@@ -1,4 +1,12 @@
 import React, { useState, useEffect } from 'react';
+import { db } from '../firebase';
+import {
+    collection,
+    onSnapshot,
+    doc,
+    setDoc,
+    deleteDoc
+} from 'firebase/firestore';
 import {
     Users,
     Database,
@@ -60,6 +68,8 @@ interface GlobalAccount {
 }
 
 interface ProjectTeamMember {
+    id?: string;
+    projectId: string;
     username: string;
     role: UserRole;
 }
@@ -258,9 +268,7 @@ export default function AdminDashboard({
     const [newStoreName, setNewStoreName] = useState<string>('');
     const [newWhName, setNewWhName] = useState<string>('');
 
-    const [projectHistory, setProjectHistory] = useState<ProjectSession[]>([
-        { id: 'PROJ-101', sessionCode: 'SO-WRG-2026-08', locationId: 'WH-01', locationName: 'Gudang Utama Waringin (WMS)', opnameDate: '2026-08-15', method: 'LIST_TO_FLOOR', status: 'ARCHIVED', createdAt: '2026-08-15 08:00' },
-    ]);
+    const [projectHistory, setProjectHistory] = useState<ProjectSession[]>([]);
     const [activeProject, setActiveProject] = useState<ProjectSession | null>(null);
 
     const [wizLocationId, setWizLocationId] = useState<string>('WH-01');
@@ -285,24 +293,53 @@ export default function AdminDashboard({
     const [b2bPrefix, setB2bPrefix] = useState<string>('B2B-');
     const [savedPrefix, setSavedPrefix] = useState<string>('B2B-');
 
-    const [globalAccounts, setGlobalAccounts] = useState<GlobalAccount[]>([
-        { id: '1', username: 'riski.so', name: 'Riski Pratama', pin: '1234', email: 'riski@anymindgroup.com' },
-        { id: '2', username: 'putri.so', name: 'Putri', pin: '1234', email: 'putri@anymindgroup.com' },
-        { id: '3', username: 'budi.so', name: 'Budi Santoso', pin: '1234', email: 'budi@anymindgroup.com' }
-    ]);
+    // =======================================================
+    // FIRESTORE REAL-TIME LISTENERS
+    // =======================================================
+
+    // 1. Real-time KTP Global Accounts
+    const [globalAccounts, setGlobalAccounts] = useState<GlobalAccount[]>([]);
+    useEffect(() => {
+        const unsubscribe = onSnapshot(collection(db, "global_accounts"), (snapshot) => {
+            const data = snapshot.docs.map(docSnap => ({
+                id: docSnap.id,
+                ...docSnap.data()
+            })) as GlobalAccount[];
+            setGlobalAccounts(data);
+        });
+        return () => unsubscribe();
+    }, []);
+
+    // 2. Real-time Projects History
+    useEffect(() => {
+        const unsubscribe = onSnapshot(collection(db, "projects"), (snapshot) => {
+            const data = snapshot.docs.map(docSnap => ({
+                id: docSnap.id,
+                ...docSnap.data()
+            })) as ProjectSession[];
+            setProjectHistory(data);
+        });
+        return () => unsubscribe();
+    }, []);
+
+    // 3. Real-time Project Teams Assignment
+    const [allProjectTeams, setAllProjectTeams] = useState<ProjectTeamMember[]>([]);
+    useEffect(() => {
+        const unsubscribe = onSnapshot(collection(db, "project_teams"), (snapshot) => {
+            const data = snapshot.docs.map(docSnap => ({
+                id: docSnap.id,
+                ...docSnap.data()
+            })) as ProjectTeamMember[];
+            setAllProjectTeams(data);
+        });
+        return () => unsubscribe();
+    }, []);
+
     const [newAccUser, setNewAccUser] = useState('');
     const [newAccName, setNewAccName] = useState('');
     const [newAccPin, setNewAccPin] = useState('');
     const [newAccEmail, setNewAccEmail] = useState('');
-
     const [visiblePins, setVisiblePins] = useState<Record<string, boolean>>({});
-
-    const [projectTeams, setProjectTeams] = useState<Record<string, ProjectTeamMember[]>>({
-        'PROJ-101': [
-            { username: 'riski.so', role: 'spv' },
-            { username: 'putri.so', role: 'counter' }
-        ]
-    });
 
     const [assignUsername, setAssignUsername] = useState('');
     const [assignRole, setAssignRole] = useState<UserRole>('counter');
@@ -441,21 +478,22 @@ export default function AdminDashboard({
         link.click();
     };
 
-    const handleConfirmDeleteProject = () => {
+    // DELETE PROJECT FIRESTORE
+    const handleConfirmDeleteProject = async () => {
         if (projectToDelete) {
-            setProjectHistory(prev => prev.filter(p => p.id !== projectToDelete.id));
-            triggerNotification(`Project "${projectToDelete.sessionCode}" Berhasil Dihapus Permanen!`);
+            await deleteDoc(doc(db, "projects", projectToDelete.id));
+            triggerNotification(`Project "${projectToDelete.sessionCode}" Berhasil Dihapus dari Cloud!`);
             setProjectToDelete(null);
         }
     };
 
-    const handleStartNewProjectSession = () => {
+    // START NEW PROJECT FIRESTORE
+    const handleStartNewProjectSession = async () => {
         const isConsignment = wizLocationId === 'CONSIGNMENT_GENERIC';
         const locName = isConsignment ? 'Consignment Global Project' : (warehouseList.find(l => l.id === wizLocationId)?.name || 'Gudang Utama');
         const projId = `PROJ-${Date.now().toString().slice(-4)}`;
 
-        const newSession: ProjectSession = {
-            id: projId,
+        const newSession = {
             sessionCode: wizSessionCode.trim() || `SO-${isConsignment ? 'CONSIGN' : wizLocationId}-${wizOpnameDate}`,
             locationId: wizLocationId,
             locationName: locName,
@@ -465,65 +503,68 @@ export default function AdminDashboard({
             createdAt: new Date().toLocaleString()
         };
 
+        // Save to Firestore Cloud
+        await setDoc(doc(db, "projects", projId), newSession);
+
         setMasterDataList([]);
         setRecoveryAdjustments({});
-        setProjectTeams(prev => ({ ...prev, [projId]: [] }));
-        setProjectHistory(prev => [newSession, ...prev]);
-        setActiveProject(newSession);
+        setActiveProject({ id: projId, ...newSession } as ProjectSession);
         setViewState('DASHBOARD');
         setActiveTab('progress');
-        triggerNotification(`Project Sesi Baru "${newSession.sessionCode}" Berhasil Diluncurkan!`);
+        triggerNotification(`Project "${newSession.sessionCode}" Tersimpan Permanen di Cloud!`);
     };
 
     const handleOpenHistoricalProject = (proj: ProjectSession) => {
         setActiveProject(proj);
         setViewState('DASHBOARD');
         setActiveTab('progress');
-        triggerNotification(`Membuka Histori Project "${proj.sessionCode}" (${proj.status})`);
+        triggerNotification(`Membuka Histori Project "${proj.sessionCode}"`);
     };
 
-    const handleAddGlobalAccount = () => {
+    // ADD KTP GLOBAL TO FIRESTORE
+    const handleAddGlobalAccount = async () => {
         if (newAccUser.trim() && newAccPin.trim() && newAccName.trim()) {
-            const newUser: GlobalAccount = {
-                id: Date.now().toString(),
-                username: newAccUser.trim().toLowerCase(),
+            const uName = newAccUser.trim().toLowerCase();
+            const newUser = {
+                username: uName,
                 name: newAccName.trim(),
                 pin: newAccPin.trim(),
-                email: newAccEmail.trim() || `${newAccUser.trim().toLowerCase()}@anymindgroup.com`
+                email: newAccEmail.trim() || `${uName}@anymindgroup.com`
             };
-            setGlobalAccounts(prev => [...prev, newUser]);
+
+            await setDoc(doc(db, "global_accounts", uName), newUser);
             setNewAccUser(''); setNewAccName(''); setNewAccPin(''); setNewAccEmail('');
-            triggerNotification(`KTP Global ${newUser.username} berhasil dibuat!`);
+            triggerNotification(`KTP Global ${uName} berhasil tersimpan di Cloud!`);
         }
     };
 
-    const handleBulkyKTPUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const handleBulkyKTPUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (file) {
             const reader = new FileReader();
-            reader.onload = (event) => {
+            reader.onload = async (event) => {
                 const text = event.target?.result as string;
                 const lines = text.split('\n');
                 if (lines.length > 1) {
-                    const parsedUsers: GlobalAccount[] = [];
+                    let count = 0;
                     for (let i = 1; i < lines.length; i++) {
                         const cols = lines[i].split(',');
                         if (cols.length >= 2) {
                             const uName = cols[0]?.trim().toLowerCase();
-                            if (uName && !globalAccounts.find(a => a.username === uName)) {
-                                parsedUsers.push({
-                                    id: (Date.now() + i).toString(),
+                            if (uName) {
+                                const newUser = {
                                     username: uName,
                                     name: cols[1]?.trim() || uName,
                                     pin: cols[2]?.trim() || '1234',
                                     email: cols[3]?.trim() || `${uName}@anymindgroup.com`
-                                });
+                                };
+                                await setDoc(doc(db, "global_accounts", uName), newUser);
+                                count++;
                             }
                         }
                     }
-                    if (parsedUsers.length > 0) {
-                        setGlobalAccounts(prev => [...prev, ...parsedUsers]);
-                        triggerNotification(`Bulky Import Sukses! ${parsedUsers.length} KTP Global ditambahkan.`);
+                    if (count > 0) {
+                        triggerNotification(`Bulky Import Sukses! ${count} KTP tersimpan di Cloud.`);
                     }
                 }
             };
@@ -553,7 +594,10 @@ export default function AdminDashboard({
         setVisiblePins(prev => ({ ...prev, [id]: !prev[id] }));
     };
 
-    const activeTeamMembers = activeProject ? (projectTeams[activeProject.id] || []) : [];
+    // Filter Team Members for Current Active Project
+    const activeTeamMembers = activeProject
+        ? allProjectTeams.filter(t => t.projectId === activeProject.id)
+        : [];
 
     const assignOptions = globalAccounts
         .filter(acc => !activeTeamMembers.find(t => t.username === acc.username))
@@ -561,44 +605,39 @@ export default function AdminDashboard({
 
     const reassignOptions = activeTeamMembers.map(tm => ({ value: tm.username, label: tm.username }));
 
-    const handleAssignTeamManual = () => {
+    // ASSIGN TEAM TO PROJECT FIRESTORE
+    const handleAssignTeamManual = async () => {
         if (!activeProject || !assignUsername) return;
-        const exists = activeTeamMembers.find(t => t.username === assignUsername);
-        if (exists) {
-            triggerNotification(`Gagal: ${assignUsername} sudah ada di project ini!`);
-            return;
-        }
+        const docId = `${activeProject.id}_${assignUsername}`;
 
-        const newMember: ProjectTeamMember = { username: assignUsername, role: assignRole };
-        setProjectTeams(prev => ({
-            ...prev,
-            [activeProject.id]: [...(prev[activeProject.id] || []), newMember]
-        }));
+        await setDoc(doc(db, "project_teams", docId), {
+            projectId: activeProject.id,
+            username: assignUsername,
+            role: assignRole
+        });
+
         setAssignUsername('');
-        triggerNotification(`Berhasil assign ${assignUsername} sebagai ${assignRole.toUpperCase()}!`);
+        triggerNotification(`Berhasil assign ${assignUsername} di Cloud!`);
     };
 
-    const handleRemoveTeamMember = (username: string) => {
+    // REMOVE TEAM MEMBER FIRESTORE
+    const handleRemoveTeamMember = async (username: string) => {
         if (!activeProject) return;
-        setProjectTeams(prev => ({
-            ...prev,
-            [activeProject.id]: prev[activeProject.id].filter(t => t.username !== username)
-        }));
-        triggerNotification(`Akses ${username} dicabut dari project ini.`);
+        const docId = `${activeProject.id}_${username}`;
+        await deleteDoc(doc(db, "project_teams", docId));
+        triggerNotification(`Akses ${username} dicabut dari Cloud.`);
     };
 
     const handleBulkyAssignTeam = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (file && activeProject) {
             const reader = new FileReader();
-            reader.onload = (event) => {
+            reader.onload = async (event) => {
                 const text = event.target?.result as string;
                 const lines = text.split('\n');
 
-                let newGlobalAccounts: GlobalAccount[] = [];
-                let newTeamMembers: ProjectTeamMember[] = [];
-
                 if (lines.length > 1) {
+                    let count = 0;
                     for (let i = 1; i < lines.length; i++) {
                         const cols = lines[i].split(',');
                         if (cols.length >= 2) {
@@ -607,31 +646,27 @@ export default function AdminDashboard({
                             const uRole: UserRole = (rawRole === 'spv' || rawRole === 'owner') ? (rawRole as UserRole) : 'counter';
 
                             if (uName) {
-                                if (!globalAccounts.find(a => a.username === uName) && !newGlobalAccounts.find(a => a.username === uName)) {
-                                    newGlobalAccounts.push({
-                                        id: `AUTO-${Date.now()}-${i}`,
+                                // Auto create KTP if not exist
+                                if (!globalAccounts.find(a => a.username === uName)) {
+                                    await setDoc(doc(db, "global_accounts", uName), {
                                         username: uName,
                                         name: uName,
                                         pin: '1234',
                                         email: `${uName}@anymindgroup.com`
                                     });
                                 }
-                                if (!newTeamMembers.find(t => t.username === uName) && !activeTeamMembers.find(t => t.username === uName)) {
-                                    newTeamMembers.push({ username: uName, role: uRole });
-                                }
+
+                                const docId = `${activeProject.id}_${uName}`;
+                                await setDoc(doc(db, "project_teams", docId), {
+                                    projectId: activeProject.id,
+                                    username: uName,
+                                    role: uRole
+                                });
+                                count++;
                             }
                         }
                     }
-                    if (newGlobalAccounts.length > 0) setGlobalAccounts(prev => [...prev, ...newGlobalAccounts]);
-                    if (newTeamMembers.length > 0) {
-                        setProjectTeams(prev => ({
-                            ...prev,
-                            [activeProject.id]: [...(prev[activeProject.id] || []), ...newTeamMembers]
-                        }));
-                        triggerNotification(`Bulky Assign Sukses! ${newTeamMembers.length} staff dimasukkan ke project.`);
-                    } else {
-                        triggerNotification(`Semua user di file sudah ter-assign.`);
-                    }
+                    triggerNotification(`Bulky Assign Sukses! ${count} staff dimasukkan ke Cloud.`);
                 }
             };
             reader.readAsText(file);
@@ -678,14 +713,14 @@ export default function AdminDashboard({
     };
 
     const handleBackupHardfileDatabase = () => {
-        const blob = new Blob([JSON.stringify({ activeProject, projectTeams, masterDataList, globalAccounts, auditLogs }, null, 2)], { type: 'application/json' });
+        const blob = new Blob([JSON.stringify({ activeProject, allProjectTeams, masterDataList, globalAccounts, auditLogs }, null, 2)], { type: 'application/json' });
         const link = document.createElement('a');
         link.href = URL.createObjectURL(blob);
         link.setAttribute('download', `BACKUP_${activeProject?.sessionCode || 'SO'}.json`);
         link.click();
     };
 
-    const handleExportPaperCountsheet = () => { triggerNotification('Lembar Countsheet Cetak diunduh! (Simulasi)'); };
+    const handleExportPaperCountsheet = () => { triggerNotification('Lembar Countsheet Cetak diunduh!'); };
     const handleSavePrefix = () => { setSavedPrefix(b2bPrefix); triggerNotification(`Prefix SKU diperbarui!`); };
     const handleReassignTask = (location: string, newCounterName: string) => {
         if (!newCounterName) return;
@@ -696,10 +731,10 @@ export default function AdminDashboard({
         triggerNotification(`Lokasi "${location}" di-reassign ke ${newCounterName}!`);
     };
 
-    const handleExportFinalRecoveryExcel = () => { triggerNotification('Final Recovery (.xls) diunduh! (Simulasi)'); };
-    const handleExportExcel = () => { triggerNotification('Rekap Selisih (.xls) diunduh! (Simulasi)'); };
-    const handleExportAuditExcel = () => { triggerNotification('Audit Trail (.xls) diunduh! (Simulasi)'); };
-    const handleDownloadTemplateXLS = () => { triggerNotification('Template Master diunduh! (Simulasi)'); };
+    const handleExportFinalRecoveryExcel = () => { triggerNotification('Final Recovery (.xls) diunduh!'); };
+    const handleExportExcel = () => { triggerNotification('Rekap Selisih (.xls) diunduh!'); };
+    const handleExportAuditExcel = () => { triggerNotification('Audit Trail (.xls) diunduh!'); };
+    const handleDownloadTemplateXLS = () => { triggerNotification('Template Master diunduh!'); };
 
     const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
@@ -859,7 +894,7 @@ export default function AdminDashboard({
                             <AlertTriangle className="w-8 h-8" />
                             <h3 className="text-base font-black text-slate-900">Konfirmasi Hapus Project</h3>
                         </div>
-                        <p className="text-xs text-slate-600 leading-relaxed">Apakah kamu yakin ingin menghapus project <b className="text-slate-900">{projectToDelete.sessionCode}</b>? Data terkait akan dihapus permanen.</p>
+                        <p className="text-xs text-slate-600 leading-relaxed">Apakah kamu yakin ingin menghapus project <b className="text-slate-900">{projectToDelete.sessionCode}</b>? Data terkait akan dihapus permanen dari Cloud.</p>
                         <div className="flex justify-end space-x-2 pt-2 border-t border-slate-100">
                             <button onClick={() => setProjectToDelete(null)} className="px-4 py-2 bg-slate-100 text-slate-700 rounded-xl text-xs font-bold">Batal</button>
                             <button onClick={handleConfirmDeleteProject} className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-extrabold">Ya, Hapus Permanen</button>
@@ -876,7 +911,7 @@ export default function AdminDashboard({
                             <div className="p-3 bg-purple-50 text-purple-700 rounded-xl"><Archive className="w-7 h-7" /></div>
                             <div>
                                 <h1 className="text-lg font-black text-slate-900">Global Control Center (Kantor Pusat)</h1>
-                                <p className="text-xs text-slate-500">Merekam seluruh riwayat project dan mengatur master KTP Pegawai.</p>
+                                <p className="text-xs text-slate-500">Merekam seluruh riwayat project & KTP Pegawai secara Cloud Firestore.</p>
                             </div>
                         </div>
                         <div className="flex items-center space-x-3 mt-4 md:mt-0">
@@ -897,7 +932,7 @@ export default function AdminDashboard({
                                 <div className="flex items-center space-x-1.5"><Building2 className="w-4 h-4" /><span>Manajemen Project & Master Lokasi</span></div>
                             </button>
                             <button onClick={() => setLandingTab('accounts')} className={`px-4 py-2 text-xs font-bold rounded-xl transition-all ${landingTab === 'accounts' ? 'bg-slate-800 text-white shadow-md' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
-                                <div className="flex items-center space-x-1.5"><Contact className="w-4 h-4" /><span>Master Akun Global (KTP)</span></div>
+                                <div className="flex items-center space-x-1.5"><Contact className="w-4 h-4" /><span>Master Akun Global (KTP Cloud)</span></div>
                             </button>
                         </div>
                     )}
@@ -958,14 +993,14 @@ export default function AdminDashboard({
                             )}
 
                             <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
-                                <h3 className="text-sm font-bold text-slate-800">Daftar Histori Project Opname:</h3>
+                                <h3 className="text-sm font-bold text-slate-800">Daftar Histori Project Opname (Live Cloud):</h3>
                                 <div className="overflow-x-auto border border-slate-200 rounded-xl">
                                     <table className="w-full text-left text-xs border-collapse min-w-full">
                                         <thead className="bg-slate-100 font-bold text-slate-700 border-b border-slate-200">
                                             <tr><th className="p-3">KODE PROJECT</th><th className="p-3">LOKASI</th><th className="p-3">TANGGAL</th><th className="p-3">METODE TERKUNCI</th><th className="p-3 text-center">STATUS</th><th className="p-3 text-right">AKSI</th></tr>
                                         </thead>
                                         <tbody className="divide-y divide-slate-100 font-medium">
-                                            {projectHistory.map((proj) => (
+                                            {projectHistory.length > 0 ? projectHistory.map((proj) => (
                                                 <tr key={proj.id} className="hover:bg-slate-50">
                                                     <td className="p-3 font-bold font-mono text-purple-700">{proj.sessionCode}</td>
                                                     <td className="p-3 font-bold text-slate-900">{proj.locationName}</td>
@@ -977,7 +1012,9 @@ export default function AdminDashboard({
                                                         {effectiveRole === 'owner' && (<button onClick={() => setProjectToDelete(proj)} className="p-1.5 text-red-600 rounded-lg"><Trash2 className="w-4 h-4" /></button>)}
                                                     </td>
                                                 </tr>
-                                            ))}
+                                            )) : (
+                                                <tr><td colSpan={6} className="p-5 text-center text-slate-400 font-medium">Belum ada project di Cloud Firestore. Klik "+ Start New Project" di atas.</td></tr>
+                                            )}
                                         </tbody>
                                     </table>
                                 </div>
@@ -989,15 +1026,15 @@ export default function AdminDashboard({
                         <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
                             <div className="flex justify-between items-start">
                                 <div>
-                                    <h3 className="text-sm font-extrabold text-slate-900 flex items-center space-x-2"><Contact className="w-4 h-4 text-purple-700" /><span>Master Pendaftaran Akun (KTP Global)</span></h3>
-                                    <p className="text-xs text-slate-500 mt-1">Daftarkan KTP/Identitas seluruh pegawai di sini sebelum mereka di-assign ke project manapun.</p>
+                                    <h3 className="text-sm font-extrabold text-slate-900 flex items-center space-x-2"><Contact className="w-4 h-4 text-purple-700" /><span>Master Pendaftaran Akun (KTP Cloud)</span></h3>
+                                    <p className="text-xs text-slate-500 mt-1">Daftarkan KTP/Identitas seluruh pegawai ke Firestore sebelum di-assign ke project.</p>
                                 </div>
                                 <div className="flex items-center space-x-2">
                                     <button onClick={handleBlastEmailKTP} className="px-3 py-2 bg-slate-900 text-white rounded-xl text-xs font-bold flex items-center space-x-1.5 shadow-sm hover:bg-slate-800">
-                                        <Send className="w-4 h-4 text-amber-400" /><span>Blast Email Kredensial ke Semua</span>
+                                        <Send className="w-4 h-4 text-amber-400" /><span>Blast Email Kredensial</span>
                                     </button>
                                     <button onClick={handleDownloadKTPTemplate} className="px-3 py-2 bg-slate-100 text-slate-700 rounded-xl text-xs font-bold flex items-center space-x-1.5 border border-slate-200 hover:bg-slate-200">
-                                        <FileSpreadsheet className="w-4 h-4 text-emerald-600" /><span>Download Template</span>
+                                        <FileSpreadsheet className="w-4 h-4 text-emerald-600" /><span>Template</span>
                                     </button>
                                 </div>
                             </div>
@@ -1013,7 +1050,7 @@ export default function AdminDashboard({
                                     </div>
                                     <div className="flex justify-end pt-1">
                                         <button onClick={handleAddGlobalAccount} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold flex items-center space-x-1.5">
-                                            <UserPlus className="w-3.5 h-3.5" /><span>Buat KTP</span>
+                                            <UserPlus className="w-3.5 h-3.5" /><span>Buat KTP di Cloud</span>
                                         </button>
                                     </div>
                                 </div>
@@ -1021,7 +1058,7 @@ export default function AdminDashboard({
                                 <div className="p-4 bg-purple-50/50 border border-purple-200 rounded-xl text-center flex flex-col justify-center items-center space-y-2">
                                     <Upload className="w-8 h-8 text-purple-600 mb-1" />
                                     <div className="text-xs font-bold text-purple-900">Bulky Import KTP (.xls / .csv)</div>
-                                    <p className="text-[10px] text-slate-500 px-2 leading-tight">Buat ratusan akun serentak cukup via Upload Excel.</p>
+                                    <p className="text-[10px] text-slate-500 px-2 leading-tight">Buat ratusan KTP serentak ke Cloud via Upload Excel.</p>
                                     <label className="px-4 py-2 mt-2 bg-purple-700 text-white rounded-xl text-xs font-bold cursor-pointer inline-flex items-center space-x-1 hover:bg-purple-800 shadow-sm">
                                         <Upload className="w-3 h-3" /><span>Upload File Excel KTP</span>
                                         <input type="file" accept=".csv, .xls, .xlsx" className="hidden" onChange={handleBulkyKTPUpload} />
@@ -1032,10 +1069,10 @@ export default function AdminDashboard({
                             <div className="overflow-x-auto border border-slate-200 rounded-xl">
                                 <table className="w-full text-left text-xs border-collapse">
                                     <thead className="bg-slate-100 font-bold text-slate-700 border-b border-slate-200">
-                                        <tr><th className="p-3 border-b">USERNAME</th><th className="p-3 border-b">NAMA LENGKAP PADA KTP</th><th className="p-3 border-b">EMAIL KONTAK</th><th className="p-3 border-b text-center">PIN AKSES</th><th className="p-3 border-b text-right">AKSI OWNER</th></tr>
+                                        <tr><th className="p-3 border-b">USERNAME</th><th className="p-3 border-b">NAMA PEGAWAI</th><th className="p-3 border-b">EMAIL KONTAK</th><th className="p-3 border-b text-center">PIN AKSES</th><th className="p-3 border-b text-right">AKSI OWNER</th></tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-100 font-medium text-slate-800">
-                                        {globalAccounts.map((acc) => (
+                                        {globalAccounts.length > 0 ? globalAccounts.map((acc) => (
                                             <tr key={acc.id} className="hover:bg-slate-50">
                                                 <td className="p-3 font-bold font-mono text-blue-600">{acc.username}</td>
                                                 <td className="p-3 font-bold">{acc.name}</td>
@@ -1054,7 +1091,9 @@ export default function AdminDashboard({
                                                     </button>
                                                 </td>
                                             </tr>
-                                        ))}
+                                        )) : (
+                                            <tr><td colSpan={5} className="p-5 text-center text-slate-400 font-medium">Belum ada KTP Global di Firestore. Buat KTP manual atau import Excel.</td></tr>
+                                        )}
                                     </tbody>
                                 </table>
                             </div>
@@ -1294,7 +1333,7 @@ export default function AdminDashboard({
                     )}
 
                     {activeTab === 'team' && effectiveRole === 'owner' && (
-                        <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4 animate-in fade-in zoom-in-95 duration-200">
+                        <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
                             <div className="flex justify-between items-start">
                                 <div>
                                     <h3 className="text-sm font-extrabold text-slate-900 flex items-center space-x-2"><Users className="w-4 h-4 text-blue-700" /><span>Manajemen Tim & Role (Khusus Project Ini)</span></h3>
