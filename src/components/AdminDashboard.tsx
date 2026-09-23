@@ -10,7 +10,7 @@ import {
     UserPlus, Filter, TrendingDown, Printer, SlidersHorizontal,
     CheckCircle2, XCircle, Search, Building2, DollarSign,
     Download, Scale, PlayCircle, Archive, ArrowLeft, AlertTriangle,
-    LogOut, GripHorizontal, Contact, Eye, EyeOff
+    LogOut, GripHorizontal, Contact, Eye, EyeOff, UserCheck, Clock
 } from 'lucide-react';
 import type { UserRole } from '../types';
 
@@ -100,7 +100,7 @@ const SearchableSelect = ({ options, value, onChange, placeholder, className = "
 
     return (
         <div className={`relative ${className}`}>
-            <div className="w-full px-3 py-2.5 text-xs bg-white border border-slate-200 rounded-xl outline-none font-bold cursor-pointer flex justify-between items-center hover:bg-slate-50 transition-colors shadow-sm" onClick={() => setIsOpen(!isOpen)}>
+            <div className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-xl outline-none font-bold cursor-pointer flex justify-between items-center hover:bg-slate-50 transition-colors shadow-xs" onClick={() => setIsOpen(!isOpen)}>
                 <span className={value ? "text-slate-800 truncate" : "text-slate-400 truncate"}>{selectedLabel}</span>
                 <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0 ml-2" />
             </div>
@@ -108,7 +108,7 @@ const SearchableSelect = ({ options, value, onChange, placeholder, className = "
                 <>
                     <div className="fixed inset-0 z-40" onClick={() => { setIsOpen(false); setSearch(''); }}></div>
                     <div className="absolute z-50 w-full mt-2 bg-white border border-slate-200 rounded-xl shadow-2xl max-h-56 overflow-y-auto">
-                        <div className="p-2 sticky top-0 bg-white/90 backdrop-blur-sm border-b border-slate-100 z-10">
+                        <div className="p-2 sticky top-0 bg-white/90 backdrop-blur-xs border-b border-slate-100 z-10">
                             <input type="text" autoFocus className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg outline-none" placeholder="Ketik pencarian..." value={search} onChange={(e) => setSearch(e.target.value)} />
                         </div>
                         <div className="py-1">
@@ -126,6 +126,7 @@ const SearchableSelect = ({ options, value, onChange, placeholder, className = "
 
 export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner', currentUserEmail = 'yos.krisnawan@anymindgroup.com' }: AdminDashboardProps) {
 
+    // WHITELIST OWNER UNTUK HAK AKSES SUPER ADMIN
     const OWNER_WHITELIST = ['yos.krisnawan@anymindgroup.com', 'krisnawanyos@gmail.com'];
     const isWhitelistedOwner = currentUserRole === 'owner' && OWNER_WHITELIST.includes(currentUserEmail.toLowerCase().trim());
     const effectiveRole: UserRole = isWhitelistedOwner ? 'owner' : (currentUserRole === 'owner' ? 'spv' : currentUserRole);
@@ -169,9 +170,7 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
     const [showToast, setShowToast] = useState<string | null>(null);
     const triggerNotification = (message: string) => { setShowToast(message); setTimeout(() => setShowToast(null), 3000); };
 
-    // ==========================================
-    // UI ANALYTICS STATES
-    // ==========================================
+    // ANALYTICS STATES
     const [showLevelProgress, setShowLevelProgress] = useState<boolean>(false);
     const [viewRoundFilter, setViewRoundFilter] = useState<'overall' | 1 | 2 | 3 | 4>('overall');
     const [brandSearch, setBrandSearch] = useState<string>('');
@@ -180,9 +179,7 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
     const [recoveryAdjustments, setRecoveryAdjustments] = useState<{ [sku: string]: number }>({});
     const [initialFileToUpload, setInitialFileToUpload] = useState<File | null>(null);
 
-    // ==========================================
-    // FIRESTORE
-    // ==========================================
+    // FIRESTORE LISTENERS
     const [globalAccounts, setGlobalAccounts] = useState<GlobalAccount[]>([]);
     const [projectHistory, setProjectHistory] = useState<ProjectSession[]>([]);
     const [allProjectTeams, setAllProjectTeams] = useState<ProjectTeamMember[]>([]);
@@ -195,7 +192,7 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
         return () => { unsub1(); unsub2(); unsub3(); };
     }, []);
 
-    // KTP Global Management
+    // KTP GLOBAL MANAGEMENT
     const [newAccUser, setNewAccUser] = useState('');
     const [newAccName, setNewAccName] = useState('');
     const [newAccPin, setNewAccPin] = useState('');
@@ -208,14 +205,14 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
             const newUser = { username: uName, name: newAccName.trim(), pin: newAccPin.trim(), email: newAccEmail.trim() || `${uName}@anymindgroup.com` };
             await setDoc(doc(db, "global_accounts", uName), newUser);
             setNewAccUser(''); setNewAccName(''); setNewAccPin(''); setNewAccEmail('');
-            triggerNotification(`KTP Global ${uName} berhasil diamankan di Cloud!`);
+            triggerNotification(`KTP Global ${uName} berhasil tersimpan di Cloud!`);
         }
     };
 
     const handleDeleteGlobalAccount = async (username: string) => {
-        if (window.confirm(`Yakin ingin menghapus KTP: ${username} secara permanen?`)) {
+        if (window.confirm(`Yakin hapus permanen KTP: ${username}?`)) {
             await deleteDoc(doc(db, "global_accounts", username));
-            triggerNotification(`Akun KTP ${username} ditarik dari Cloud.`);
+            triggerNotification(`Akun KTP ${username} dihapus.`);
         }
     };
 
@@ -235,30 +232,26 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                     count++;
                 }
             }
-            if (count > 0) triggerNotification(`Bulky Import Sukses! ${count} KTP tersimpan.`);
+            if (count > 0) triggerNotification(`Import Sukses! ${count} KTP tersimpan.`);
         };
         reader.readAsText(file);
     };
 
-    const togglePinVisibility = (id: string) => {
-        setVisiblePins(prev => ({ ...prev, [id]: !prev[id] }));
-    };
+    const togglePinVisibility = (id: string) => setVisiblePins(prev => ({ ...prev, [id]: !prev[id] }));
 
     const handleDownloadKTPTemplate = () => {
         const csvContent = "Username,Nama Lengkap,PIN,Email\nrudi.so,Rudi Tabuti,1234,rudi@anymindgroup.com";
         const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        link.setAttribute('download', 'Template_Import_KTP_Global.csv');
-        link.click();
-        triggerNotification('Template KTP Global (.csv) diunduh!');
+        const link = document.createElement('a'); link.href = URL.createObjectURL(blob);
+        link.setAttribute('download', 'Template_Import_KTP_Global.csv'); link.click();
+        triggerNotification('Template KTP (.csv) diunduh!');
     };
 
-    // Project Control
+    // PROJECT CONTROL
     const handleConfirmDeleteProject = async () => {
         if (projectToDelete) {
             await deleteDoc(doc(db, "projects", projectToDelete.id));
-            triggerNotification(`Project "${projectToDelete.sessionCode}" dihapus permanen!`);
+            triggerNotification(`Project "${projectToDelete.sessionCode}" berhasil dihapus.`);
             setProjectToDelete(null);
         }
     };
@@ -276,17 +269,15 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
         if (initialFileToUpload) parseXLSXFile(initialFileToUpload); else setMasterDataList([]);
         setRecoveryAdjustments({}); setActiveProject({ id: projId, ...newSession } as ProjectSession);
         setViewState('DASHBOARD'); setActiveTab('progress');
-        triggerNotification(`Project Baru Aktif: ${newSession.sessionCode}`);
+        triggerNotification(`Project Baru Diluncurkan: ${newSession.sessionCode}`);
     };
 
     const handleOpenHistoricalProject = (proj: ProjectSession) => {
-        setActiveProject(proj);
-        setViewState('DASHBOARD');
-        setActiveTab('progress');
+        setActiveProject(proj); setViewState('DASHBOARD'); setActiveTab('progress');
         triggerNotification(`Membuka Dashboard Project "${proj.sessionCode}"`);
     };
 
-    // Tim & Access
+    // TIM & ACCESS
     const activeTeamMembers = activeProject ? allProjectTeams.filter(t => t.projectId === activeProject.id) : [];
     const [assignUsername, setAssignUsername] = useState('');
     const [assignRole, setAssignRole] = useState<UserRole>('counter');
@@ -328,7 +319,7 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                             }
                         }
                     }
-                    triggerNotification(`Bulky Assign Sukses! ${count} staff masuk ke project.`);
+                    triggerNotification(`Assign Sukses! ${count} staff didaftarkan.`);
                 }
             };
             reader.readAsText(file);
@@ -338,13 +329,11 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
     const handleDownloadTeamTemplate = () => {
         const csvContent = "Username,Role\nriski.so,spv\nputri.so,counter";
         const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        link.setAttribute('download', 'Template_Assign_Tim_Project.csv');
-        link.click();
+        const link = document.createElement('a'); link.href = URL.createObjectURL(blob);
+        link.setAttribute('download', 'Template_Assign_Tim_Project.csv'); link.click();
     };
 
-    // Excel Parser
+    // EXCEL PARSER
     const [masterDataList, setMasterDataList] = useState<MasterSKUItem[]>([]);
     const parseXLSXFile = (file: File) => {
         const reader = new FileReader();
@@ -379,7 +368,7 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
         triggerNotification(`Stok SKU ${sku} disesuaikan ke ${newQty}!`);
     };
 
-    // Computations & Analytics Variables
+    // COMPUTATIONS
     const filteredMasterDataList = masterDataList.filter(item => {
         if (viewRoundFilter === 'overall') return true;
         if (viewRoundFilter === 1) return item.currentRound === 1 || !item.isCounted;
@@ -404,9 +393,15 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
         return { name, total: group.total, counted: group.counted, percentage: Math.round((group.counted / group.total) * 100) };
     });
 
+    // REAPING COUNTER REAL-TIME PROGRESS
     const counterGroups = filteredMasterDataList.reduce((acc: any, item) => {
-        const cName = item.counter || 'Unassigned'; if (!acc[cName]) acc[cName] = { total: 0, counted: 0 };
-        acc[cName].total++; if (item.isCounted) acc[cName].counted++; return acc;
+        const cName = item.counter || 'Unassigned'; if (!acc[cName]) acc[cName] = { total: 0, counted: 0, errorCount: 0 };
+        acc[cName].total++;
+        if (item.isCounted) {
+            acc[cName].counted++;
+            if ((item.countedQty ?? item.Qty) !== item.Qty) acc[cName].errorCount++;
+        }
+        return acc;
     }, {});
 
     const brandAccuracyList = Array.from(new Set(masterDataList.map(m => m.SKUBrand))).map(brandName => {
@@ -421,8 +416,6 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
 
     return (
         <div className="min-h-screen bg-slate-50 text-slate-800 p-4 lg:p-8 max-w-7xl mx-auto font-sans relative">
-
-            {/* AnyMind Branded Header Strip */}
             <div className="absolute top-0 left-0 w-full h-2 bg-linear-to-r from-blue-600 via-indigo-600 to-purple-600 rounded-t-2xl hidden md:block"></div>
 
             {showToast && (
@@ -432,7 +425,7 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
             )}
 
             {projectToDelete && (
-                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
                     <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-5 shadow-2xl border border-slate-200">
                         <div className="flex items-center space-x-3 text-red-600"><AlertTriangle className="w-8 h-8" /><h3 className="text-lg font-black text-slate-900">Hapus Project Cloud</h3></div>
                         <p className="text-sm text-slate-600 leading-relaxed">Yakin hapus project <b className="text-slate-900">{projectToDelete.sessionCode}</b>? Data dari Firestore akan musnah selamanya.</p>
@@ -469,7 +462,7 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                     </div>
 
                     {effectiveRole === 'owner' && (
-                        <div className="flex space-x-3 p-1.5 bg-white border border-slate-200 rounded-2xl w-fit shadow-sm">
+                        <div className="flex space-x-3 p-1.5 bg-white border border-slate-200 rounded-2xl w-fit shadow-xs">
                             <button onClick={() => setLandingTab('projects')} className={`px-5 py-2.5 text-sm font-bold rounded-xl transition-all flex items-center space-x-2 ${landingTab === 'projects' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'}`}>
                                 <Building2 className="w-4 h-4" /><span>Lokasi & Project</span>
                             </button>
@@ -482,7 +475,7 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                     {landingTab === 'projects' && (
                         <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl shadow-slate-200/40 space-y-5">
                             <h3 className="text-base font-black text-slate-800 flex items-center space-x-2"><Database className="w-5 h-5 text-indigo-600" /><span>Live Firestore Projects</span></h3>
-                            <div className="overflow-x-auto border border-slate-200 rounded-2xl">
+                            <div className="overflow-x-auto border border-slate-200 rounded-2xl scrollbar-thin">
                                 <table className="w-full text-left text-sm min-w-full">
                                     <thead className="bg-slate-50/80 font-bold text-slate-500 border-b border-slate-200">
                                         <tr><th className="p-4">KODE PROJECT</th><th className="p-4">LOKASI WMS</th><th className="p-4">TANGGAL</th><th className="p-4 text-center">STATUS</th><th className="p-4 text-right">AKSI</th></tr>
@@ -533,7 +526,7 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                                 </div>
                             </div>
 
-                            <div className="overflow-x-auto border border-slate-200 rounded-2xl">
+                            <div className="overflow-x-auto border border-slate-200 rounded-2xl scrollbar-thin">
                                 <table className="w-full text-left text-sm"><thead className="bg-slate-50 font-bold text-slate-500 border-b"><tr><th className="p-4">USERNAME</th><th className="p-4">NAMA PEGAWAI</th><th className="p-4">EMAIL</th><th className="p-4 text-center">PIN</th><th className="p-4 text-right">AKSI</th></tr></thead>
                                     <tbody className="divide-y divide-slate-100 font-medium">
                                         {globalAccounts.map((acc) => (
@@ -596,7 +589,7 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
             {viewState === 'DASHBOARD' && activeProject && (
                 <div className="space-y-6 animate-in fade-in duration-500">
 
-                    {/* Dashboard Header Bar */}
+                    {/* Dashboard Header Bar + SCROLLER RAPI DENGAN SCROLLBAR-THIN */}
                     <div className="bg-white p-5 rounded-3xl shadow-xl shadow-slate-200/40 border border-slate-100 flex flex-col xl:flex-row justify-between xl:items-center gap-4">
                         <div className="flex items-center space-x-4">
                             <button onClick={() => setViewState('LANDING')} className="p-3 bg-slate-50 hover:bg-slate-100 rounded-2xl transition-colors"><ArrowLeft className="w-5 h-5 text-slate-700" /></button>
@@ -608,13 +601,17 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                                 <p className="text-sm text-slate-500 font-medium flex items-center space-x-2 mt-1"><MapPin className="w-3.5 h-3.5" /><span>{activeProject.locationName}</span><span>•</span><span>{activeProject.opnameDate}</span></p>
                             </div>
                         </div>
-                        <div className="flex bg-slate-50/80 p-1.5 rounded-2xl border border-slate-100 w-full xl:w-auto overflow-x-auto scrollbar-none">
-                            {orderedTabs.map(t => (
-                                <button key={t.id} draggable onDragStart={(e) => handleDragStart(e, t.id)} onDragOver={(e) => e.preventDefault()} onDrop={(e) => handleDrop(e, t.id)} onClick={() => setActiveTab(t.id)} className={`flex-1 xl:flex-none px-5 py-2.5 text-sm font-bold rounded-xl flex items-center justify-center space-x-2 transition-all whitespace-nowrap ${activeTab === t.id ? 'bg-white shadow-md text-indigo-700 border border-slate-200/60' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'}`}>
-                                    <GripHorizontal className="w-3.5 h-3.5 opacity-30 cursor-grab hover:opacity-100 hidden md:block" />
-                                    <t.icon className={`w-4 h-4 ${activeTab === t.id ? 'text-indigo-600' : ''}`} /><span>{t.label}</span>
-                                </button>
-                            ))}
+
+                        {/* CONTAINER TAB NAVIGASI DENGAN SCROLLER */}
+                        <div className="flex bg-slate-50/80 p-1.5 rounded-2xl border border-slate-200/80 w-full xl:w-auto overflow-x-auto scrollbar-thin scrollbar-thumb-indigo-200">
+                            <div className="flex space-x-1.5 w-max">
+                                {orderedTabs.map(t => (
+                                    <button key={t.id} draggable onDragStart={(e) => handleDragStart(e, t.id)} onDragOver={(e) => e.preventDefault()} onDrop={(e) => handleDrop(e, t.id)} onClick={() => setActiveTab(t.id)} className={`px-5 py-2.5 text-sm font-bold rounded-xl flex items-center space-x-2 transition-all whitespace-nowrap ${activeTab === t.id ? 'bg-white shadow-md text-indigo-700 border border-slate-200/60' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'}`}>
+                                        <GripHorizontal className="w-3.5 h-3.5 opacity-30 cursor-grab hover:opacity-100 hidden md:block" />
+                                        <t.icon className={`w-4 h-4 ${activeTab === t.id ? 'text-indigo-600' : ''}`} /><span>{t.label}</span>
+                                    </button>
+                                ))}
+                            </div>
                         </div>
                     </div>
 
@@ -651,6 +648,40 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                                 </div>
                             </div>
 
+                            {/* DEDICATED REAL-TIME COUNTER PROGRESS SECTION */}
+                            <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-xl shadow-slate-200/30 space-y-4">
+                                <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+                                    <h3 className="text-base font-black text-slate-900 flex items-center"><UserCheck className="w-5 h-5 mr-2 text-indigo-600" />Real-Time Monitoring Progress Per Counter PIC</h3>
+                                    <span className="text-xs font-bold text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-xl flex items-center"><Clock className="w-3.5 h-3.5 mr-1" />Live Sync Firestore</span>
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                    {Object.keys(counterGroups).map((cName, idx) => {
+                                        const cData = counterGroups[cName];
+                                        const pct = cData.total > 0 ? Math.round((cData.counted / cData.total) * 100) : 0;
+                                        return (
+                                            <div key={idx} className="p-4 bg-slate-50/80 border border-slate-200/80 rounded-2xl space-y-3 hover:border-indigo-300 transition-all">
+                                                <div className="flex justify-between items-start">
+                                                    <div>
+                                                        <div className="text-sm font-black text-slate-900">{cName}</div>
+                                                        <div className="text-xs text-slate-500 font-medium mt-0.5">{cData.counted} / {cData.total} SKU Terhitung</div>
+                                                    </div>
+                                                    <span className={`text-[10px] font-black px-2.5 py-1 rounded-lg ${pct === 100 ? 'bg-emerald-100 text-emerald-800' : 'bg-indigo-100 text-indigo-800'}`}>{pct}% Done</span>
+                                                </div>
+                                                <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
+                                                    <div className="bg-linear-to-r from-indigo-500 to-blue-600 h-2 rounded-full transition-all duration-500" style={{ width: `${pct}%` }}></div>
+                                                </div>
+                                                {cData.errorCount > 0 && (
+                                                    <div className="text-[10px] font-bold text-red-600 bg-red-50 px-2.5 py-1 rounded-md w-fit">⚠️ {cData.errorCount} SKU Selisih Ditemukan</div>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                    {Object.keys(counterGroups).length === 0 && (
+                                        <div className="col-span-full text-center text-sm text-slate-400 py-6">Belum ada penugasan counter PIC.</div>
+                                    )}
+                                </div>
+                            </div>
+
                             {/* Detailed Analytics Rows */}
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                                 {/* Level Progress */}
@@ -663,42 +694,30 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                                         {levelProgress.length === 0 && <div className="text-sm text-slate-400 font-medium">Data level kosong.</div>}
                                     </div>
                                 </div>
-                                {/* Counter Performance */}
-                                <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-xl shadow-slate-200/30 space-y-5">
-                                    <h3 className="text-base font-black text-slate-900">Leaderboard Counter</h3>
-                                    <div className="space-y-4 max-h-60 overflow-y-auto pr-2 scrollbar-thin">
-                                        {Object.keys(counterGroups).map((cName, idx) => {
-                                            const progressPct = counterGroups[cName].total > 0 ? Math.round((counterGroups[cName].counted / counterGroups[cName].total) * 100) : 0;
-                                            return (
-                                                <div key={idx} className="space-y-2 p-3 bg-slate-50 rounded-2xl border border-slate-100"><div className="flex justify-between text-xs font-bold"><span className="text-slate-800">{cName}</span><span className="text-indigo-600">{progressPct}%</span></div><div className="w-full bg-white border border-slate-200 rounded-full h-2.5 overflow-hidden"><div className="bg-indigo-500 h-2.5 rounded-full" style={{ width: `${progressPct}%` }}></div></div></div>
-                                            );
-                                        })}
-                                    </div>
-                                </div>
-                            </div>
 
-                            {/* Brand Accuracy */}
-                            <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-xl shadow-slate-200/30 space-y-5">
-                                <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 border-b border-slate-100 pb-4">
-                                    <h3 className="text-base font-black text-slate-900 flex items-center"><TrendingDown className="w-5 h-5 mr-2 text-indigo-500" />Akurasi Hitung per Brand</h3>
-                                    <div className="flex items-center space-x-2">
-                                        <div className="relative"><Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" /><input type="text" placeholder="Cari Brand..." value={brandSearch} onChange={(e) => setBrandSearch(e.target.value)} className="pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500/20" /></div>
-                                        <select value={brandStatusFilter} onChange={(e) => setBrandStatusFilter(e.target.value as 'all' | 'selisih' | 'match')} className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500/20"><option value="all">All</option><option value="selisih">Selisih</option><option value="match">Match</option></select>
-                                    </div>
-                                </div>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-96 overflow-y-auto pr-2 scrollbar-thin">
-                                    {brandAccuracyList.map((bAcc, idx) => (
-                                        <div key={idx} className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
-                                            <div className="flex justify-between items-center">
-                                                <div><span className="text-sm font-black text-slate-900">{bAcc.brand}</span><div className="text-xs text-slate-500 font-medium mt-0.5">{bAcc.totalSKUs} SKU Total • <span className="text-red-500 font-bold">{bAcc.diffSKUs} Selisih</span></div></div>
-                                                <div className="flex flex-col items-end space-y-2"><span className={`text-[10px] font-black px-2.5 py-1 rounded-lg ${bAcc.accuracyPct === 100 ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}`}>{bAcc.accuracyPct}% Akurat</span><button onClick={() => setExpandedBrandDetail(prev => ({ ...prev, [bAcc.brand]: !prev[bAcc.brand] }))} className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded-md hover:bg-indigo-100">{expandedBrandDetail[bAcc.brand] ? 'Tutup Detail' : 'Lihat SKU'}</button></div>
-                                            </div>
-                                            <div className="w-full bg-slate-200 rounded-full h-1.5"><div className={`h-1.5 rounded-full ${bAcc.accuracyPct === 100 ? 'bg-emerald-500' : 'bg-amber-500'}`} style={{ width: `${bAcc.accuracyPct}%` }}></div></div>
-                                            {expandedBrandDetail[bAcc.brand] && (
-                                                <div className="mt-3 bg-white border border-slate-200 rounded-xl overflow-x-auto text-[10px]"><table className="w-full text-left"><thead className="bg-slate-50"><tr><th className="p-2">SKU</th><th className="p-2 text-center">WMS</th><th className="p-2 text-center">ACT</th><th className="p-2 text-center">DIFF</th></tr></thead><tbody>{bAcc.skuList.map((s, i) => <tr key={i} className="border-t"><td className="p-2 font-mono font-bold text-indigo-600">{s.SKU}</td><td className="p-2 text-center">{s.Qty}</td><td className="p-2 text-center font-bold">{s.countedQty ?? '-'}</td><td className="p-2 text-center"><span className={((s.countedQty ?? s.Qty) - s.Qty) === 0 ? 'text-emerald-500' : 'text-red-500 font-bold'}>{s.isCounted ? ((s.countedQty ?? s.Qty) - s.Qty) : '-'}</span></td></tr>)}</tbody></table></div>
-                                            )}
+                                {/* Brand Accuracy Search */}
+                                <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-xl shadow-slate-200/30 space-y-5">
+                                    <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 border-b border-slate-100 pb-4">
+                                        <h3 className="text-base font-black text-slate-900 flex items-center"><TrendingDown className="w-5 h-5 mr-2 text-indigo-500" />Akurasi Hitung per Brand</h3>
+                                        <div className="flex items-center space-x-2">
+                                            <div className="relative"><Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" /><input type="text" placeholder="Cari Brand..." value={brandSearch} onChange={(e) => setBrandSearch(e.target.value)} className="pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500/20" /></div>
+                                            <select value={brandStatusFilter} onChange={(e) => setBrandStatusFilter(e.target.value as 'all' | 'selisih' | 'match')} className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500/20"><option value="all">All</option><option value="selisih">Selisih</option><option value="match">Match</option></select>
                                         </div>
-                                    ))}
+                                    </div>
+                                    <div className="space-y-3 max-h-60 overflow-y-auto pr-2 scrollbar-thin">
+                                        {brandAccuracyList.map((bAcc, idx) => (
+                                            <div key={idx} className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
+                                                <div className="flex justify-between items-center">
+                                                    <div><span className="text-sm font-black text-slate-900">{bAcc.brand}</span><div className="text-xs text-slate-500 font-medium mt-0.5">{bAcc.totalSKUs} SKU Total • <span className="text-red-500 font-bold">{bAcc.diffSKUs} Selisih</span></div></div>
+                                                    <div className="flex flex-col items-end space-y-2"><span className={`text-[10px] font-black px-2.5 py-1 rounded-lg ${bAcc.accuracyPct === 100 ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}`}>{bAcc.accuracyPct}% Akurat</span><button onClick={() => setExpandedBrandDetail(prev => ({ ...prev, [bAcc.brand]: !prev[bAcc.brand] }))} className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded-md hover:bg-indigo-100">{expandedBrandDetail[bAcc.brand] ? 'Tutup Detail' : 'Lihat SKU'}</button></div>
+                                                </div>
+                                                <div className="w-full bg-slate-200 rounded-full h-1.5"><div className={`h-1.5 rounded-full ${bAcc.accuracyPct === 100 ? 'bg-emerald-500' : 'bg-amber-500'}`} style={{ width: `${bAcc.accuracyPct}%` }}></div></div>
+                                                {expandedBrandDetail[bAcc.brand] && (
+                                                    <div className="mt-3 bg-white border border-slate-200 rounded-xl overflow-x-auto text-[10px]"><table className="w-full text-left"><thead className="bg-slate-50"><tr><th className="p-2">SKU</th><th className="p-2 text-center">WMS</th><th className="p-2 text-center">ACT</th><th className="p-2 text-center">DIFF</th></tr></thead><tbody>{bAcc.skuList.map((s, i) => <tr key={i} className="border-t"><td className="p-2 font-mono font-bold text-indigo-600">{s.SKU}</td><td className="p-2 text-center">{s.Qty}</td><td className="p-2 text-center font-bold">{s.countedQty ?? '-'}</td><td className="p-2 text-center"><span className={((s.countedQty ?? s.Qty) - s.Qty) === 0 ? 'text-emerald-500' : 'text-red-500 font-bold'}>{s.isCounted ? ((s.countedQty ?? s.Qty) - s.Qty) : '-'}</span></td></tr>)}</tbody></table></div>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -708,16 +727,33 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                     {activeTab === 'master' && (
                         <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl shadow-slate-200/40 space-y-5 animate-in slide-in-from-bottom-2 duration-300">
                             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-100 pb-4">
-                                <div><h3 className="text-base font-black text-slate-900">Database Master Task & Lokasi Rak</h3><p className="text-sm text-slate-500">Edit, Assign PIC, dan lengkapi deskripsi barang.</p></div>
-                                <div className="flex items-center space-x-3 w-full md:w-auto">
-                                    <button onClick={handleDownloadTemplateXLSX} className="flex-1 md:flex-none px-4 py-2.5 bg-slate-50 text-slate-700 border border-slate-200 hover:bg-slate-100 rounded-xl text-sm font-bold flex items-center justify-center space-x-2 transition-colors"><FileSpreadsheet className="w-4 h-4 text-emerald-600" /><span>Template (.xlsx)</span></button>
-                                    <label className="flex-1 md:flex-none px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-sm font-bold cursor-pointer inline-flex items-center justify-center space-x-2 shadow-md transition-transform active:scale-95"><Upload className="w-4 h-4" /><span>Upload Master</span><input type="file" accept=".xlsx, .xls" className="hidden" onChange={(e) => { if (e.target.files?.[0]) parseXLSXFile(e.target.files[0]); }} /></label>
+                                <div>
+                                    <h3 className="text-base font-black text-slate-900">Database Master Task & Lokasi Rak</h3>
+                                    <p className="text-sm text-slate-500">Edit, Assign PIC, dan lengkapi deskripsi barang.</p>
                                 </div>
+
+                                {/* PROTEKSI UPLOAD MASTER: HANYA OWNER YANG BISA LIHAT / UPLOAD[cite: 11] */}
+                                {effectiveRole === 'owner' ? (
+                                    <div className="flex items-center space-x-3 w-full md:w-auto">
+                                        <button onClick={handleDownloadTemplateXLSX} className="flex-1 md:flex-none px-4 py-2.5 bg-slate-50 text-slate-700 border border-slate-200 hover:bg-slate-100 rounded-xl text-sm font-bold flex items-center justify-center space-x-2 transition-colors">
+                                            <FileSpreadsheet className="w-4 h-4 text-emerald-600" /><span>Template (.xlsx)</span>
+                                        </button>
+                                        <label className="flex-1 md:flex-none px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-sm font-bold cursor-pointer inline-flex items-center justify-center space-x-2 shadow-md transition-transform active:scale-95">
+                                            <Upload className="w-4 h-4" /><span>Upload Master</span>
+                                            <input type="file" accept=".xlsx, .xls" className="hidden" onChange={(e) => { if (e.target.files?.[0]) parseXLSXFile(e.target.files[0]); }} />
+                                        </label>
+                                    </div>
+                                ) : (
+                                    <div className="px-4 py-2 bg-slate-100 text-slate-500 border border-slate-200 rounded-xl text-xs font-bold flex items-center">
+                                        🔒 Mode Supervisor (Read Only)[cite: 11]
+                                    </div>
+                                )}
                             </div>
 
-                            <div className="overflow-x-auto border border-slate-200 rounded-2xl shadow-inner scrollbar-thin">
+                            {/* TABEL DENGAN SCROLLER RAPI */}
+                            <div className="overflow-x-auto border border-slate-200 rounded-2xl shadow-inner max-h-125 scrollbar-thin scrollbar-thumb-indigo-200">
                                 <table className="w-full text-left text-[11px] min-w-max border-collapse">
-                                    <thead className="bg-slate-50/90 backdrop-blur-sm font-black text-slate-600 sticky top-0 z-20 shadow-sm border-b border-slate-200">
+                                    <thead className="bg-slate-50/90 backdrop-blur-xs font-black text-slate-600 sticky top-0 z-20 shadow-xs border-b border-slate-200">
                                         <tr><th className="p-3">OWNER</th><th className="p-3">SKU</th><th className="p-3 max-w-xs">DESKRIPSI</th><th className="p-3">BRAND</th><th className="p-3 bg-indigo-50/50">LOKASI RAK</th><th className="p-3 bg-indigo-50/50">COUNTER PIC</th><th className="p-3">ED SYSTEM</th><th className="p-3 text-center">WMS QTY</th><th className="p-3 text-center">ACTUAL QTY</th></tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-100 font-medium bg-white">
@@ -733,7 +769,7 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                                                 </tr>
                                             );
                                         })}
-                                        {masterDataList.length === 0 && (<tr><td colSpan={10} className="p-10 text-center text-slate-400 font-medium flex flex-col items-center"><Database className="w-8 h-8 mb-2 opacity-20" />Belum ada task. Upload file master Excel di pojok kanan atas.</td></tr>)}
+                                        {masterDataList.length === 0 && (<tr><td colSpan={10} className="p-10 text-center text-slate-400 font-medium flex flex-col items-center"><Database className="w-8 h-8 mb-2 opacity-20" />Belum ada task. Upload file master Excel di atas.</td></tr>)}
                                     </tbody>
                                 </table>
                             </div>
@@ -764,7 +800,7 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                                     <h3 className="text-base font-black text-slate-900 flex items-center"><Scale className="w-5 h-5 mr-2 text-indigo-600" />Laporan Selisih & Override Recovery</h3>
                                     <button className="px-4 py-2 bg-slate-50 text-slate-700 border border-slate-200 hover:bg-slate-100 rounded-xl text-sm font-bold flex items-center transition-colors"><Printer className="w-4 h-4 mr-2" />Cetak Laporan</button>
                                 </div>
-                                <div className="overflow-x-auto border border-slate-200 rounded-2xl">
+                                <div className="overflow-x-auto border border-slate-200 rounded-2xl scrollbar-thin">
                                     <table className="w-full text-left text-sm"><thead className="bg-slate-50/80 font-black text-slate-600 border-b"><tr><th className="p-4">SKU BARANG</th><th className="p-4 text-center">WMS QTY</th><th className="p-4 text-center">ACTUAL QTY</th><th className="p-4 text-center">SELISIH</th><th className="p-4 text-right bg-amber-50/50">VALUASI (Rp)</th><th className="p-4 text-right bg-indigo-50/50">OVERRIDE RECOVERY</th></tr></thead>
                                         <tbody className="divide-y divide-slate-100 font-medium">
                                             {masterDataList.filter(i => i.isCounted && ((i.countedQty || 0) - i.Qty) !== 0).map((item, i) => {
