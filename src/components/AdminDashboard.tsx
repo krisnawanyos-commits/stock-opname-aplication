@@ -142,7 +142,6 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
     const [selectedCounterForDetail, setSelectedCounterForDetail] = useState<string | null>(null);
     const [ktpSearch, setKtpSearch] = useState<string>('');
 
-    // TEAM ASSIGNMENT STATES
     const [assignUsername, setAssignUsername] = useState<string>('');
     const [assignRole, setAssignRole] = useState<UserRole>('counter');
 
@@ -310,6 +309,36 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
         reader.readAsArrayBuffer(file);
     };
 
+    const handleDownloadTemplateXLSX = () => {
+        const templateData = [{
+            SKU: 'ENFA-01',
+            Description: 'Susu Kaleng 400g',
+            'UPC 1': '12345678',
+            'UPC 2': '',
+            Status: 'Active',
+            Location: 'R-01',
+            level: '1',
+            ailee: 'A',
+            Zone: 'FOOD',
+            'Location Type': 'RACK',
+            counter: 'bambang',
+            'current round': 1,
+            'satuan hitung': 'PCS',
+            'SKU Brand': 'ENFAGROW',
+            'expired date by system': '2026-12-31',
+            'expired date by actual': '',
+            'QTY ACTUAL': '',
+            REMARKS: '',
+            'Qty System': 100,
+            'Unit Price': 150000
+        }];
+        const ws = XLSX.utils.json_to_sheet(templateData);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Master_Task");
+        XLSX.writeFile(wb, "Template_Master_Task.xlsx");
+        triggerNotification("Template Master Task (.xlsx) berhasil diunduh!");
+    };
+
     const handleExportCurrentMasterXLSX = () => {
         if (masterDataList.length === 0) {
             triggerNotification("Tidak ada data Master Task untuk diexport!");
@@ -395,7 +424,6 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
         triggerNotification(`Stok SKU ${sku} disesuaikan ke ${newQty}!`);
     };
 
-    // TEAM ASSIGNMENT HANDLERS
     const handleDownloadTeamTemplate = () => {
         const csvContent = "Username,Role\nriski.so,spv\nputri.so,counter";
         const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -724,9 +752,33 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                                 <div onClick={() => setWizMethod('FLOOR_TO_LIST')} className={`p-4 rounded-2xl border-2 cursor-pointer ${wizMethod === 'FLOOR_TO_LIST' ? 'border-indigo-600 bg-indigo-50' : 'border-slate-100 bg-slate-50'}`}><div className="text-sm font-black text-center text-slate-900">FLOOR TO LIST</div></div>
                             </div>
                         </div>
-                        <div className="p-5 bg-indigo-50 border border-indigo-100 rounded-2xl text-center space-y-3">
-                            <input type="file" accept=".xlsx, .xls" onChange={(e) => setInitialFileToUpload(e.target.files?.[0] || null)} className="text-xs" />
+
+                        {/* RESTORED CARD PRE-LOAD MASTER TASK EXCEL WITH DOWNLOAD TEMPLATE BUTTON */}
+                        <div className="p-5 bg-linear-to-br from-indigo-50 to-blue-50 border border-indigo-100 rounded-2xl text-center space-y-3">
+                            <div className="flex justify-center"><FileSpreadsheet className="w-8 h-8 text-indigo-600" /></div>
+                            <div>
+                                <div className="text-sm font-bold text-indigo-900">Pre-load Master Task Excel (.xlsx)</div>
+                                <p className="text-xs text-indigo-600/70 mt-1">Upload sekarang untuk mempercepat sesi opname.</p>
+                            </div>
+
+                            <div className="flex flex-col sm:flex-row justify-center items-center gap-3 pt-2">
+                                <button
+                                    type="button"
+                                    onClick={handleDownloadTemplateXLSX}
+                                    className="px-4 py-2 bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-50 rounded-xl text-xs font-bold flex items-center space-x-1.5 shadow-xs transition-colors cursor-pointer"
+                                >
+                                    <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                                    <span>Download Template (.xlsx)</span>
+                                </button>
+                                <input
+                                    type="file"
+                                    accept=".xlsx, .xls"
+                                    onChange={(e) => setInitialFileToUpload(e.target.files?.[0] || null)}
+                                    className="text-xs file:mr-2 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:font-bold file:bg-indigo-600 file:text-white hover:file:bg-indigo-700 cursor-pointer"
+                                />
+                            </div>
                         </div>
+
                         <div className="flex justify-end pt-4"><button onClick={handleStartNewProjectSession} className="w-full md:w-auto px-8 py-3.5 bg-slate-900 text-white rounded-2xl text-sm font-black flex items-center justify-center space-x-2 shadow-xl"><PlayCircle className="w-5 h-5" /><span>Launch Dashboard</span></button></div>
                     </div>
                 </div>
