@@ -27,6 +27,7 @@ interface GroupedSKUItem {
   isCounted: boolean;
   docIds: string[];
   batchCount: number;
+  allSystemEds: string[];
 }
 
 export default function Step4CountDetail({ sessionData, rack, onBackToList, onLogout }: Step4CountDetailProps) {
@@ -63,6 +64,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
         const rawActQty = data.QTY_ACTUAL ?? data.countedQty;
         const numActQty = parseInt(rawActQty, 10);
         const hasActQty = rawActQty !== undefined && rawActQty !== null && !isNaN(numActQty);
+        const edSys = data.expiredDateSystem || '';
 
         if (!groupedMap[skuKey]) {
           groupedMap[skuKey] = {
@@ -74,30 +76,33 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             totalSystemQty: sysQty,
             qtyGood: hasActQty ? numActQty : 0,
             qtyBad: parseInt(data.QTY_BAD) || 0,
-            expDateSystem: data.expiredDateSystem || '',
+            expDateSystem: edSys,
             expDateActual: data.expDateActual || data.expiredDateActual || '',
             isBadStock: (parseInt(data.QTY_BAD) || 0) > 0 || !!data.badRemarks,
             badRemarks: data.badRemarks || '',
             isCounted: !!data.isCounted || hasActQty,
             docIds: [docSnap.id],
-            batchCount: 1
+            batchCount: 1,
+            allSystemEds: edSys ? [edSys] : []
           };
         } else {
-          // GABUNGKAN TOTAL QTY SYSTEM & SIMPAN SEMUA ID DOKUMEN
           groupedMap[skuKey].totalSystemQty += sysQty;
           groupedMap[skuKey].docIds.push(docSnap.id);
           groupedMap[skuKey].batchCount += 1;
+
+          if (edSys && !groupedMap[skuKey].allSystemEds.includes(edSys)) {
+            groupedMap[skuKey].allSystemEds.push(edSys);
+            groupedMap[skuKey].allSystemEds.sort();
+          }
 
           if (hasActQty) {
             groupedMap[skuKey].qtyGood += numActQty;
             groupedMap[skuKey].isCounted = true;
           }
 
-          // PILIH EXPIRED DATE SYSTEM TERCEPAT (FEFO)
           const currentEd = groupedMap[skuKey].expDateSystem;
-          const newEd = data.expiredDateSystem || '';
-          if (newEd && (!currentEd || newEd < currentEd)) {
-            groupedMap[skuKey].expDateSystem = newEd;
+          if (edSys && (!currentEd || edSys < currentEd)) {
+            groupedMap[skuKey].expDateSystem = edSys;
           }
         }
       });
@@ -205,7 +210,6 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     setUnmappedList((prev) => prev.filter((item) => item.id !== id));
   };
 
-  // SIMPAN DAN DILAKUKAN BATCH WRITE UNTUK MENGUPDATE SEMUA DOKUMEN SKU DENGAN PRESISI
   const handleSaveAndNext = async () => {
     if (isSessionLocked) return;
     setIsLoadingSave(true);
@@ -214,7 +218,6 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       const batch = writeBatch(db);
 
       skuList.forEach(skuItem => {
-        // Tulis total Qty Good ke dokumen pertama, dokumen turunan di-mark isCounted
         skuItem.docIds.forEach((docId, i) => {
           const taskRef = doc(db, "master_tasks", docId);
           batch.set(taskRef, {
@@ -323,31 +326,43 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                 <p className="font-body-sm text-slate-500">{currentSku.category}</p>
               </div>
 
-              {/* INFORMASI EXPIRED DATE FEFO */}
+              {/* INFORMASI EXPIRED DATE FEFO DENGAN DAFTAR BADGES TANPA QTY SYSTEM */}
               <div className="bg-blue-50/60 border border-blue-200 p-space-sm rounded-xl space-y-2">
                 <div className="flex justify-between items-center">
                   <span className="font-label-sm text-blue-900 font-bold flex items-center gap-1">
                     <span className="material-symbols-outlined text-[16px] text-blue-700">event</span> Expired Date System (FEFO)
                   </span>
-                  <button type="button" disabled={isSessionLocked} onClick={() => handleSetSameExpAsSystem(idx)} className="px-2.5 py-1 bg-emerald-600 text-white rounded-lg text-[10px] font-bold active:scale-95">
+                  <button type="button" disabled={isSessionLocked} onClick={() => handleSetSameExpAsSystem(idx)} className="px-2.5 py-1 bg-emerald-600 text-white rounded-lg text-[10px] font-bold active:scale-95 cursor-pointer">
                     Sama dgn System
                   </button>
                 </div>
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   <div>
                     <label className="text-[10px] text-slate-500 font-bold block uppercase mb-0.5">ED System Terdekat</label>
-                    <div className="flex flex-col">
-                      <input type="text" readOnly value={currentSku.expDateSystem || '-'} className="w-full p-2 bg-white/80 border border-slate-200 rounded-lg text-slate-600 font-mono text-xs font-bold outline-none" />
-                      {currentSku.batchCount > 1 && (
-                        <span className="text-[9px] text-indigo-600 font-bold mt-0.5">*Gabungan {currentSku.batchCount} Batch ED (System: {currentSku.totalSystemQty} PCS)</span>
-                      )}
-                    </div>
+                    <input type="text" readOnly value={currentSku.expDateSystem || '-'} className="w-full p-2 bg-white/80 border border-slate-200 rounded-lg text-slate-600 font-mono text-xs font-bold outline-none" />
                   </div>
                   <div>
                     <label className="text-[10px] text-blue-700 font-bold block uppercase mb-0.5">ED Actual (Fisik)</label>
                     <input type="date" disabled={isSessionLocked} value={currentSku.expDateActual || ''} onChange={(e) => updateItemField(idx, 'expDateActual', e.target.value)} className="w-full p-1.5 bg-white border-2 border-blue-400 rounded-lg text-slate-900 font-mono text-xs font-bold outline-none shadow-xs" />
                   </div>
                 </div>
+
+                {/* LIST DAFTAR ED SYSTEM TERDAFTAR DI RAK INI (TANPA PEMBOCORAN STOK SYSTEM) */}
+                {currentSku.allSystemEds.length > 0 && (
+                  <div className="pt-2 border-t border-blue-200/60 space-y-1">
+                    <span className="text-[10px] font-bold text-slate-600 block">
+                      Variasi ED System di Rak Ini ({currentSku.batchCount} Batch):
+                    </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {currentSku.allSystemEds.map((edDate, edIdx) => (
+                        <span key={edIdx} className="px-2 py-0.5 bg-white border border-blue-300 text-blue-900 font-mono text-[10px] font-bold rounded-md shadow-xs flex items-center gap-1">
+                          <span>📅</span>
+                          <span>{edDate}</span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* INPUT KONDISI BAIK (DEFAULT 0) */}
@@ -357,11 +372,11 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                   <span className="font-label-sm text-slate-500 font-semibold">{currentSku.uom}</span>
                 </div>
                 <div className="flex items-center gap-space-sm">
-                  <button type="button" disabled={isSessionLocked} onClick={() => adjustQty(idx, -1)} className="w-14 h-14 bg-white border border-slate-300 text-slate-800 rounded-xl flex items-center justify-center text-xl shrink-0"><span className="material-symbols-outlined">remove</span></button>
+                  <button type="button" disabled={isSessionLocked} onClick={() => adjustQty(idx, -1)} className="w-14 h-14 bg-white border border-slate-300 text-slate-800 rounded-xl flex items-center justify-center text-xl shrink-0 cursor-pointer"><span className="material-symbols-outlined">remove</span></button>
                   <div className="flex-1 h-14 bg-white border-2 border-blue-500 rounded-xl flex items-center justify-center">
                     <input type="number" min="0" disabled={isSessionLocked} value={currentSku.qtyGood} onChange={(e) => updateItemField(idx, 'qtyGood', parseInt(e.target.value) || 0)} className="w-full text-center font-bold text-2xl outline-none" />
                   </div>
-                  <button type="button" disabled={isSessionLocked} onClick={() => adjustQty(idx, 1)} className="w-14 h-14 bg-blue-600 text-white rounded-xl flex items-center justify-center text-xl shrink-0"><span className="material-symbols-outlined">add</span></button>
+                  <button type="button" disabled={isSessionLocked} onClick={() => adjustQty(idx, 1)} className="w-14 h-14 bg-blue-600 text-white rounded-xl flex items-center justify-center text-xl shrink-0 cursor-pointer"><span className="material-symbols-outlined">add</span></button>
                 </div>
               </div>
 
@@ -369,7 +384,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
               <div className="bg-amber-50/70 border border-amber-200 p-space-md rounded-xl space-y-space-sm">
                 <div className="flex items-center justify-between">
                   <span className="font-body-lg text-amber-900 font-bold">Bad Stock Detected?</span>
-                  <button type="button" onClick={() => toggleBadStock(idx)} className={`min-h-11 min-w-11 px-3 py-1 rounded-full text-xs font-bold ${currentSku.isBadStock ? 'bg-amber-500 text-slate-950' : 'bg-slate-200 text-slate-600'}`}>{currentSku.isBadStock ? 'ON' : 'OFF'}</button>
+                  <button type="button" onClick={() => toggleBadStock(idx)} className={`min-h-11 min-w-11 px-3 py-1 rounded-full text-xs font-bold cursor-pointer ${currentSku.isBadStock ? 'bg-amber-500 text-slate-950' : 'bg-slate-200 text-slate-600'}`}>{currentSku.isBadStock ? 'ON' : 'OFF'}</button>
                 </div>
                 {currentSku.isBadStock && (
                   <div className="pt-2 space-y-2 border-t border-amber-200">
@@ -407,7 +422,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
               <div className="space-y-3 pt-2">
                 <div className="flex gap-2">
                   <input type="text" value={unmappedBarcode} onChange={(e) => setUnmappedBarcode(e.target.value)} placeholder="Scan/Ketik Barcode..." className="flex-1 h-11 border border-slate-300 px-3 rounded-lg text-sm font-mono font-bold" />
-                  <button type="button" onClick={triggerNativeBarcodeScan} className="px-3 min-h-11 bg-blue-600 text-white font-bold rounded-lg flex items-center gap-1 text-xs">
+                  <button type="button" onClick={triggerNativeBarcodeScan} className="px-3 min-h-11 bg-blue-600 text-white font-bold rounded-lg flex items-center gap-1 text-xs cursor-pointer">
                     <span className="material-symbols-outlined text-[18px]">photo_camera</span> Scan
                   </button>
                 </div>
@@ -437,18 +452,18 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                   <div>
                     <label className="text-[10px] font-bold text-slate-600 block mb-0.5">Satuan (UOM):</label>
                     <div className="flex gap-1 h-10">
-                      <button type="button" onClick={() => setUnmappedUnit('PCS')} className={`flex-1 rounded-lg text-xs font-bold ${unmappedUnit === 'PCS' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700'}`}>PCS</button>
-                      <button type="button" onClick={() => setUnmappedUnit('CARTON')} className={`flex-1 rounded-lg text-xs font-bold ${unmappedUnit === 'CARTON' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700'}`}>CARTON</button>
+                      <button type="button" onClick={() => setUnmappedUnit('PCS')} className={`flex-1 rounded-lg text-xs font-bold cursor-pointer ${unmappedUnit === 'PCS' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700'}`}>PCS</button>
+                      <button type="button" onClick={() => setUnmappedUnit('CARTON')} className={`flex-1 rounded-lg text-xs font-bold cursor-pointer ${unmappedUnit === 'CARTON' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700'}`}>CARTON</button>
                     </div>
                   </div>
                 </div>
 
-                <button type="button" onClick={triggerNativeCamera} className={`w-full h-11 border rounded-lg font-bold text-xs flex items-center justify-center gap-1 ${!isBarcodeInSystem && !unmappedPhotoUrl ? 'bg-rose-50 border-rose-300 text-rose-700 animate-pulse' : 'bg-slate-100 border-slate-300 text-slate-700'}`}>
+                <button type="button" onClick={triggerNativeCamera} className={`w-full h-11 border rounded-lg font-bold text-xs flex items-center justify-center gap-1 cursor-pointer ${!isBarcodeInSystem && !unmappedPhotoUrl ? 'bg-rose-50 border-rose-300 text-rose-700 animate-pulse' : 'bg-slate-100 border-slate-300 text-slate-700'}`}>
                   <span className="material-symbols-outlined text-[18px]">add_a_photo</span>
                   <span>{unmappedPhotoUrl ? 'Foto Terlampir ✓' : (!isBarcodeInSystem ? 'Ambil Foto Kamera (Wajib)' : 'Ambil Foto Kamera (Opsional)')}</span>
                 </button>
 
-                <button type="button" onClick={handleAddUnmapped} className="w-full min-h-11 bg-blue-600 text-white font-bold rounded-lg">+ Tambahkan Ke Temuan</button>
+                <button type="button" onClick={handleAddUnmapped} className="w-full min-h-11 bg-blue-600 text-white font-bold rounded-lg cursor-pointer">+ Tambahkan Ke Temuan</button>
               </div>
             )}
           </div>
