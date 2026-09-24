@@ -1,6 +1,6 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../firebase';
-import { doc, setDoc } from 'firebase/firestore';
+import { collection, onSnapshot, query, where, doc, setDoc } from 'firebase/firestore';
 import type { SessionData, RackItem, CustomModalState, UnmappedItem } from '../types';
 import CustomModal from './CustomModal';
 
@@ -31,47 +31,57 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const barcodeScanInputRef = useRef<HTMLInputElement>(null);
 
-  const [skuList, setSkuList] = useState<SKUItem[]>([
-    {
-      id: '1',
-      sku: 'SMB-14',
-      upc: '8993189272165',
-      upc2: '18993189388184',
-      name: 'Simba Sereal 2in1 Strawberi 22 gr',
-      category: 'Food & Beverage • Kemasan Bantal Kecil',
-      uom: 'PCS',
-      qtyGood: 12,
-      qtyBad: 0,
-      expDateSystem: '2026-10-18',
-      expDateActual: '',
-      isBadStock: false,
-      badRemarks: '',
-    },
-    {
-      id: '2',
-      sku: 'KPB-08',
-      upc: '8991001122334',
-      name: 'Kopi Kapal Api Special Mix 20x25g',
-      category: 'Food & Beverage • Sachet',
-      uom: 'CARTON',
-      qtyGood: 5,
-      qtyBad: 1,
-      expDateSystem: '2026-08-14',
-      expDateActual: '2026-08-14',
-      isBadStock: true,
-      badRemarks: 'Dus penyok & kemasan bocor terkena benturan pallet.',
-    },
-  ]);
-
+  const [skuList, setSkuList] = useState<SKUItem[]>([]);
   const [isSessionLocked, setIsSessionLocked] = useState<boolean>(false);
   const [unmappedDrawerOpen, setUnmappedDrawerOpen] = useState<boolean>(false);
   const [isLoadingSave, setIsLoadingSave] = useState<boolean>(false);
-  const companionName = sessionData.partners?.[0] || 'Budi Prasetyo';
 
   const [modal, setModal] = useState<CustomModalState>({
     isOpen: false, title: '', message: '',
   });
 
+  // REAL-TIME FIRESTORE DATA FETCHING UNTUK RAK YANG DIPILIH
+  useEffect(() => {
+    const primaryCounter = (sessionData.primaryCounter || "Unassigned").toLowerCase().trim();
+    const targetLocation = rack.rackNumber || rack.id;
+
+    const qTasks = query(
+      collection(db, "master_tasks"),
+      where("counter", "==", primaryCounter),
+      where("Location", "==", targetLocation)
+    );
+
+    const unsubscribe = onSnapshot(qTasks, (snapshot) => {
+      const items: SKUItem[] = snapshot.docs.map(docSnap => {
+        const data = docSnap.data();
+        const rawActQty = data.QTY_ACTUAL ?? data.countedQty;
+        const numActQty = parseInt(rawActQty, 10);
+        const hasActQty = rawActQty !== undefined && rawActQty !== null && !isNaN(numActQty);
+
+        return {
+          id: docSnap.id,
+          sku: data.SKU || '',
+          upc: data.UPC1 || data.upc || '',
+          upc2: data.UPC2 || '',
+          name: data.Description || data.name || data.SKU || '',
+          category: `${data.Zone || 'RACKING'} • ${data.SKUBrand || 'General'}`,
+          uom: (data.satuanHitung as 'PCS' | 'CARTON') || 'PCS',
+          qtyGood: hasActQty ? numActQty : (parseInt(data.Qty || data.QTY_SYSTEM) || 0),
+          qtyBad: parseInt(data.QTY_BAD) || 0,
+          expDateSystem: data.expiredDateSystem || '',
+          expDateActual: data.expDateActual || data.expiredDateActual || '',
+          isBadStock: (parseInt(data.QTY_BAD) || 0) > 0 || !!data.badRemarks,
+          badRemarks: data.badRemarks || '',
+        };
+      });
+
+      setSkuList(items);
+    });
+
+    return () => unsubscribe();
+  }, [rack, sessionData]);
+
+  // UNMAPPED ITEMS STATES
   const [unmappedBarcode, setUnmappedBarcode] = useState<string>('');
   const [unmappedQty, setUnmappedQty] = useState<number>(1);
   const [unmappedUnit, setUnmappedUnit] = useState<'PCS' | 'CARTON'>('PCS');
@@ -175,18 +185,16 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     setUnmappedList((prev) => prev.filter((item) => item.id !== id));
   };
 
+  // SYNC FIRESTORE COMPLETE PROGRESS UPDATE REAL-TIME
   const handleSaveAndNext = async () => {
     if (isSessionLocked) return;
     setIsLoadingSave(true);
 
     try {
       for (const skuItem of skuList) {
-        const taskId = `${rack.rackNumber}_${skuItem.sku}`;
+        const taskId = skuItem.id;
         await setDoc(doc(db, "master_tasks", taskId), {
-          Location: rack.rackNumber,
-          SKU: skuItem.sku,
-          Description: skuItem.name,
-          counter: sessionData.primaryCounter || 'Unassigned',
+          counter: (sessionData.primaryCounter || 'Unassigned').toLowerCase().trim(),
           isCounted: true,
           QTY_ACTUAL: skuItem.qtyGood,
           QTY_BAD: skuItem.qtyBad,
@@ -246,7 +254,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
           <div className="flex items-center justify-between gap-space-sm pt-0.5">
             <div className="flex items-center gap-1.5 text-slate-600 font-label-sm text-label-sm truncate">
               <span className="material-symbols-outlined text-[16px] text-emerald-600 shrink-0">group</span>
-              <span className="truncate">Tim: {(sessionData.primaryCounter || 'putri').split('.')[0]} (SO) &amp; {companionName} (WH)</span>
+              <span className="truncate">Counter Active: <b className="text-slate-900">{sessionData.primaryCounter}</b></span>
             </div>
           </div>
         </div>
@@ -271,6 +279,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             </div>
           </div>
 
+          {/* LIST SKU DARI FIRESTORE REAL-TIME */}
           {skuList.map((currentSku, idx) => (
             <div key={currentSku.id} className="bg-white rounded-xl p-space-md shadow-xs border border-slate-200 space-y-space-md relative overflow-hidden">
               <div className="absolute top-0 left-0 right-0 h-1.5 bg-blue-600"></div>
@@ -347,6 +356,12 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             </div>
           ))}
 
+          {skuList.length === 0 && (
+            <div className="bg-white p-8 rounded-xl text-center text-slate-400 font-medium border border-slate-200">
+              Tidak ada SKU ditemukan untuk rak ini.
+            </div>
+          )}
+
           <div className="bg-white rounded-xl p-space-md shadow-xs border border-slate-200 space-y-space-md">
             <div className="flex items-center justify-between cursor-pointer" onClick={() => setUnmappedDrawerOpen(!unmappedDrawerOpen)}>
               <h3 className="font-headline-sm text-slate-900 font-bold">Item Tak Terdaftar / Temuan Lain</h3>
@@ -419,14 +434,16 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             </div>
           )}
 
-          <button
-            type="button"
-            disabled={isLoadingSave}
-            onClick={handleSaveAndNext}
-            className="w-full min-h-14 bg-blue-600 text-white rounded-xl font-bold text-lg shadow-md cursor-pointer disabled:opacity-50"
-          >
-            {isLoadingSave ? "Menyimpan ke Cloud..." : "Simpan Semua & Lanjut Rak Berikutnya"}
-          </button>
+          {skuList.length > 0 && (
+            <button
+              type="button"
+              disabled={isLoadingSave}
+              onClick={handleSaveAndNext}
+              className="w-full min-h-14 bg-blue-600 text-white rounded-xl font-bold text-lg shadow-md cursor-pointer disabled:opacity-50"
+            >
+              {isLoadingSave ? "Menyimpan ke Cloud..." : "Simpan Semua & Lanjut Rak Berikutnya"}
+            </button>
+          )}
 
         </div>
       </main>

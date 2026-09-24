@@ -21,25 +21,25 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
   });
 
   useEffect(() => {
-    const primaryCounter = sessionData.primaryCounter || "Unassigned";
+    const primaryCounter = (sessionData.primaryCounter || "Unassigned").toLowerCase().trim();
     const qTasks = query(
       collection(db, "master_tasks"),
       where("counter", "==", primaryCounter)
     );
 
     const unsubscribe = onSnapshot(qTasks, (snapshot) => {
-      const taskList = snapshot.docs.map(doc => doc.data());
+      const taskList = snapshot.docs.map(docSnap => docSnap.data());
       const groupedRacks: Record<string, RackItem> = {};
 
       taskList.forEach((task: any) => {
         const rackLoc = task.Location || 'Z02-10-A';
-        const isCounted = !!task.isCounted;
+        const isCounted = !!task.isCounted || task.QTY_ACTUAL !== null;
 
         const existingRack = groupedRacks[rackLoc];
         if (!existingRack) {
           groupedRacks[rackLoc] = {
             id: rackLoc,
-            rackNumber: `${rackLoc} (Level ${task.level || '1'})`,
+            rackNumber: rackLoc,
             level: parseInt(task.level || '1', 10),
             zone: task.Zone || 'RACKING',
             status: 'pending',
@@ -73,15 +73,7 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
         };
       });
 
-      if (rackArray.length === 0) {
-        setRacks([
-          { id: '1', rackNumber: 'Z02-10-A (Level 1)', level: 1, zone: 'RACKING', status: 'completed', totalSKU: 24, countedSKU: 24 },
-          { id: '2', rackNumber: 'Z02-10-B (Level 1)', level: 1, zone: 'RACKING', status: 'in-progress', totalSKU: 18, countedSKU: 10 },
-          { id: '3', rackNumber: 'Z02-10-C (Level 2)', level: 2, zone: 'DAMAGE', status: 'pending', totalSKU: 30, countedSKU: 0 },
-        ]);
-      } else {
-        setRacks(rackArray);
-      }
+      setRacks(rackArray);
     });
 
     return () => unsubscribe();
@@ -109,13 +101,6 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
 
     return matchesFilter && matchesSearch;
   });
-
-  const getInitials = (name?: string) => {
-    if (!name) return 'SO';
-    const parts = name.split(/[\s.]+/).filter(Boolean);
-    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-    return (name.substring(0, 2)).toUpperCase();
-  };
 
   const handleLockSubmit = async () => {
     setIsLocking(true);
@@ -172,14 +157,11 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
             <button
               type="button"
               onClick={onLogout}
-              className="px-2.5 py-1 flex items-center gap-1 rounded-full text-xs font-semibold bg-surface-container text-on-surface-variant hover:bg-error-container/40 hover:text-error transition-colors cursor-pointer"
+              className="px-3 py-1 flex items-center gap-1 rounded-lg text-xs font-bold bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 transition-colors cursor-pointer"
             >
               <span>Keluar</span>
               <span className="material-symbols-outlined text-[16px]">logout</span>
             </button>
-            <div className="w-8 h-8 rounded-full bg-secondary-container text-on-secondary-container flex items-center justify-center font-bold text-xs shadow-xs ring-2 ring-surface-container-high">
-              {getInitials(sessionData.primaryCounter)}
-            </div>
           </div>
         </div>
       </header>
@@ -191,7 +173,7 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
               <div className="flex items-center gap-space-xs min-w-0">
                 <span className="material-symbols-outlined text-secondary text-[20px] shrink-0">warehouse</span>
                 <h2 className="font-headline-sm text-headline-sm text-on-surface truncate">
-                  {sessionData.sessionName || "Kosambi WH — SO Sesi Utama 2026"}
+                  {sessionData.sessionName || "SO Sesi Utama 2026"}
                 </h2>
               </div>
               <span className="px-2.5 py-1 rounded-full bg-amber-100 text-amber-900 font-label-sm text-label-sm uppercase tracking-wider shrink-0 flex items-center gap-1 font-bold">
@@ -203,13 +185,9 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
               <div className="inline-flex items-center gap-1.5 bg-surface-container-low px-2.5 py-1 rounded-full">
                 <span className="text-xs">👥</span>
                 <span className="font-label-sm text-label-sm text-on-surface-variant font-medium truncate">
-                  Tim: {(sessionData.primaryCounter || 'putri').split('.')[0]} (SO) &amp; {(sessionData.partners || ['Budi Prasetyo']).join(', ')} (WH)
+                  Counter Active: <b className="text-slate-900">{sessionData.primaryCounter}</b>
                 </span>
                 <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>
-              </div>
-              <div className="inline-flex items-center gap-1 text-secondary font-label-sm text-label-sm bg-secondary-fixed/50 px-2 py-0.5 rounded-full">
-                <span className="material-symbols-outlined text-[14px]">tune</span>
-                <span>List to Floor (Guided Rak)</span>
               </div>
             </div>
           </div>
@@ -217,8 +195,8 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
           <div className="bg-surface-container-lowest rounded-xl p-space-md shadow-sm border border-outline-variant/30 flex flex-col gap-space-sm">
             <div className="flex items-start justify-between">
               <div>
-                <span className="font-label-md text-label-md text-on-surface-variant block uppercase tracking-wide">Ringkasan Operasional</span>
-                <h3 className="font-headline-sm text-headline-sm text-on-surface font-bold">Progres Perhitungan Putaran 1</h3>
+                <span className="font-label-md text-label-md text-on-surface-variant block uppercase tracking-wide">Ringkasan Tugas Kamu</span>
+                <h3 className="font-headline-sm text-headline-sm text-on-surface font-bold">Progress Perhitungan</h3>
               </div>
               <div className="flex flex-col items-end">
                 <span className="font-headline-lg-mobile text-headline-lg-mobile text-secondary font-bold leading-none">{progressPercent}%</span>
@@ -227,29 +205,6 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
             </div>
             <div className="w-full bg-surface-container-high h-2.5 rounded-full overflow-hidden flex">
               <div className="bg-secondary h-full rounded-full transition-all duration-500" style={{ width: `${progressPercent}%` }}></div>
-            </div>
-            <div className="grid grid-cols-3 gap-space-xs pt-space-xs">
-              <div className="flex items-center gap-1.5 bg-emerald-50 text-emerald-800 p-2 rounded-lg">
-                <span className="material-symbols-outlined text-[18px] text-emerald-600 shrink-0">check_circle</span>
-                <div className="min-w-0">
-                  <p className="font-label-md text-label-md font-bold leading-tight">{completedCount} Rak</p>
-                  <p className="font-label-sm text-label-sm opacity-80 leading-tight">Selesai</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-1.5 bg-amber-50 text-amber-900 p-2 rounded-lg">
-                <span className="material-symbols-outlined text-[18px] text-amber-600 shrink-0">sync</span>
-                <div className="min-w-0">
-                  <p className="font-label-md text-label-md font-bold leading-tight">{inProgressCount} Rak</p>
-                  <p className="font-label-sm text-label-sm opacity-80 leading-tight">Berjalan</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-1.5 bg-surface-container-low text-on-surface-variant p-2 rounded-lg">
-                <span className="material-symbols-outlined text-[18px] text-outline shrink-0">schedule</span>
-                <div className="min-w-0">
-                  <p className="font-label-md text-label-md font-bold leading-tight">{pendingCount} Rak</p>
-                  <p className="font-label-sm text-label-sm opacity-80 leading-tight">Pending</p>
-                </div>
-              </div>
             </div>
           </div>
 
@@ -260,7 +215,7 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Cari nomor rak atau zona (misal: Z02-10, RACKING)..."
+                placeholder="Cari nomor rak atau zona (misal: A01-50-A)..."
                 className="w-full h-11 pl-10 pr-4 bg-surface-container-lowest rounded-xl font-body-md text-body-md shadow-sm border border-outline-variant/30 outline-none"
               />
             </div>
@@ -280,10 +235,10 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
                 <div className={`flex items-start justify-between gap-space-xs ${rack.status === 'in-progress' ? 'pl-1' : ''}`}>
                   <div className="flex flex-col min-w-0">
                     <div className="flex items-center gap-1.5">
-                      <span className={`material-symbols-outlined text-[18px] ${rack.status === 'completed' ? 'text-secondary' : rack.status === 'in-progress' ? 'text-secondary' : 'text-outline'}`}>shelves</span>
+                      <span className="material-symbols-outlined text-[18px] text-indigo-600">shelves</span>
                       <h4 className="font-headline-sm text-headline-sm text-on-surface truncate">Rak {rack.rackNumber}</h4>
                     </div>
-                    <p className="font-body-sm text-body-sm text-on-surface-variant mt-0.5">Zone: {rack.zone}</p>
+                    <p className="font-body-sm text-body-sm text-on-surface-variant mt-0.5">{rack.countedSKU} / {rack.totalSKU} SKU Dihitung • Zone: {rack.zone}</p>
                   </div>
                   {rack.status === 'completed' && <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-800 font-label-sm text-label-sm px-2.5 py-1 rounded-full shrink-0 border border-emerald-200"><span className="material-symbols-outlined text-[14px] text-emerald-700 font-bold">check</span> Selesai</span>}
                   {rack.status === 'in-progress' && <span className="inline-flex items-center gap-1.5 bg-amber-50 text-amber-900 font-label-sm text-label-sm px-2.5 py-1 rounded-full shrink-0 border border-amber-200"><span className="w-1.5 h-1.5 rounded-full bg-amber-600 animate-pulse"></span> Sedang Dihitung</span>}
@@ -291,6 +246,9 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
                 </div>
               </div>
             ))}
+            {filteredRacks.length === 0 && (
+              <div className="p-8 text-center text-slate-400 font-medium">Belum ada tugas rak untuk akun kamu ({sessionData.primaryCounter}).</div>
+            )}
           </div>
 
           <div className="flex flex-col gap-2 pt-2">

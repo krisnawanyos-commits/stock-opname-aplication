@@ -98,7 +98,10 @@ const SearchableSelect = ({ options, value, onChange, placeholder, className = "
     const [isOpen, setIsOpen] = useState(false);
     const [search, setSearch] = useState('');
     const filteredOptions = options.filter((o: any) => o.label.toLowerCase().includes(search.toLowerCase()));
-    const selectedLabel = options.find((o: any) => o.value === value)?.label || placeholder;
+
+    // FALLBACK CERDAS: TAMPILKAN VALUE AKTUAL JIKA TIDAK KETEMU DI DROPDOWN
+    const foundOpt = options.find((o: any) => o.value.toLowerCase() === (value || '').toLowerCase());
+    const selectedLabel = foundOpt ? foundOpt.label : (value && value !== 'unassigned' ? value : placeholder);
 
     return (
         <div className={`relative ${className}`}>
@@ -206,6 +209,7 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
         return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); };
     }, []);
 
+    // REAL-TIME FIRESTORE LISTENER UNTUK MASTER TASK PROJECT
     useEffect(() => {
         if (!activeProject) return;
 
@@ -324,6 +328,7 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
         acc.email.toLowerCase().includes(ktpSearch.toLowerCase())
     );
 
+    // PARSER EXCEL MASTER TASK DENGAN UNIK DOKUMEN PER BARIS
     const parseXLSXFile = async (file: File) => {
         const reader = new FileReader();
         reader.onload = async (e) => {
@@ -341,14 +346,24 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                 const rawCounter = (row['counter'] || row['Counter'] || row['COUNTER'] || 'Unassigned').toString().toLowerCase().trim();
                 const locStr = (row['Location'] || row['LOCATION'] || `LOC-${idx + 1}`).toString().trim();
                 const skuStr = (row['SKU'] || `SKU-${idx + 1}`).toString().trim();
-                const taskId = `${locStr}_${skuStr}`;
+                const taskId = `${locStr}_${skuStr}_${idx + 1}`;
 
-                if (rawCounter !== 'unassigned' && activeProject) {
-                    await setDoc(doc(db, "project_teams", `${activeProject.id}_${rawCounter}`), {
-                        projectId: activeProject.id,
+                // Auto-upsert ke KTP Cloud & Tim Project agar tidak Miss Mismatch
+                if (rawCounter !== 'unassigned') {
+                    await setDoc(doc(db, "global_accounts", rawCounter), {
                         username: rawCounter,
-                        role: 'counter'
+                        name: rawCounter.toUpperCase(),
+                        pin: '1234',
+                        email: `${rawCounter}@anymindgroup.com`
                     }, { merge: true });
+
+                    if (activeProject) {
+                        await setDoc(doc(db, "project_teams", `${activeProject.id}_${rawCounter}`), {
+                            projectId: activeProject.id,
+                            username: rawCounter,
+                            role: 'counter'
+                        }, { merge: true });
+                    }
                 }
 
                 const rawActQty = row['QTY ACTUAL'] ?? row['Qty Actual'] ?? row['ACTUAL QTY'];
@@ -399,7 +414,7 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
     const handleReassignCounter = async (taskIndex: number, newCounter: string) => {
         const targetItem = masterDataList[taskIndex];
         const cleanCounter = newCounter.toLowerCase().trim();
-        const taskId = targetItem.id || `${targetItem.Location}_${targetItem.SKU}`;
+        const taskId = targetItem.id || `${targetItem.Location}_${targetItem.SKU}_${taskIndex + 1}`;
 
         await setDoc(doc(db, "master_tasks", taskId), {
             counter: cleanCounter,
