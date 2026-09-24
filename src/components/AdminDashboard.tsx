@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../firebase';
 import {
-    collection, onSnapshot, doc, setDoc, deleteDoc
+    collection, onSnapshot, doc, setDoc, deleteDoc, writeBatch
 } from 'firebase/firestore';
 import * as XLSX from 'xlsx';
 import {
@@ -99,7 +99,6 @@ const SearchableSelect = ({ options, value, onChange, placeholder, className = "
     const [search, setSearch] = useState('');
     const filteredOptions = options.filter((o: any) => o.label.toLowerCase().includes(search.toLowerCase()));
 
-    // FALLBACK CERDAS: TAMPILKAN VALUE AKTUAL JIKA TIDAK KETEMU DI DROPDOWN
     const foundOpt = options.find((o: any) => o.value.toLowerCase() === (value || '').toLowerCase());
     const selectedLabel = foundOpt ? foundOpt.label : (value && value !== 'unassigned' ? value : placeholder);
 
@@ -239,7 +238,7 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                     Status: data.Status || 'Active',
                     currentRound: data.currentRound || 1,
                     expiredDateSystem: data.expiredDateSystem || '',
-                    expiredDateActual: data.expDateActual || '',
+                    expiredDateActual: data.expDateActual || data.expiredDateActual || '',
                     Qty: parseInt(data.Qty || data.QTY_SYSTEM) || 0,
                     countedQty: isCounted ? (isNaN(numActQty) ? 0 : numActQty) : undefined,
                     Remarks: data.badRemarks || data.Remarks || '',
@@ -328,87 +327,102 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
         acc.email.toLowerCase().includes(ktpSearch.toLowerCase())
     );
 
-    // PARSER EXCEL MASTER TASK DENGAN UNIK DOKUMEN PER BARIS
-    const parseXLSXFile = async (file: File) => {
-        const reader = new FileReader();
-        reader.onload = async (e) => {
-            const data = new Uint8Array(e.target?.result as ArrayBuffer);
-            const workbook = XLSX.read(data, { type: 'array' });
-            const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-            const json = XLSX.utils.sheet_to_json(worksheet) as any[];
+    // PARSER EXCEL ATOMIC BATCH (CEPAT < 1 DETIK UTK 122+ SKUs)
+    const parseXLSXFile = (file: File, currentProjId?: string): Promise<MasterSKUItem[]> => {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                try {
+                    const data = new Uint8Array(e.target?.result as ArrayBuffer);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+                    const json = XLSX.utils.sheet_to_json(worksheet) as any[];
 
-            triggerNotification("Mengunggah dan menyimpan Master Task ke Cloud...");
+                    triggerNotification("Mengunggah seluruh data ke Cloud Firestore...");
 
-            const newMasterList: MasterSKUItem[] = [];
+                    const batch = writeBatch(db);
+                    const newMasterList: MasterSKUItem[] = [];
+                    const pId = currentProjId || activeProject?.id;
 
-            for (let idx = 0; idx < json.length; idx++) {
-                const row = json[idx];
-                const rawCounter = (row['counter'] || row['Counter'] || row['COUNTER'] || 'Unassigned').toString().toLowerCase().trim();
-                const locStr = (row['Location'] || row['LOCATION'] || `LOC-${idx + 1}`).toString().trim();
-                const skuStr = (row['SKU'] || `SKU-${idx + 1}`).toString().trim();
-                const taskId = `${locStr}_${skuStr}_${idx + 1}`;
+                    for (let idx = 0; idx < json.length; idx++) {
+                        const row = json[idx];
+                        const rawCounter = (row['counter'] || row['Counter'] || row['COUNTER'] || 'Unassigned').toString().toLowerCase().trim();
+                        const locStr = (row['Location'] || row['LOCATION'] || `LOC-${idx + 1}`).toString().trim();
+                        const skuStr = (row['SKU'] || `SKU-${idx + 1}`).toString().trim();
+                        const taskId = `${locStr}_${skuStr}_${idx + 1}`;
 
-                // Auto-upsert ke KTP Cloud & Tim Project agar tidak Miss Mismatch
-                if (rawCounter !== 'unassigned') {
-                    await setDoc(doc(db, "global_accounts", rawCounter), {
-                        username: rawCounter,
-                        name: rawCounter.toUpperCase(),
-                        pin: '1234',
-                        email: `${rawCounter}@anymindgroup.com`
-                    }, { merge: true });
+                        if (rawCounter !== 'unassigned') {
+                            const accRef = doc(db, "global_accounts", rawCounter);
+                            batch.set(accRef, {
+                                username: rawCounter,
+                                name: rawCounter.toUpperCase(),
+                                pin: '1234',
+                                email: `${rawCounter}@anymindgroup.com`
+                            }, { merge: true });
 
-                    if (activeProject) {
-                        await setDoc(doc(db, "project_teams", `${activeProject.id}_${rawCounter}`), {
-                            projectId: activeProject.id,
-                            username: rawCounter,
-                            role: 'counter'
-                        }, { merge: true });
+                            if (pId) {
+                                const teamRef = doc(db, "project_teams", `${pId}_${rawCounter}`);
+                                batch.set(teamRef, {
+                                    projectId: pId,
+                                    username: rawCounter,
+                                    role: 'counter'
+                                }, { merge: true });
+                            }
+                        }
+
+                        const rawActQty = row['QTY ACTUAL'] ?? row['Qty Actual'] ?? row['ACTUAL QTY'];
+                        const numActQty = parseInt(rawActQty, 10);
+                        const isCounted = rawActQty !== undefined && rawActQty !== null && rawActQty !== '' && !isNaN(numActQty);
+
+                        const taskDoc = {
+                            Owner: row['Owner'] || 'DDI',
+                            SKU: skuStr,
+                            Description: row['Description'] || '',
+                            UPC1: row['UPC 1']?.toString() || '',
+                            UPC2: row['UPC 2']?.toString() || '',
+                            SKUBrand: row['SKU Brand'] || '',
+                            satuanHitung: row['satuan hitung'] || 'PCS',
+                            Location: locStr,
+                            level: row['level']?.toString() || '1',
+                            ailee: row['ailee']?.toString() || '',
+                            Zone: row['Zone']?.toString() || 'RACKING',
+                            LocationType: row['Location Type'] || 'RACK',
+                            counter: rawCounter,
+                            Status: row['Status'] || 'Active',
+                            currentRound: parseInt(row['current round']) || 1,
+                            expiredDateSystem: row['expired date by system'] || '',
+                            expiredDateActual: row['expired date by actual'] || '',
+                            Qty: parseInt(row['Qty System'] || row['QTY SYSTEM']) || 0,
+                            unitPrice: parseInt(row['Unit Price'] || '0'),
+                            isCounted,
+                            QTY_ACTUAL: isCounted ? numActQty : null,
+                            updatedAt: new Date().toISOString()
+                        };
+
+                        const taskRef = doc(db, "master_tasks", taskId);
+                        batch.set(taskRef, taskDoc, { merge: true });
+
+                        newMasterList.push({
+                            id: taskId,
+                            ...taskDoc,
+                            countedQty: isCounted ? numActQty : undefined,
+                            Remarks: row['REMARKS'] || ''
+                        });
                     }
+
+                    await batch.commit();
+                    setMasterDataList(newMasterList);
+                    triggerNotification(`Upload Berhasil! ${newMasterList.length} SKU tersimpan di Firestore Cloud.`);
+                    resolve(newMasterList);
+                } catch (err) {
+                    console.error("Batch commit error:", err);
+                    triggerNotification("Gagal upload ke Firestore!");
+                    reject(err);
                 }
-
-                const rawActQty = row['QTY ACTUAL'] ?? row['Qty Actual'] ?? row['ACTUAL QTY'];
-                const numActQty = parseInt(rawActQty, 10);
-                const isCounted = rawActQty !== undefined && rawActQty !== null && rawActQty !== '' && !isNaN(numActQty);
-
-                const taskDoc = {
-                    Owner: row['Owner'] || 'DDI',
-                    SKU: skuStr,
-                    Description: row['Description'] || '',
-                    UPC1: row['UPC 1']?.toString() || '',
-                    UPC2: row['UPC 2']?.toString() || '',
-                    SKUBrand: row['SKU Brand'] || '',
-                    satuanHitung: row['satuan hitung'] || 'PCS',
-                    Location: locStr,
-                    level: row['level']?.toString() || '1',
-                    ailee: row['ailee']?.toString() || '',
-                    Zone: row['Zone']?.toString() || 'RACKING',
-                    LocationType: row['Location Type'] || 'RACK',
-                    counter: rawCounter,
-                    Status: row['Status'] || 'Active',
-                    currentRound: parseInt(row['current round']) || 1,
-                    expiredDateSystem: row['expired date by system'] || '',
-                    expiredDateActual: row['expired date by actual'] || '',
-                    Qty: parseInt(row['Qty System'] || row['QTY SYSTEM']) || 0,
-                    unitPrice: parseInt(row['Unit Price'] || '0'),
-                    isCounted,
-                    QTY_ACTUAL: isCounted ? numActQty : null,
-                    updatedAt: new Date().toISOString()
-                };
-
-                await setDoc(doc(db, "master_tasks", taskId), taskDoc, { merge: true });
-
-                newMasterList.push({
-                    id: taskId,
-                    ...taskDoc,
-                    countedQty: isCounted ? numActQty : undefined,
-                    Remarks: ''
-                });
-            }
-
-            setMasterDataList(newMasterList);
-            triggerNotification(`Upload Berhasil! ${newMasterList.length} SKU tersimpan di Firestore Cloud.`);
-        };
-        reader.readAsArrayBuffer(file);
+            };
+            reader.onerror = (err) => reject(err);
+            reader.readAsArrayBuffer(file);
+        });
     };
 
     const handleReassignCounter = async (taskIndex: number, newCounter: string) => {
@@ -509,15 +523,21 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
         const matched = allLocs.find(l => l.id === wizLocationId);
         const locName = matched ? matched.name : (wizLocationId || 'Gudang Utama');
         const projId = `PROJ-${Date.now().toString().slice(-4)}`;
-        const newSession = {
+        const newSession: ProjectSession = {
+            id: projId,
             sessionCode: wizSessionCode.trim() || `SO-${wizLocationId}-${wizOpnameDate}`,
             locationId: wizLocationId || 'WH-01', locationName: locName, opnameDate: wizOpnameDate,
             method: wizMethod, status: 'LIVE_ACTIVE', createdAt: new Date().toLocaleString()
         };
         await setDoc(doc(db, "projects", projId), newSession);
-        if (initialFileToUpload) await parseXLSXFile(initialFileToUpload);
-        setRecoveryAdjustments({}); setActiveProject({ id: projId, ...newSession } as ProjectSession);
-        setViewState('DASHBOARD'); setActiveTab('progress');
+        setActiveProject(newSession);
+
+        if (initialFileToUpload) {
+            await parseXLSXFile(initialFileToUpload, projId);
+        }
+        setRecoveryAdjustments({});
+        setViewState('DASHBOARD');
+        setActiveTab('progress');
         triggerNotification(`Project Baru Diluncurkan: ${newSession.sessionCode}`);
     };
 
