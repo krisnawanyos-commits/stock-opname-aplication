@@ -7,10 +7,18 @@ import type { UserRole } from '../types';
 interface Step1LoginProps {
     onLogin?: (role: UserRole, email: string, username: string) => void;
     onSuccessLogin?: (username: string, role: UserRole, name?: string) => void;
+    onBackToApp?: () => void;
+    currentUserRole?: UserRole;
+    currentUserEmail?: string;
+    currentUsername?: string;
 }
 
-export default function Step1Login({ onLogin, onSuccessLogin }: Step1LoginProps) {
-    const [username, setUsername] = useState('');
+export default function Step1Login({
+    onLogin,
+    onSuccessLogin,
+    currentUsername
+}: Step1LoginProps) {
+    const [username, setUsername] = useState(currentUsername || '');
     const [pin, setPin] = useState('');
     const [error, setError] = useState('');
     const [isLoading, setIsLoading] = useState(false);
