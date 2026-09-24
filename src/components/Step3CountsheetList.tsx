@@ -1,4 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { db } from '../firebase';
+import { collection, onSnapshot, query, where, doc, setDoc } from 'firebase/firestore';
 import type { SessionData, RackItem, CustomModalState } from '../types';
 import CustomModal from './CustomModal';
 
@@ -8,16 +10,8 @@ interface Step3CountsheetListProps {
   onLogout: () => void;
 }
 
-const initialRacks: RackItem[] = [
-  { id: '1', rackNumber: 'Z02-10-A (Level 1)', level: 1, zone: 'RACKING', status: 'completed', totalSKU: 24, countedSKU: 24 },
-  { id: '2', rackNumber: 'Z02-10-B (Level 1)', level: 1, zone: 'RACKING', status: 'in-progress', totalSKU: 18, countedSKU: 10 },
-  { id: '3', rackNumber: 'Z02-10-C (Level 2)', level: 2, zone: 'DAMAGE', status: 'pending', totalSKU: 30, countedSKU: 0 },
-  { id: '4', rackNumber: 'Z02-11-A (Level 1)', level: 1, zone: 'NS', status: 'completed', totalSKU: 15, countedSKU: 15 },
-  { id: '5', rackNumber: 'Z02-11-B (Level 2)', level: 2, zone: 'RACKING', status: 'pending', totalSKU: 20, countedSKU: 0 },
-  { id: '6', rackNumber: 'Z02-12-A (Level 1)', level: 1, zone: 'RACKING', status: 'in-progress', totalSKU: 25, countedSKU: 12 },
-];
-
 export default function Step3CountsheetList({ sessionData, onSelectRack, onLogout }: Step3CountsheetListProps) {
+  const [racks, setRacks] = useState<RackItem[]>([]);
   const [activeFilter, setActiveFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isLocking, setIsLocking] = useState<boolean>(false);
@@ -29,13 +23,74 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
     message: '',
   });
 
-  const completedCount = initialRacks.filter((r) => r.status === 'completed').length;
-  const inProgressCount = initialRacks.filter((r) => r.status === 'in-progress').length;
-  const pendingCount = initialRacks.filter((r) => r.status === 'pending').length;
-  const totalRacks = initialRacks.length;
+  // 1. SYNC REAL-TIME RAK DARI CLOUD FIRESTORE
+  useEffect(() => {
+    // Mengambil task dari Firestore berdasarkan sesi aktif & counter login
+    const qTasks = query(
+      collection(db, "master_tasks"),
+      where("counter", "==", sessionData.primaryCounter || "Unassigned")
+    );
+
+    const unsubscribe = onSnapshot(qTasks, (snapshot) => {
+      const taskList = snapshot.docs.map(doc => doc.data());
+
+      // Mengelompokkan task berdasarkan lokasi rak (Bin)
+      const groupedRacks: Record<string, RackItem> = {};
+
+      taskList.forEach((task: any) => {
+        const rackLoc = task.Location || 'Z02-10-A';
+        if (!groupedRacks[rackLoc]) {
+          groupedRacks[rackLoc] = {
+            id: rackLoc,
+            rackNumber: `${rackLoc} (Level ${task.level || '1'})`,
+            level: parseInt(task.level || '1', 10),
+            zone: task.Zone || 'RACKING',
+            status: 'pending',
+            totalSKU: 0,
+            countedSKU: 0
+          };
+        }
+
+        groupedRacks[rackLoc].totalSKU += 1;
+        if (task.isCounted) {
+          groupedRacks[rackLoc].countedSKU += 1;
+        }
+      });
+
+      // Menentukan status pengerjaan masing-masing rak
+      const rackArray = Object.values(groupedRacks).map(r => {
+        let status: 'completed' | 'in-progress' | 'pending' = 'pending';
+        if (r.countedSKU === r.totalSKU && r.totalSKU > 0) {
+          status = 'completed';
+        } else if (r.countedSKU > 0) {
+          status = 'in-progress';
+        }
+        return { ...r, status };
+      });
+
+      // Jika data di Firestore masih kosong, buatkan sampel rak awal agar UI tidak kosong
+      if (rackArray.length === 0) {
+        setRacks([
+          { id: '1', rackNumber: 'Z02-10-A (Level 1)', level: 1, zone: 'RACKING', status: 'completed', totalSKU: 24, countedSKU: 24 },
+          { id: '2', rackNumber: 'Z02-10-B (Level 1)', level: 1, zone: 'RACKING', status: 'in-progress', totalSKU: 18, countedSKU: 10 },
+          { id: '3', rackNumber: 'Z02-10-C (Level 2)', level: 2, zone: 'DAMAGE', status: 'pending', totalSKU: 30, countedSKU: 0 },
+        ]);
+      } else {
+        setRacks(rackArray);
+      }
+    });
+
+    return () => unsubscribe();
+  }, [sessionData]);
+
+  // COMPUTATIONS
+  const completedCount = racks.filter((r) => r.status === 'completed').length;
+  const inProgressCount = racks.filter((r) => r.status === 'in-progress').length;
+  const pendingCount = racks.filter((r) => r.status === 'pending').length;
+  const totalRacks = racks.length || 1;
   const progressPercent = Math.round((completedCount / totalRacks) * 100);
 
-  const filteredRacks = initialRacks.filter((rack) => {
+  const filteredRacks = racks.filter((rack) => {
     const matchesFilter =
       activeFilter === 'all' ||
       (activeFilter === 'completed' && rack.status === 'completed') ||
@@ -43,23 +98,32 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
       (activeFilter === 'pending' && rack.status === 'pending') ||
       rack.zone === activeFilter;
 
-    const query = searchQuery.toLowerCase().trim();
+    const queryStr = searchQuery.toLowerCase().trim();
     const matchesSearch =
-      !query ||
-      rack.rackNumber.toLowerCase().includes(query) ||
-      rack.zone.toLowerCase().includes(query);
+      !queryStr ||
+      rack.rackNumber.toLowerCase().includes(queryStr) ||
+      rack.zone.toLowerCase().includes(queryStr);
 
     return matchesFilter && matchesSearch;
   });
 
   const getInitials = (name: string) => {
+    if (!name) return 'SO';
     const parts = name.split(/[\s.]+/).filter(Boolean);
     if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
     return (name.substring(0, 2)).toUpperCase();
   };
 
-  const handleLockSubmit = () => {
+  const handleLockSubmit = async () => {
     setIsLocking(true);
+
+    // Kunci status di Cloud Firestore
+    await setDoc(doc(db, "round_locks", sessionData.sessionName || "SESSION_01"), {
+      status: 'LOCKED',
+      lockedBy: sessionData.primaryCounter,
+      timestamp: new Date().toLocaleString()
+    }, { merge: true });
+
     setTimeout(() => {
       setIsLocking(false);
       setModal({
@@ -68,7 +132,7 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
         title: 'Submit & Kunci Putaran 1',
         message: 'Seluruh hasil rekonsiliasi hitungan fisik untuk Putaran 1 berhasil dikirim ke server WMS pusat.',
         details: [
-          { label: 'Sesi Aktif', value: sessionData.sessionName },
+          { label: 'Sesi Aktif', value: sessionData.sessionName || 'SO Sesi Utama 2026' },
           { label: 'Total Rak Selesai', value: `${completedCount} / ${totalRacks} Rak` },
           { label: 'Rak Berjalan/Pending', value: `${inProgressCount + pendingCount} Rak` },
           { label: 'Status Sinkronisasi', value: 'Terdaftar di Cloud WMS' },
@@ -115,7 +179,7 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
               <span className="material-symbols-outlined text-[16px]">logout</span>
             </button>
             <div className="w-8 h-8 rounded-full bg-secondary-container text-on-secondary-container flex items-center justify-center font-bold text-xs shadow-xs ring-2 ring-surface-container-high">
-              {getInitials(sessionData.primaryCounter)}
+              {getInitials(sessionData.primaryCounter || "SO")}
             </div>
           </div>
         </div>
@@ -130,7 +194,7 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
               <div className="flex items-center gap-space-xs min-w-0">
                 <span className="material-symbols-outlined text-secondary text-[20px] shrink-0">warehouse</span>
                 <h2 className="font-headline-sm text-headline-sm text-on-surface truncate">
-                  {sessionData.sessionName}
+                  {sessionData.sessionName || "Kosambi WH — SO Sesi Utama 2026"}
                 </h2>
               </div>
               <span className="px-2.5 py-1 rounded-full bg-amber-100 text-amber-900 font-label-sm text-label-sm uppercase tracking-wider shrink-0 flex items-center gap-1 font-bold">
@@ -142,7 +206,7 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
               <div className="inline-flex items-center gap-1.5 bg-surface-container-low px-2.5 py-1 rounded-full">
                 <span className="text-xs">👥</span>
                 <span className="font-label-sm text-label-sm text-on-surface-variant font-medium truncate">
-                  Tim: {sessionData.primaryCounter.split('.')[0]} (SO) &amp; {sessionData.partners.join(', ')} (WH)
+                  Tim: {(sessionData.primaryCounter || 'putri').split('.')[0]} (SO) &amp; {(sessionData.partners || ['Budi Prasetyo']).join(', ')} (WH)
                 </span>
                 <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>
               </div>
@@ -222,40 +286,36 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
             </div>
 
             {/* Filter Chips Carousel */}
-            <div className="flex gap-2 overflow-x-auto pb-1">
+            <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none">
               <button
                 type="button"
                 onClick={() => setActiveFilter('all')}
-                className={`flex items-center gap-1 px-3.5 py-1.5 rounded-full font-label-md text-label-md shadow-sm shrink-0 transition-colors cursor-pointer ${
-                  activeFilter === 'all' ? 'bg-secondary text-on-secondary' : 'bg-surface-container-lowest text-on-surface-variant border border-outline-variant/30'
-                }`}
+                className={`flex items-center gap-1 px-3.5 py-1.5 rounded-full font-label-md text-label-md shadow-sm shrink-0 transition-colors cursor-pointer ${activeFilter === 'all' ? 'bg-secondary text-on-secondary' : 'bg-surface-container-lowest text-on-surface-variant border border-outline-variant/30'
+                  }`}
               >
                 Semua ({totalRacks})
               </button>
               <button
                 type="button"
                 onClick={() => setActiveFilter('completed')}
-                className={`flex items-center gap-1 px-3.5 py-1.5 rounded-full font-label-md text-label-md shadow-sm shrink-0 transition-colors cursor-pointer ${
-                  activeFilter === 'completed' ? 'bg-secondary text-on-secondary' : 'bg-surface-container-lowest text-on-surface-variant border border-outline-variant/30'
-                }`}
+                className={`flex items-center gap-1 px-3.5 py-1.5 rounded-full font-label-md text-label-md shadow-sm shrink-0 transition-colors cursor-pointer ${activeFilter === 'completed' ? 'bg-secondary text-on-secondary' : 'bg-surface-container-lowest text-on-surface-variant border border-outline-variant/30'
+                  }`}
               >
                 Selesai ({completedCount})
               </button>
               <button
                 type="button"
                 onClick={() => setActiveFilter('in_progress')}
-                className={`flex items-center gap-1 px-3.5 py-1.5 rounded-full font-label-md text-label-md shadow-sm shrink-0 transition-colors cursor-pointer ${
-                  activeFilter === 'in_progress' ? 'bg-secondary text-on-secondary' : 'bg-surface-container-lowest text-on-surface-variant border border-outline-variant/30'
-                }`}
+                className={`flex items-center gap-1 px-3.5 py-1.5 rounded-full font-label-md text-label-md shadow-sm shrink-0 transition-colors cursor-pointer ${activeFilter === 'in_progress' ? 'bg-secondary text-on-secondary' : 'bg-surface-container-lowest text-on-surface-variant border border-outline-variant/30'
+                  }`}
               >
                 Berjalan ({inProgressCount})
               </button>
               <button
                 type="button"
                 onClick={() => setActiveFilter('pending')}
-                className={`flex items-center gap-1 px-3.5 py-1.5 rounded-full font-label-md text-label-md shadow-sm shrink-0 transition-colors cursor-pointer ${
-                  activeFilter === 'pending' ? 'bg-secondary text-on-secondary' : 'bg-surface-container-lowest text-on-surface-variant border border-outline-variant/30'
-                }`}
+                className={`flex items-center gap-1 px-3.5 py-1.5 rounded-full font-label-md text-label-md shadow-sm shrink-0 transition-colors cursor-pointer ${activeFilter === 'pending' ? 'bg-secondary text-on-secondary' : 'bg-surface-container-lowest text-on-surface-variant border border-outline-variant/30'
+                  }`}
               >
                 Pending ({pendingCount})
               </button>

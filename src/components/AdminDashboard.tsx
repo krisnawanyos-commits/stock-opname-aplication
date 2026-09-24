@@ -10,7 +10,7 @@ import {
     UserPlus, Filter, TrendingDown, Printer, SlidersHorizontal,
     CheckCircle2, XCircle, Search, Building2, DollarSign,
     Download, Scale, PlayCircle, Archive, ArrowLeft, AlertTriangle,
-    LogOut, GripHorizontal, Contact, Eye, EyeOff, UserCheck, Clock, Store, Link2
+    LogOut, GripHorizontal, Contact, Eye, EyeOff, UserCheck, Clock, Store, Link2, KeyRound
 } from 'lucide-react';
 import type { UserRole } from '../types';
 
@@ -36,7 +36,7 @@ interface ProjectTeamMember {
 }
 
 interface MasterSKUItem {
-    Owner: string;
+    Owner?: string;
     SKU: string;
     Description: string;
     UPC1: string;
@@ -160,6 +160,11 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
     const [newWhName, setNewWhName] = useState<string>('');
     const [newStoreName, setNewStoreName] = useState<string>('');
 
+    // FORM UPDATE AKUN OWNER
+    const [ownerNewName, setOwnerNewName] = useState<string>('Yos Krisnawan');
+    const [ownerNewEmail, setOwnerNewEmail] = useState<string>(currentUserEmail);
+    const [ownerNewPin, setOwnerNewPin] = useState<string>('');
+
     const [wizLocationId, setWizLocationId] = useState<string>('');
     const [wizOpnameDate, setWizOpnameDate] = useState<string>('2026-09-22');
     const [wizSessionCode, setWizSessionCode] = useState<string>('SO-WRG-2026-09');
@@ -192,18 +197,12 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
 
         const unsub4 = onSnapshot(collection(db, "warehouses"), (snap) => {
             const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as LocationOption));
-            setWarehouseList(list.length === 0 ? [
-                { id: 'WH-01', name: 'Waringin-Kosambi', type: 'NON_CONSIGNMENT' },
-                { id: 'WH-02', name: 'Biteship-Surabaya', type: 'NON_CONSIGNMENT' }
-            ] : list);
+            setWarehouseList(list);
         });
 
         const unsub5 = onSnapshot(collection(db, "consignment_stores"), (snap) => {
             const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as LocationOption));
-            setConsignmentStoreList(list.length === 0 ? [
-                { id: 'STORE-01', name: 'XY14-The FoodHall Grand Indonesia-(GI)', type: 'CONSIGNMENT' },
-                { id: 'STORE-02', name: 'XY02-The FoodHall Gourmet Plaza Indonesia-(PI)', type: 'CONSIGNMENT' }
-            ] : list);
+            setConsignmentStoreList(list);
         });
 
         return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); };
@@ -267,6 +266,19 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
         const link = document.createElement('a'); link.href = URL.createObjectURL(blob);
         link.setAttribute('download', 'Template_Import_KTP_Global.csv'); link.click();
         triggerNotification('Template KTP (.csv) diunduh!');
+    };
+
+    const handleUpdateOwnerAccount = async () => {
+        if (ownerNewEmail.trim()) {
+            const ownerKey = currentUserEmail.toLowerCase().replace(/[^a-zA-Z0-9]/g, '_');
+            await setDoc(doc(db, "owner_profile", ownerKey), {
+                name: ownerNewName,
+                email: ownerNewEmail.trim(),
+                pin: ownerNewPin || '1234',
+                updatedAt: new Date().toLocaleString()
+            });
+            triggerNotification('Profil & Akun Owner Berhasil Diperbarui!');
+        }
     };
 
     // LOKASI HANDLERS
@@ -441,7 +453,7 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
         link.setAttribute('download', 'Template_Assign_Tim_Project.csv'); link.click();
     };
 
-    // EXCEL PARSER DENGAN HEADER PRESISI UNTUK MASTER TASK
+    // EXCEL PARSER TANPA MANDATORI OWNER UNTUK MASTER TASK
     const [masterDataList, setMasterDataList] = useState<MasterSKUItem[]>([]);
     const parseXLSXFile = (file: File) => {
         const reader = new FileReader();
@@ -451,7 +463,8 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
             const worksheet = workbook.Sheets[workbook.SheetNames[0]];
             const json = XLSX.utils.sheet_to_json(worksheet) as any[];
             const parsed = json.map(row => ({
-                Owner: row['Owner'] || 'DDI', SKU: row['SKU']?.toString() || '', Description: row['Description'] || '',
+                Owner: row['Owner'] || 'DDI',
+                SKU: row['SKU']?.toString() || '', Description: row['Description'] || '',
                 UPC1: row['UPC 1']?.toString() || '', UPC2: row['UPC 2']?.toString() || '', SKUBrand: row['SKU Brand'] || '',
                 satuanHitung: row['satuan hitung'] || 'PCS', Location: row['Location']?.toString() || '', level: row['level']?.toString() || '1',
                 ailee: row['ailee']?.toString() || '', Zone: row['Zone']?.toString() || '', LocationType: row['Location Type'] || 'RACK',
@@ -465,10 +478,9 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
         reader.readAsArrayBuffer(file);
     };
 
-    // TEMPLATE EXCEL PARALEL SESUAI HEADER COUNTSHEET COUNTER
+    // TEMPLATE EXCEL OPERASIONAL SIMPEL (ALIGN DENGAN LAYAR COUNTER)
     const handleDownloadTemplateXLSX = () => {
         const templateData = [{
-            Owner: 'DDI',
             SKU: 'ENFA-01',
             Description: 'Susu Kaleng 400g',
             'UPC 1': '12345678',
@@ -608,10 +620,8 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
 
                     {landingTab === 'projects' && (
                         <div className="space-y-6">
-                            {/* MASTER KELOLA LOKASI GUDANG (WMS & CONSIGNMENT STORE) - HANYA OWNER */}
                             {effectiveRole === 'owner' && (
                                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                                    {/* CARD 1: GUDANG UTAMA (ONLINE / WMS) */}
                                     <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl shadow-slate-200/40 space-y-4">
                                         <div className="border-b border-slate-100 pb-3 flex justify-between items-center">
                                             <h3 className="text-base font-black text-slate-900 flex items-center space-x-2">
@@ -637,7 +647,6 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                                         </div>
                                     </div>
 
-                                    {/* CARD 2: TOKO CONSIGNMENT (OFFLINE STORE) */}
                                     <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl shadow-slate-200/40 space-y-4">
                                         <div className="border-b border-slate-100 pb-3 flex justify-between items-center">
                                             <h3 className="text-base font-black text-slate-900 flex items-center space-x-2">
@@ -665,7 +674,6 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                                 </div>
                             )}
 
-                            {/* TABEL LIVE FIRESTORE PROJECTS */}
                             <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl shadow-slate-200/40 space-y-5">
                                 <h3 className="text-base font-black text-slate-800 flex items-center space-x-2"><Database className="w-5 h-5 text-indigo-600" /><span>Live Firestore Projects</span></h3>
                                 <div className="overflow-x-auto border border-slate-200 rounded-2xl scrollbar-thin">
@@ -753,8 +761,6 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                     <div className="bg-white rounded-3xl p-8 shadow-xl shadow-slate-200/40 border border-slate-100 space-y-6">
                         <div className="space-y-2">
                             <label className="text-sm font-extrabold text-slate-800">1. Tipe Lokasi Opname:</label>
-
-                            {/* SEARCHABLE DROPDOWN UNTUK WIZARD LOKASI */}
                             <SearchableSelect
                                 options={combinedLocationOptions}
                                 value={wizLocationId}
@@ -775,7 +781,6 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                             </div>
                         </div>
 
-                        {/* CARD PRE-LOAD MASTER TASK EXCEL DENGAN TOMBOL DOWNLOAD TEMPLATE */}
                         <div className="p-5 bg-linear-to-br from-indigo-50 to-blue-50 border border-indigo-100 rounded-2xl text-center space-y-3">
                             <div className="flex justify-center"><FileSpreadsheet className="w-8 h-8 text-indigo-600" /></div>
                             <div>
@@ -795,7 +800,7 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                                     type="file"
                                     accept=".xlsx, .xls"
                                     onChange={(e) => setInitialFileToUpload(e.target.files?.[0] || null)}
-                                    className="text-xs file:mr-2 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-indigo-600 file:text-white hover:file:bg-indigo-700 cursor-pointer"
+                                    className="text-xs file:mr-2 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:font-bold file:bg-indigo-600 file:text-white hover:file:bg-indigo-700 cursor-pointer"
                                 />
                             </div>
                         </div>
@@ -963,14 +968,14 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                             <div className="overflow-x-auto border border-slate-200 rounded-2xl shadow-inner max-h-125 scrollbar-thin scrollbar-thumb-indigo-200">
                                 <table className="w-full text-left text-[11px] min-w-max border-collapse">
                                     <thead className="bg-slate-50/90 backdrop-blur-xs font-black text-slate-600 sticky top-0 z-20 shadow-xs border-b border-slate-200">
-                                        <tr><th className="p-3">OWNER</th><th className="p-3">SKU</th><th className="p-3 max-w-xs">DESKRIPSI</th><th className="p-3">BRAND</th><th className="p-3 bg-indigo-50/50">LOKASI RAK</th><th className="p-3 bg-indigo-50/50">COUNTER PIC</th><th className="p-3">ED SYSTEM</th><th className="p-3 text-center">WMS QTY</th><th className="p-3 text-center">ACTUAL QTY</th></tr>
+                                        <tr><th className="p-3">SKU</th><th className="p-3 max-w-xs">DESKRIPSI</th><th className="p-3">BRAND</th><th className="p-3 bg-indigo-50/50">LOKASI RAK</th><th className="p-3 bg-indigo-50/50">COUNTER PIC</th><th className="p-3">ED SYSTEM</th><th className="p-3 text-center">WMS QTY</th><th className="p-3 text-center">ACTUAL QTY</th></tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-100 font-medium bg-white">
                                         {masterDataList.map((row, idx) => {
                                             const diff = row.isCounted ? ((row.countedQty || 0) - row.Qty) : 0;
                                             return (
                                                 <tr key={idx} className={`hover:bg-slate-50 transition-colors ${row.isCounted ? (diff === 0 ? 'bg-emerald-50/20' : 'bg-red-50/20') : ''}`}>
-                                                    <td className="p-3">{row.Owner}</td><td className="p-3 font-mono font-black text-indigo-600">{row.SKU}</td><td className="p-3 truncate max-w-xs" title={row.Description}>{row.Description}</td><td className="p-3">{row.SKUBrand}</td>
+                                                    <td className="p-3 font-mono font-black text-indigo-600">{row.SKU}</td><td className="p-3 truncate max-w-xs" title={row.Description}>{row.Description}</td><td className="p-3">{row.SKUBrand}</td>
                                                     <td className="p-3 font-mono font-bold bg-indigo-50/10 flex items-center"><MapPin className="w-3 h-3 text-indigo-400 mr-1" />{row.Location} <span className="text-[9px] text-slate-400 ml-1">({row.Zone})</span></td>
                                                     <td className="p-2 bg-indigo-50/10"><SearchableSelect options={allProjectTeams.filter(t => t.projectId === activeProject.id).map(t => ({ value: t.username, label: t.username }))} value={row.counter === 'Unassigned' ? '' : row.counter} onChange={(val: string) => { const nw = [...masterDataList]; nw[idx].counter = val; setMasterDataList(nw); }} placeholder="Assign..." className="w-32" /></td>
                                                     <td className="p-3 font-mono text-slate-500">{row.expiredDateSystem || '-'}</td>
@@ -978,7 +983,7 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                                                 </tr>
                                             );
                                         })}
-                                        {masterDataList.length === 0 && (<tr><td colSpan={10} className="p-10 text-center text-slate-400 font-medium flex flex-col items-center"><Database className="w-8 h-8 mb-2 opacity-20" />Belum ada task. Upload file master Excel di atas.</td></tr>)}
+                                        {masterDataList.length === 0 && (<tr><td colSpan={9} className="p-10 text-center text-slate-400 font-medium flex flex-col items-center"><Database className="w-8 h-8 mb-2 opacity-20" />Belum ada task. Upload file master Excel di atas.</td></tr>)}
                                     </tbody>
                                 </table>
                             </div>
@@ -1039,9 +1044,29 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                         </div>
                     )}
 
-                    {/* TAB 4: PENGATURAN PROJECT (TIM, PRICING & GSHEET WEBHOOK) */}
+                    {/* TAB 4: PENGATURAN PROJECT (SETTINGS OWNER, TIM, PRICING & GSHEET WEBHOOK) */}
                     {activeTab === 'settings' && (
                         <div className="space-y-6 animate-in slide-in-from-bottom-2 duration-300">
+
+                            {/* PANEL PENGATURAN AKUN OWNER */}
+                            <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl shadow-slate-200/40 space-y-4">
+                                <div className="border-b border-slate-100 pb-3 flex justify-between items-center">
+                                    <h3 className="text-base font-black text-slate-900 flex items-center space-x-2">
+                                        <KeyRound className="w-5 h-5 text-indigo-600" />
+                                        <span>Pengaturan Akun & Profil Owner</span>
+                                    </h3>
+                                    <span className="text-xs font-bold text-indigo-700 bg-indigo-50 px-3 py-1 rounded-xl">Otorisasi Master</span>
+                                </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                    <input type="text" placeholder="Nama Lengkap Owner" value={ownerNewName} onChange={(e) => setOwnerNewName(e.target.value)} className="px-4 py-2.5 text-xs bg-slate-50 border border-slate-200 rounded-xl outline-none" />
+                                    <input type="email" placeholder="Email Owner" value={ownerNewEmail} onChange={(e) => setOwnerNewEmail(e.target.value)} className="px-4 py-2.5 text-xs bg-slate-50 border border-slate-200 rounded-xl outline-none" />
+                                    <input type="password" maxLength={4} placeholder="PIN Akses Baru (4-Digit)" value={ownerNewPin} onChange={(e) => setOwnerNewPin(e.target.value)} className="px-4 py-2.5 text-xs font-mono bg-slate-50 border border-slate-200 rounded-xl outline-none" />
+                                </div>
+                                <div className="flex justify-end">
+                                    <button onClick={handleUpdateOwnerAccount} className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md transition-colors">Simpan Perubahan Profil Owner</button>
+                                </div>
+                            </div>
+
                             {/* CARD GOOGLE SHEETS WEBHOOK BACKUP INTEGRATION */}
                             <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl shadow-slate-200/40 space-y-4">
                                 <div className="border-b border-slate-100 pb-3 flex justify-between items-center">

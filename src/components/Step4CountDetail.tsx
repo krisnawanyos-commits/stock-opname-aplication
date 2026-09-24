@@ -19,7 +19,8 @@ interface SKUItem {
   uom: 'PCS' | 'CARTON';
   qtyGood: number;
   qtyBad: number;
-  expDate?: string;
+  expDateSystem?: string;
+  expDateActual?: string;
   badRemarks?: string;
 }
 
@@ -38,6 +39,8 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       uom: 'PCS',
       qtyGood: 12,
       qtyBad: 0,
+      expDateSystem: '2026-10-18',
+      expDateActual: '',
     },
     {
       id: '2',
@@ -48,7 +51,8 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       uom: 'CARTON',
       qtyGood: 5,
       qtyBad: 1,
-      expDate: '2026-08-14',
+      expDateSystem: '2026-08-14',
+      expDateActual: '2026-08-14',
       badRemarks: 'Dus penyok & kemasan bocor terkena benturan pallet.',
     },
   ]);
@@ -57,7 +61,9 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
   const [isSessionLocked, setIsSessionLocked] = useState<boolean>(false);
   const [badStockEnabled, setBadStockEnabled] = useState<boolean>(false);
   const [unmappedDrawerOpen, setUnmappedDrawerOpen] = useState<boolean>(false);
-  const [companionName, setCompanionName] = useState<string>(sessionData.partners[0] || 'Budi Prasetyo');
+
+  // DIBUAT DARI SESSION DATA (SOLUSI SETCOMPANIONNAME UNUSED)
+  const companionName = sessionData.partners?.[0] || 'Budi Prasetyo';
 
   // Custom Modal State
   const [modal, setModal] = useState<CustomModalState>({
@@ -66,7 +72,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     message: '',
   });
 
-  // Unmapped SKU Form State (including Expired Date & Batch Number)
+  // Unmapped SKU Form State
   const [unmappedBarcode, setUnmappedBarcode] = useState<string>('8997012399912');
   const [unmappedUnit, setUnmappedUnit] = useState<'PCS' | 'CARTON'>('PCS');
   const [unmappedExpDate, setUnmappedExpDate] = useState<string>('2026-10-15');
@@ -86,19 +92,21 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       batchNumber: 'BATCH-2026-X9',
       photoUrl: '',
     },
-    {
-      id: 'unmapped-2',
-      barcode: 'UNKNOWN-8886008101014',
-      name: 'Kopi Instan Sachet 20g',
-      qty: 1,
-      uom: 'CARTON',
-      expDate: '2027-01-20',
-      batchNumber: 'BATCH-2026-K8',
-      photoUrl: '',
-    },
   ]);
 
   const currentSku = skuList[activeSkuIndex];
+
+  // ACTION: SAMA DENGAN SYSTEM UNTUK EXPIRED DATE
+  const handleSetSameExpAsSystem = () => {
+    if (isSessionLocked) return;
+    if (currentSku?.expDateSystem) {
+      setSkuList((prev) =>
+        prev.map((item, idx) =>
+          idx === activeSkuIndex ? { ...item, expDateActual: item.expDateSystem } : item
+        )
+      );
+    }
+  };
 
   // Native Camera Photo Upload Handlers
   const triggerNativeCamera = () => {
@@ -127,7 +135,6 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
   const handleBarcodeCaptured = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      // Simulate barcode reading from captured image
       const randomBarcode = '899' + Math.floor(1000000000 + Math.random() * 9000000000);
       setUnmappedBarcode(randomBarcode);
       setModal({
@@ -237,6 +244,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
   };
 
   const getInitials = (name: string) => {
+    if (!name) return 'SO';
     const parts = name.split(/[\s.]+/).filter(Boolean);
     if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
     return (name.substring(0, 2)).toUpperCase();
@@ -244,7 +252,6 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
 
   return (
     <div className="bg-slate-50 text-slate-900 font-body-md text-body-md flex flex-col min-h-screen">
-      {/* Custom Modal replacing alert */}
       <CustomModal modal={modal} onClose={() => setModal((prev) => ({ ...prev, isOpen: false }))} />
 
       {/* Hidden Native Camera Inputs */}
@@ -266,7 +273,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       />
 
       {/* Header Bar */}
-      <header className="fixed top-0 w-full z-50 bg-white/95 border-b border-slate-200 backdrop-blur-md pt-safe shadow-sm">
+      <header className="fixed top-0 w-full z-50 bg-white/95 border-b border-slate-200 backdrop-blur-md pt-safe shadow-xs">
         <div className="h-32 px-margin flex flex-col justify-center gap-space-xs max-w-md mx-auto">
           <div className="flex items-center justify-between">
             <button
@@ -289,10 +296,10 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
               <button
                 type="button"
                 onClick={onLogout}
-                className="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-xs shadow-sm hover:bg-blue-700 cursor-pointer"
+                className="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-xs shadow-xs hover:bg-blue-700 cursor-pointer"
                 title="Klik untuk Keluar / Logout"
               >
-                {getInitials(sessionData.primaryCounter)}
+                {getInitials(sessionData.primaryCounter || 'SO')}
               </button>
             </div>
           </div>
@@ -307,11 +314,11 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
           <div className="flex items-center justify-between gap-space-sm pt-0.5">
             <div className="flex items-center gap-1.5 text-slate-600 font-label-sm text-label-sm truncate">
               <span className="material-symbols-outlined text-[16px] text-emerald-600 shrink-0">group</span>
-              <span className="truncate">Tim: {sessionData.primaryCounter.split('.')[0]} (SO) &amp; {companionName} (WH)</span>
+              <span className="truncate">Tim: {(sessionData.primaryCounter || 'putri').split('.')[0]} (SO) &amp; {companionName} (WH)</span>
             </div>
             <button type="button" className="min-h-11 shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-md bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 transition-colors">
               <span className="material-symbols-outlined text-[15px]">swap_horiz</span>
-              <span className="font-label-sm text-label-sm uppercase font-semibold">List to Floor (Guided Rack)</span>
+              <span className="font-label-sm text-label-sm uppercase font-semibold">List to Floor (Guided Rak)</span>
             </button>
           </div>
         </div>
@@ -321,8 +328,8 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       <main className="flex-1 flex flex-col relative w-full px-margin pt-36 pb-32 bg-slate-50 min-h-screen max-w-md mx-auto">
         <div className="flex flex-col w-full pb-12 space-y-4">
 
-          {/* Admin Session Banner / Lock Simulation Toggle */}
-          <div className="bg-white p-space-md rounded-xl flex items-center justify-between shadow-sm border border-slate-200">
+          {/* Admin Session Banner */}
+          <div className="bg-white p-space-md rounded-xl flex items-center justify-between shadow-xs border border-slate-200">
             <div className="flex items-center gap-space-sm min-w-0">
               <span className={`w-2.5 h-2.5 rounded-full ${isSessionLocked ? 'bg-red-600' : 'bg-emerald-500 animate-pulse'} shrink-0`}></span>
               <div className="min-w-0">
@@ -351,102 +358,17 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             </button>
           </div>
 
-          {/* Operational Mode Selector (Tabs) */}
-          <div className="bg-slate-200/80 p-1 rounded-xl grid grid-cols-2 gap-1 border border-slate-300/70 shadow-inner">
-            <button
-              type="button"
-              className="min-h-11 py-2 px-space-sm rounded-lg bg-blue-600 text-white font-label-md text-label-md uppercase tracking-wider flex items-center justify-center gap-1.5 shadow-sm transition-all font-bold cursor-pointer"
-            >
-              <span className="material-symbols-outlined text-[18px]">format_list_bulleted</span>
-              <span>List to Floor</span>
-            </button>
-            <button
-              type="button"
-              className="min-h-11 py-2 px-space-sm rounded-lg text-slate-600 hover:text-slate-900 hover:bg-white/80 font-label-md text-label-md uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all font-medium cursor-pointer"
-            >
-              <span className="material-symbols-outlined text-[18px]">radar</span>
-              <span>Floor to List</span>
-            </button>
-          </div>
-
-          {/* Team Identification Module */}
-          <div className="bg-white rounded-xl p-space-md shadow-sm border border-slate-200 space-y-space-md">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-space-xs">
-                <span className="material-symbols-outlined text-blue-600 text-[20px]">badge</span>
-                <h2 className="font-headline-sm text-headline-sm text-slate-900">Setup Tim Counter</h2>
-              </div>
-              <span className="font-label-sm text-[11px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 uppercase font-semibold">
-                Siap Hitung
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 gap-space-sm">
-              {/* Primary Counter Read-only */}
-              <div className="bg-slate-50 border border-slate-200 p-space-sm rounded-lg flex items-center justify-between">
-                <div className="flex items-center gap-space-sm min-w-0">
-                  <div className="w-9 h-9 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center shrink-0">
-                    <span className="material-symbols-outlined text-[20px]">person_check</span>
-                  </div>
-                  <div className="min-w-0">
-                    <p className="font-label-sm text-label-sm text-slate-500 uppercase font-medium">Counter Utama (SO)</p>
-                    <p className="font-body-lg text-body-lg text-slate-900 font-semibold truncate">
-                      {sessionData.primaryCounter} (Staff SO)
-                    </p>
-                  </div>
-                </div>
-                <span className="material-symbols-outlined text-emerald-600 text-[20px] shrink-0" title="Terverifikasi SSO">
-                  verified
-                </span>
-              </div>
-
-              {/* Secondary Counter Editable */}
-              <div className="bg-slate-50 border border-slate-200 p-space-sm rounded-lg space-y-space-xs">
-                <label className="font-label-sm text-label-sm text-slate-600 flex items-center justify-between font-medium" htmlFor="companionInput">
-                  <span>Counter Pendamping (WH)</span>
-                  <span className="text-amber-700 font-bold flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
-                    Tersambung
-                  </span>
-                </label>
-                <div className="flex items-center gap-space-sm">
-                  <div className="relative flex-1">
-                    <input
-                      id="companionInput"
-                      type="text"
-                      disabled={isSessionLocked}
-                      value={companionName}
-                      onChange={(e) => setCompanionName(e.target.value)}
-                      placeholder="Contoh: Budi Prasetyo"
-                      className="w-full h-11 border border-slate-300 px-space-sm rounded-lg font-body-md text-body-md focus:outline-none focus:ring-2 focus:ring-blue-600 shadow-sm disabled:bg-slate-100"
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    disabled={isSessionLocked}
-                    onClick={() => setCompanionName(companionName === 'Budi Prasetyo' ? 'Ahmad Fauzi' : 'Budi Prasetyo')}
-                    className="min-h-11 px-space-sm bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 rounded-lg font-label-sm text-label-sm uppercase flex items-center gap-1 shrink-0 font-semibold shadow-sm cursor-pointer disabled:opacity-50"
-                  >
-                    <span className="material-symbols-outlined text-[16px]">sync_alt</span>
-                    <span>Switch</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-
           {/* SKU Carousel Buttons */}
-          <div className="flex space-x-2 overflow-x-auto pb-1">
+          <div className="flex space-x-2 overflow-x-auto pb-1 scrollbar-none">
             {skuList.map((item, idx) => (
               <button
                 key={item.id}
                 type="button"
                 onClick={() => setActiveSkuIndex(idx)}
-                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 cursor-pointer ${
-                  activeSkuIndex === idx
-                    ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30'
-                    : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
-                }`}
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 cursor-pointer ${activeSkuIndex === idx
+                  ? 'bg-blue-600 text-white shadow-xs shadow-blue-600/30'
+                  : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
+                  }`}
               >
                 <span>{item.sku}</span>
                 {(item.qtyGood > 0 || item.qtyBad > 0) && (
@@ -456,9 +378,9 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             ))}
           </div>
 
-          {/* Primary Active Count Card (Guided Rack Mode) */}
+          {/* Primary Active Count Card */}
           {currentSku && (
-            <div className={`bg-white rounded-xl p-space-md shadow-sm border border-slate-200 space-y-space-md relative overflow-hidden transition-opacity ${isSessionLocked ? 'opacity-75' : ''}`}>
+            <div className={`bg-white rounded-xl p-space-md shadow-xs border border-slate-200 space-y-space-md relative overflow-hidden transition-opacity ${isSessionLocked ? 'opacity-75' : ''}`}>
               <div className="absolute top-0 left-0 right-0 h-1.5 bg-blue-600"></div>
 
               {/* Bin Target Chip */}
@@ -511,6 +433,50 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                 )}
               </div>
 
+              {/* EXPIRED DATE SECTION (SOLUSI BENTROKAN CSS CLASS BORDER) */}
+              <div className="bg-blue-50/60 border border-blue-200 p-space-sm rounded-xl space-y-2">
+                <div className="flex justify-between items-center">
+                  <span className="font-label-sm text-label-sm text-blue-900 font-bold flex items-center gap-1">
+                    <span className="material-symbols-outlined text-[16px] text-blue-700">event</span>
+                    Tanggal Kadaluwarsa (Expired Date)
+                  </span>
+                  <button
+                    type="button"
+                    disabled={isSessionLocked}
+                    onClick={handleSetSameExpAsSystem}
+                    className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-bold shadow-xs transition-colors cursor-pointer active:scale-95 disabled:opacity-50"
+                  >
+                    Sama dgn System
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div>
+                    <label className="text-[10px] text-slate-500 font-bold block uppercase mb-0.5">ED System</label>
+                    <input
+                      type="text"
+                      readOnly
+                      value={currentSku.expDateSystem || '-'}
+                      className="w-full p-2 bg-white/80 border border-slate-200 rounded-lg text-slate-600 font-mono text-xs font-bold outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-blue-700 font-bold block uppercase mb-0.5">ED Actual (Fisik)</label>
+                    <input
+                      type="date"
+                      disabled={isSessionLocked}
+                      value={currentSku.expDateActual || ''}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setSkuList((prev) =>
+                          prev.map((item, idx) => (idx === activeSkuIndex ? { ...item, expDateActual: val } : item))
+                        );
+                      }}
+                      className="w-full p-1.5 bg-white border-2 border-blue-400 focus:ring-2 focus:ring-blue-600/30 rounded-lg text-slate-900 font-mono text-xs font-bold outline-none shadow-xs"
+                    />
+                  </div>
+                </div>
+              </div>
+
               {/* QTY GOOD SECTION */}
               <div className="bg-slate-50 border border-slate-200 p-space-md rounded-xl space-y-space-sm">
                 <div className="flex items-center justify-between">
@@ -529,11 +495,11 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                     type="button"
                     disabled={isSessionLocked}
                     onClick={() => adjustQty('good', -1)}
-                    className="w-14 h-14 bg-white border border-slate-300 hover:bg-slate-100 active:scale-95 text-slate-800 rounded-xl flex items-center justify-center font-headline-md text-headline-md shrink-0 shadow-sm cursor-pointer disabled:opacity-50"
+                    className="w-14 h-14 bg-white border border-slate-300 hover:bg-slate-100 active:scale-95 text-slate-800 rounded-xl flex items-center justify-center font-headline-md text-headline-md shrink-0 shadow-xs cursor-pointer disabled:opacity-50"
                   >
                     <span className="material-symbols-outlined text-[28px]">remove</span>
                   </button>
-                  <div className="flex-1 h-14 bg-white border-2 border-blue-500 rounded-xl flex items-center justify-center px-space-sm shadow-sm">
+                  <div className="flex-1 h-14 bg-white border-2 border-blue-500 rounded-xl flex items-center justify-center px-space-sm shadow-xs">
                     <input
                       type="number"
                       min="0"
@@ -552,7 +518,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                     type="button"
                     disabled={isSessionLocked}
                     onClick={() => adjustQty('good', 1)}
-                    className="w-14 h-14 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white rounded-xl flex items-center justify-center font-headline-md text-headline-md shrink-0 shadow-sm cursor-pointer disabled:opacity-50"
+                    className="w-14 h-14 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white rounded-xl flex items-center justify-center font-headline-md text-headline-md shrink-0 shadow-xs cursor-pointer disabled:opacity-50"
                   >
                     <span className="material-symbols-outlined text-[28px]">add</span>
                   </button>
@@ -560,10 +526,10 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
 
                 {/* Rapid Increments Buttons */}
                 <div className="grid grid-cols-4 gap-space-xs pt-1">
-                  <button type="button" disabled={isSessionLocked} onClick={() => adjustQty('good', 1)} className="min-h-11 bg-white border border-slate-200 hover:bg-slate-100 text-slate-800 rounded-lg font-label-md text-label-md font-semibold active:scale-95 shadow-sm cursor-pointer disabled:opacity-50">+1</button>
-                  <button type="button" disabled={isSessionLocked} onClick={() => adjustQty('good', 5)} className="min-h-11 bg-white border border-slate-200 hover:bg-slate-100 text-slate-800 rounded-lg font-label-md text-label-md font-semibold active:scale-95 shadow-sm cursor-pointer disabled:opacity-50">+5</button>
-                  <button type="button" disabled={isSessionLocked} onClick={() => adjustQty('good', 10)} className="min-h-11 bg-white border border-slate-200 hover:bg-slate-100 text-slate-800 rounded-lg font-label-md text-label-md font-semibold active:scale-95 shadow-sm cursor-pointer disabled:opacity-50">+10</button>
-                  <button type="button" disabled={isSessionLocked} onClick={() => setSkuList(prev => prev.map((item, idx) => idx === activeSkuIndex ? { ...item, qtyGood: 0 } : item))} className="min-h-11 bg-rose-50 border border-rose-200 hover:bg-rose-100 text-rose-700 rounded-lg font-label-md text-label-md font-bold active:scale-95 shadow-sm cursor-pointer disabled:opacity-50">Rst</button>
+                  <button type="button" disabled={isSessionLocked} onClick={() => adjustQty('good', 1)} className="min-h-11 bg-white border border-slate-200 hover:bg-slate-100 text-slate-800 rounded-lg font-label-md text-label-md font-semibold active:scale-95 shadow-xs cursor-pointer disabled:opacity-50">+1</button>
+                  <button type="button" disabled={isSessionLocked} onClick={() => adjustQty('good', 5)} className="min-h-11 bg-white border border-slate-200 hover:bg-slate-100 text-slate-800 rounded-lg font-label-md text-label-md font-semibold active:scale-95 shadow-xs cursor-pointer disabled:opacity-50">+5</button>
+                  <button type="button" disabled={isSessionLocked} onClick={() => adjustQty('good', 10)} className="min-h-11 bg-white border border-slate-200 hover:bg-slate-100 text-slate-800 rounded-lg font-label-md text-label-md font-semibold active:scale-95 shadow-xs cursor-pointer disabled:opacity-50">+10</button>
+                  <button type="button" disabled={isSessionLocked} onClick={() => setSkuList(prev => prev.map((item, idx) => idx === activeSkuIndex ? { ...item, qtyGood: 0 } : item))} className="min-h-11 bg-rose-50 border border-rose-200 hover:bg-rose-100 text-rose-700 rounded-lg font-label-md text-label-md font-bold active:scale-95 shadow-xs cursor-pointer disabled:opacity-50">Rst</button>
                 </div>
               </div>
 
@@ -581,17 +547,16 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                     type="button"
                     disabled={isSessionLocked}
                     onClick={() => setBadStockEnabled(!badStockEnabled)}
-                    className={`min-h-11 min-w-14 px-2 py-1 rounded-full font-label-sm text-label-sm font-bold flex items-center justify-center transition-all cursor-pointer ${
-                      badStockEnabled
-                        ? 'bg-amber-500 text-slate-950 shadow-sm'
-                        : 'bg-slate-200 text-slate-600'
-                    }`}
+                    className={`min-h-11 min-w-14 px-2 py-1 rounded-full font-label-sm text-label-sm font-bold flex items-center justify-center transition-all cursor-pointer ${badStockEnabled
+                      ? 'bg-amber-500 text-slate-950 shadow-xs'
+                      : 'bg-slate-200 text-slate-600'
+                      }`}
                   >
                     {badStockEnabled ? 'ON' : 'OFF'}
                   </button>
                 </div>
 
-                {/* BAD STOCK DRAWER / SECTION */}
+                {/* BAD STOCK DRAWER */}
                 {badStockEnabled && (
                   <div className="pt-space-sm space-y-space-md border-t border-amber-200/80">
                     <div className="space-y-space-xs">
@@ -603,11 +568,11 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                           type="button"
                           disabled={isSessionLocked}
                           onClick={() => adjustQty('bad', -1)}
-                          className="w-12 h-12 bg-white border border-amber-300 active:scale-95 text-slate-800 rounded-xl flex items-center justify-center shrink-0 shadow-sm cursor-pointer disabled:opacity-50"
+                          className="w-12 h-12 bg-white border border-amber-300 active:scale-95 text-slate-800 rounded-xl flex items-center justify-center shrink-0 shadow-xs cursor-pointer disabled:opacity-50"
                         >
                           <span className="material-symbols-outlined text-[24px]">remove</span>
                         </button>
-                        <div className="flex-1 h-12 bg-white border border-amber-400 rounded-xl flex items-center justify-center px-space-sm shadow-sm">
+                        <div className="flex-1 h-12 bg-white border border-amber-400 rounded-xl flex items-center justify-center px-space-sm shadow-xs">
                           <input
                             type="number"
                             min="0"
@@ -626,37 +591,16 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                           type="button"
                           disabled={isSessionLocked}
                           onClick={() => adjustQty('bad', 1)}
-                          className="w-12 h-12 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold active:scale-95 rounded-xl flex items-center justify-center shrink-0 shadow-sm cursor-pointer disabled:opacity-50"
+                          className="w-12 h-12 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold active:scale-95 rounded-xl flex items-center justify-center shrink-0 shadow-xs cursor-pointer disabled:opacity-50"
                         >
                           <span className="material-symbols-outlined text-[24px]">add</span>
                         </button>
                       </div>
 
                       <div className="grid grid-cols-3 gap-space-xs pt-0.5">
-                        <button type="button" disabled={isSessionLocked} onClick={() => adjustQty('bad', 1)} className="min-h-11 bg-white border border-amber-300 text-amber-900 rounded-lg font-label-md text-label-md font-semibold hover:bg-amber-100 shadow-sm cursor-pointer disabled:opacity-50">+1 Rusak</button>
-                        <button type="button" disabled={isSessionLocked} onClick={() => adjustQty('bad', 5)} className="min-h-11 bg-white border border-amber-300 text-amber-900 rounded-lg font-label-md text-label-md font-semibold hover:bg-amber-100 shadow-sm cursor-pointer disabled:opacity-50">+5 Rusak</button>
-                        <button type="button" disabled={isSessionLocked} onClick={() => adjustQty('bad', 10)} className="min-h-11 bg-white border border-amber-300 text-amber-900 rounded-lg font-label-md text-label-md font-semibold hover:bg-amber-100 shadow-sm cursor-pointer disabled:opacity-50">+10 Rusak</button>
-                      </div>
-                    </div>
-
-                    <div className="space-y-space-xs">
-                      <label className="font-label-sm text-label-sm text-slate-700 uppercase font-semibold" htmlFor="badExpiryInput">
-                        Tanggal Kadaluwarsa (Exp Date):
-                      </label>
-                      <div className="relative">
-                        <input
-                          id="badExpiryInput"
-                          type="date"
-                          disabled={isSessionLocked}
-                          value={currentSku.expDate || '2026-08-14'}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setSkuList((prev) =>
-                              prev.map((item, idx) => (idx === activeSkuIndex ? { ...item, expDate: val } : item))
-                            );
-                          }}
-                          className="w-full h-11 border border-slate-300 px-space-sm rounded-lg font-label-md text-label-md focus:outline-none focus:ring-2 focus:ring-amber-500 shadow-sm disabled:bg-slate-100"
-                        />
+                        <button type="button" disabled={isSessionLocked} onClick={() => adjustQty('bad', 1)} className="min-h-11 bg-white border border-amber-300 text-amber-900 rounded-lg font-label-md text-label-md font-semibold hover:bg-amber-100 shadow-xs cursor-pointer disabled:opacity-50">+1 Rusak</button>
+                        <button type="button" disabled={isSessionLocked} onClick={() => adjustQty('bad', 5)} className="min-h-11 bg-white border border-amber-300 text-amber-900 rounded-lg font-label-md text-label-md font-semibold hover:bg-amber-100 shadow-xs cursor-pointer disabled:opacity-50">+5 Rusak</button>
+                        <button type="button" disabled={isSessionLocked} onClick={() => adjustQty('bad', 10)} className="min-h-11 bg-white border border-amber-300 text-amber-900 rounded-lg font-label-md text-label-md font-semibold hover:bg-amber-100 shadow-xs cursor-pointer disabled:opacity-50">+10 Rusak</button>
                       </div>
                     </div>
 
@@ -668,15 +612,15 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                         id="badRemarksInput"
                         rows={2}
                         disabled={isSessionLocked}
-                        value={currentSku.badRemarks || 'Dus penyok & kemasan bocor terkena benturan pallet saat perpindahan rak.'}
+                        value={currentSku.badRemarks || ''}
                         onChange={(e) => {
                           const val = e.target.value;
                           setSkuList((prev) =>
                             prev.map((item, idx) => (idx === activeSkuIndex ? { ...item, badRemarks: val } : item))
                           );
                         }}
-                        placeholder="Contoh: Dus penyok / Kemasan sobek kena cutter"
-                        className="w-full border border-slate-300 p-space-sm rounded-lg font-body-sm text-body-sm focus:outline-none focus:ring-2 focus:ring-amber-500 resize-none shadow-sm disabled:bg-slate-100"
+                        placeholder="Contoh: Dus penyok / Kemasan sobek"
+                        className="w-full border border-slate-300 p-space-sm rounded-lg font-body-sm text-body-sm focus:outline-none focus:ring-2 focus:ring-amber-500 resize-none shadow-xs disabled:bg-slate-100"
                       />
                     </div>
                   </div>
@@ -686,7 +630,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
           )}
 
           {/* Found Item / Unmapped SKU Drawer Section */}
-          <div className="bg-white rounded-xl p-space-md shadow-sm border border-slate-200 space-y-space-md">
+          <div className="bg-white rounded-xl p-space-md shadow-xs border border-slate-200 space-y-space-md">
             <div
               className="flex items-center justify-between cursor-pointer"
               onClick={() => setUnmappedDrawerOpen(!unmappedDrawerOpen)}
@@ -721,14 +665,14 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                         value={unmappedBarcode}
                         onChange={(e) => setUnmappedBarcode(e.target.value)}
                         placeholder="Scan atau ketik barcode fisik..."
-                        className="w-full h-12 border border-slate-300 px-space-sm rounded-lg font-label-md text-label-md focus:outline-none focus:ring-2 focus:ring-blue-600 shadow-sm disabled:bg-slate-100"
+                        className="w-full h-12 border border-slate-300 px-space-sm rounded-lg font-label-md text-label-md focus:outline-none focus:ring-2 focus:ring-blue-600 shadow-xs disabled:bg-slate-100"
                       />
                     </div>
                     <button
                       type="button"
                       disabled={isSessionLocked}
                       onClick={triggerNativeBarcodeScan}
-                      className="min-h-11 px-space-md bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-label-sm text-label-sm font-semibold flex items-center gap-1 active:scale-95 shadow-sm cursor-pointer disabled:opacity-50"
+                      className="min-h-11 px-space-md bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-label-sm text-label-sm font-semibold flex items-center gap-1 active:scale-95 shadow-xs cursor-pointer disabled:opacity-50"
                       title="Buka Kamera Barcode Native HP"
                     >
                       <span className="material-symbols-outlined text-[20px]">photo_camera</span>
@@ -757,7 +701,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                       disabled={isSessionLocked}
                       value={unmappedExpDate}
                       onChange={(e) => setUnmappedExpDate(e.target.value)}
-                      className="w-full h-11 border border-slate-300 px-2 rounded-lg font-label-md text-label-md focus:outline-none focus:ring-2 focus:ring-blue-600 shadow-sm disabled:bg-slate-100"
+                      className="w-full h-11 border border-slate-300 px-2 rounded-lg font-label-md text-label-md focus:outline-none focus:ring-2 focus:ring-blue-600 shadow-xs disabled:bg-slate-100"
                     />
                   </div>
 
@@ -772,7 +716,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                       value={unmappedBatchNumber}
                       onChange={(e) => setUnmappedBatchNumber(e.target.value)}
                       placeholder="Misal: BATCH-2026-X9"
-                      className="w-full h-11 border border-slate-300 px-3 rounded-lg font-label-md text-label-md focus:outline-none focus:ring-2 focus:ring-blue-600 shadow-sm disabled:bg-slate-100"
+                      className="w-full h-11 border border-slate-300 px-3 rounded-lg font-label-md text-label-md focus:outline-none focus:ring-2 focus:ring-blue-600 shadow-xs disabled:bg-slate-100"
                     />
                   </div>
                 </div>
@@ -785,9 +729,8 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                       type="button"
                       disabled={isSessionLocked}
                       onClick={() => setUnmappedUnit('PCS')}
-                      className={`min-h-11 py-2 rounded-lg font-label-md text-label-md font-bold uppercase transition-all shadow-sm cursor-pointer ${
-                        unmappedUnit === 'PCS' ? 'bg-blue-600 text-white' : 'bg-slate-100 border border-slate-200 text-slate-700 hover:bg-slate-200'
-                      }`}
+                      className={`min-h-11 py-2 rounded-lg font-label-md text-label-md font-bold uppercase transition-all shadow-xs cursor-pointer ${unmappedUnit === 'PCS' ? 'bg-blue-600 text-white' : 'bg-slate-100 border border-slate-200 text-slate-700 hover:bg-slate-200'
+                        }`}
                     >
                       PCS
                     </button>
@@ -795,9 +738,8 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                       type="button"
                       disabled={isSessionLocked}
                       onClick={() => setUnmappedUnit('CARTON')}
-                      className={`min-h-11 py-2 rounded-lg font-label-md text-label-md uppercase transition-all shadow-sm cursor-pointer ${
-                        unmappedUnit === 'CARTON' ? 'bg-blue-600 text-white font-bold' : 'bg-slate-100 border border-slate-200 text-slate-700 hover:bg-slate-200'
-                      }`}
+                      className={`min-h-11 py-2 rounded-lg font-label-md text-label-md uppercase transition-all shadow-xs cursor-pointer ${unmappedUnit === 'CARTON' ? 'bg-blue-600 text-white font-bold' : 'bg-slate-100 border border-slate-200 text-slate-700 hover:bg-slate-200'
+                        }`}
                     >
                       CARTON
                     </button>
@@ -813,7 +755,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                     </span>
                   </div>
                   <div className="flex gap-space-sm items-center">
-                    <div className="relative w-24 h-24 rounded-lg overflow-hidden bg-white border border-slate-200 shrink-0 shadow-sm flex items-center justify-center">
+                    <div className="relative w-24 h-24 rounded-lg overflow-hidden bg-white border border-slate-200 shrink-0 shadow-xs flex items-center justify-center">
                       {unmappedPhotoUrl ? (
                         <img src={unmappedPhotoUrl} alt="Foto Temuan" className="w-full h-full object-cover" />
                       ) : (
@@ -827,7 +769,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                       type="button"
                       disabled={isSessionLocked}
                       onClick={triggerNativeCamera}
-                      className="min-h-13 flex-1 bg-white border border-slate-300 hover:bg-slate-100 text-slate-800 rounded-lg p-space-sm flex flex-col items-center justify-center gap-1 shadow-sm cursor-pointer disabled:opacity-50"
+                      className="min-h-13 flex-1 bg-white border border-slate-300 hover:bg-slate-100 text-slate-800 rounded-lg p-space-sm flex flex-col items-center justify-center gap-1 shadow-xs cursor-pointer disabled:opacity-50"
                       title="Buka Kamera Belakang HP"
                     >
                       <span className="material-symbols-outlined text-blue-600 text-[24px]">add_a_photo</span>
@@ -843,7 +785,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                       value={unmappedDesc}
                       onChange={(e) => setUnmappedDesc(e.target.value)}
                       placeholder="Tuliskan nama barang fisik, gramatur, atau catatan lokasi..."
-                      className="w-full border border-slate-300 p-space-sm rounded-lg font-body-sm text-body-sm focus:outline-none focus:ring-2 focus:ring-blue-600 resize-none shadow-sm disabled:bg-slate-100"
+                      className="w-full border border-slate-300 p-space-sm rounded-lg font-body-sm text-body-sm focus:outline-none focus:ring-2 focus:ring-blue-600 resize-none shadow-xs disabled:bg-slate-100"
                     />
                   </div>
                 </div>
@@ -852,7 +794,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                   type="button"
                   disabled={isSessionLocked}
                   onClick={handleAddUnmapped}
-                  className="w-full min-h-11 py-2 px-space-md bg-blue-600 hover:bg-blue-700 active:scale-[0.98] text-white font-label-md text-label-md font-bold uppercase rounded-lg flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer disabled:opacity-50"
+                  className="w-full min-h-11 py-2 px-space-md bg-blue-600 hover:bg-blue-700 active:scale-[0.98] text-white font-label-md text-label-md font-bold uppercase rounded-lg flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer disabled:opacity-50"
                 >
                   <span className="material-symbols-outlined text-[20px]">add_circle</span>
                   <span>Tambahkan ke Daftar Temuan</span>
@@ -862,7 +804,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
           </div>
 
           {/* List of Found Items in this rack */}
-          <div className="bg-white rounded-xl p-space-md shadow-sm border border-slate-200 space-y-space-sm">
+          <div className="bg-white rounded-xl p-space-md shadow-xs border border-slate-200 space-y-space-sm">
             <div className="flex items-center justify-between border-b border-slate-200 pb-2">
               <div className="flex items-center gap-1.5">
                 <span className="material-symbols-outlined text-amber-600 text-[20px]">inventory_2</span>
@@ -921,7 +863,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
               type="button"
               disabled={isSessionLocked}
               onClick={() => setUnmappedDrawerOpen(true)}
-              className="w-full min-h-13 px-space-md py-3 rounded-xl bg-amber-400 hover:bg-amber-500 text-slate-950 font-headline-sm text-headline-sm active:scale-[0.98] transition-transform flex items-center justify-center gap-2 shadow-sm font-bold border border-amber-300 cursor-pointer disabled:opacity-50"
+              className="w-full min-h-13 px-space-md py-3 rounded-xl bg-amber-400 hover:bg-amber-500 text-slate-950 font-headline-sm text-headline-sm active:scale-[0.98] transition-transform flex items-center justify-center gap-2 shadow-xs font-bold border border-amber-300 cursor-pointer disabled:opacity-50"
             >
               <span className="material-symbols-outlined text-[24px]">loupe</span>
               <span>+ Temukan SKU Lain di Lokasi Ini</span>
@@ -939,7 +881,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
 
             <div className="flex items-center justify-center gap-2 text-slate-600 py-2">
               <span className="material-symbols-outlined text-[18px] text-emerald-600">check_circle</span>
-              <span className="font-label-sm text-label-sm font-medium">Progress Rak Z02: 12/24 SKU Telah Dihitung (50%)</span>
+              <span className="font-label-sm text-label-sm font-medium">Progress Rak {rack.rackNumber}: {activeSkuIndex + 1}/{skuList.length} SKU ({(Math.round(((activeSkuIndex + 1) / skuList.length) * 100))})%</span>
             </div>
           </div>
 
