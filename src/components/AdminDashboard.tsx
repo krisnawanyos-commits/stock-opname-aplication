@@ -10,7 +10,7 @@ import {
     UserPlus, Filter, TrendingDown, Printer, SlidersHorizontal,
     CheckCircle2, XCircle, Search, Building2, DollarSign,
     Download, Scale, PlayCircle, Archive, ArrowLeft, AlertTriangle,
-    LogOut, GripHorizontal, Contact, Eye, EyeOff, UserCheck, Clock
+    LogOut, GripHorizontal, Contact, Eye, EyeOff, UserCheck, Clock, Store
 } from 'lucide-react';
 import type { UserRole } from '../types';
 
@@ -100,7 +100,7 @@ const SearchableSelect = ({ options, value, onChange, placeholder, className = "
 
     return (
         <div className={`relative ${className}`}>
-            <div className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-xl outline-none font-bold cursor-pointer flex justify-between items-center hover:bg-slate-50 transition-colors shadow-xs" onClick={() => setIsOpen(!isOpen)}>
+            <div className="w-full px-3 py-2.5 text-xs bg-white border border-slate-200 rounded-xl outline-none font-bold cursor-pointer flex justify-between items-center hover:bg-slate-50 transition-colors shadow-xs" onClick={() => setIsOpen(!isOpen)}>
                 <span className={value ? "text-slate-800 truncate" : "text-slate-400 truncate"}>{selectedLabel}</span>
                 <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0 ml-2" />
             </div>
@@ -126,7 +126,6 @@ const SearchableSelect = ({ options, value, onChange, placeholder, className = "
 
 export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner', currentUserEmail = 'yos.krisnawan@anymindgroup.com' }: AdminDashboardProps) {
 
-    // WHITELIST OWNER UNTUK HAK AKSES SUPER ADMIN
     const OWNER_WHITELIST = ['yos.krisnawan@anymindgroup.com', 'krisnawanyos@gmail.com'];
     const isWhitelistedOwner = currentUserRole === 'owner' && OWNER_WHITELIST.includes(currentUserEmail.toLowerCase().trim());
     const effectiveRole: UserRole = isWhitelistedOwner ? 'owner' : (currentUserRole === 'owner' ? 'spv' : currentUserRole);
@@ -157,10 +156,8 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
         setOrderedTabs(newTabs); setDraggedTabId(null);
     };
 
-    const warehouseList: LocationOption[] = [
-        { id: 'WH-01', name: 'Gudang Utama (WMS)', type: 'NON_CONSIGNMENT' },
-        { id: 'WH-02', name: 'Gudang Transit (WMS)', type: 'NON_CONSIGNMENT' }
-    ];
+    // FORM TAMBAH GUDANG CLOUD
+    const [newWhName, setNewWhName] = useState<string>('');
 
     const [wizLocationId, setWizLocationId] = useState<string>('WH-01');
     const [wizOpnameDate, setWizOpnameDate] = useState<string>('2026-09-22');
@@ -183,13 +180,29 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
     const [globalAccounts, setGlobalAccounts] = useState<GlobalAccount[]>([]);
     const [projectHistory, setProjectHistory] = useState<ProjectSession[]>([]);
     const [allProjectTeams, setAllProjectTeams] = useState<ProjectTeamMember[]>([]);
+    const [warehouseList, setWarehouseList] = useState<LocationOption[]>([]);
     const [activeProject, setActiveProject] = useState<ProjectSession | null>(null);
 
     useEffect(() => {
         const unsub1 = onSnapshot(collection(db, "global_accounts"), (snap) => setGlobalAccounts(snap.docs.map(d => ({ id: d.id, ...d.data() } as GlobalAccount))));
         const unsub2 = onSnapshot(collection(db, "projects"), (snap) => setProjectHistory(snap.docs.map(d => ({ id: d.id, ...d.data() } as ProjectSession))));
         const unsub3 = onSnapshot(collection(db, "project_teams"), (snap) => setAllProjectTeams(snap.docs.map(d => ({ id: d.id, ...d.data() } as ProjectTeamMember))));
-        return () => { unsub1(); unsub2(); unsub3(); };
+
+        // SYNC REAL-TIME FIRESTORE LOKASI GUDANG
+        const unsub4 = onSnapshot(collection(db, "warehouses"), (snap) => {
+            const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as LocationOption));
+            if (list.length === 0) {
+                // Default jika database lokasi masih kosong
+                setWarehouseList([
+                    { id: 'WH-01', name: 'Gudang Utama Waringin (WMS)', type: 'NON_CONSIGNMENT' },
+                    { id: 'WH-02', name: 'Gudang Transit Jakarta (WMS)', type: 'NON_CONSIGNMENT' }
+                ]);
+            } else {
+                setWarehouseList(list);
+            }
+        });
+
+        return () => { unsub1(); unsub2(); unsub3(); unsub4(); };
     }, []);
 
     // KTP GLOBAL MANAGEMENT
@@ -245,6 +258,26 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
         const link = document.createElement('a'); link.href = URL.createObjectURL(blob);
         link.setAttribute('download', 'Template_Import_KTP_Global.csv'); link.click();
         triggerNotification('Template KTP (.csv) diunduh!');
+    };
+
+    // LOKASI GUDANG FIRESTORE HANDLERS
+    const handleAddWarehouseCloud = async () => {
+        if (newWhName.trim()) {
+            const id = `WH-${(warehouseList.length + 1).toString().padStart(2, '0')}`;
+            await setDoc(doc(db, "warehouses", id), {
+                name: newWhName.trim(),
+                type: 'NON_CONSIGNMENT'
+            });
+            setNewWhName('');
+            triggerNotification(`Gudang Baru "${newWhName.trim()}" tersimpan di Cloud!`);
+        }
+    };
+
+    const handleDeleteWarehouseCloud = async (whId: string, whName: string) => {
+        if (window.confirm(`Hapus gudang "${whName}" dari Cloud Firestore?`)) {
+            await deleteDoc(doc(db, "warehouses", whId));
+            triggerNotification(`Gudang "${whName}" dihapus dari Cloud.`);
+        }
     };
 
     // PROJECT CONTROL
@@ -393,7 +426,6 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
         return { name, total: group.total, counted: group.counted, percentage: Math.round((group.counted / group.total) * 100) };
     });
 
-    // REAPING COUNTER REAL-TIME PROGRESS
     const counterGroups = filteredMasterDataList.reduce((acc: any, item) => {
         const cName = item.counter || 'Unassigned'; if (!acc[cName]) acc[cName] = { total: 0, counted: 0, errorCount: 0 };
         acc[cName].total++;
@@ -473,29 +505,60 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                     )}
 
                     {landingTab === 'projects' && (
-                        <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl shadow-slate-200/40 space-y-5">
-                            <h3 className="text-base font-black text-slate-800 flex items-center space-x-2"><Database className="w-5 h-5 text-indigo-600" /><span>Live Firestore Projects</span></h3>
-                            <div className="overflow-x-auto border border-slate-200 rounded-2xl scrollbar-thin">
-                                <table className="w-full text-left text-sm min-w-full">
-                                    <thead className="bg-slate-50/80 font-bold text-slate-500 border-b border-slate-200">
-                                        <tr><th className="p-4">KODE PROJECT</th><th className="p-4">LOKASI WMS</th><th className="p-4">TANGGAL</th><th className="p-4 text-center">STATUS</th><th className="p-4 text-right">AKSI</th></tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-slate-100 font-medium">
-                                        {projectHistory.map((proj) => (
-                                            <tr key={proj.id} className="hover:bg-slate-50/80 transition-colors group">
-                                                <td className="p-4 font-bold font-mono text-indigo-600">{proj.sessionCode}</td>
-                                                <td className="p-4 font-bold text-slate-800">{proj.locationName}</td>
-                                                <td className="p-4 font-mono text-slate-500">{proj.opnameDate}</td>
-                                                <td className="p-4 text-center"><span className="px-3 py-1 rounded-lg bg-emerald-100/80 text-emerald-700 font-black text-[11px] uppercase tracking-wider">{proj.status}</span></td>
-                                                <td className="p-4 text-right space-x-2">
-                                                    <button onClick={() => handleOpenHistoricalProject(proj)} className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold inline-flex items-center space-x-1.5 shadow-md transition-transform active:scale-95"><PlayCircle className="w-4 h-4" /><span>Buka Dashboard</span></button>
-                                                    {effectiveRole === 'owner' && (<button onClick={() => setProjectToDelete(proj)} className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors"><Trash2 className="w-4 h-4" /></button>)}
-                                                </td>
-                                            </tr>
+                        <div className="space-y-6">
+                            {/* MASTER KELOLA LOKASI GUDANG FIRESTORE (HANYA OWNER) */}
+                            {effectiveRole === 'owner' && (
+                                <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl shadow-slate-200/40 space-y-4">
+                                    <div className="border-b border-slate-100 pb-3 flex justify-between items-center">
+                                        <h3 className="text-base font-black text-slate-900 flex items-center space-x-2">
+                                            <Building2 className="w-5 h-5 text-indigo-600" />
+                                            <span>Master Cloud Lokasi & Gudang WMS</span>
+                                        </h3>
+                                        <span className="text-xs font-bold text-indigo-600 bg-indigo-50 px-3 py-1 rounded-xl">Real-Time Sync</span>
+                                    </div>
+                                    <div className="flex gap-3">
+                                        <input type="text" placeholder="Nama Gudang Baru (misal: Gudang Surabaya, WH-03)" value={newWhName} onChange={(e) => setNewWhName(e.target.value)} className="flex-1 px-4 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/20" />
+                                        <button onClick={handleAddWarehouseCloud} className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-bold shadow-md transition-all">+ Tambah Gudang Cloud</button>
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                                        {warehouseList.map((wh) => (
+                                            <div key={wh.id} className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl flex justify-between items-center">
+                                                <div className="flex items-center space-x-2">
+                                                    <Store className="w-4 h-4 text-indigo-600" />
+                                                    <div><span className="font-mono text-xs font-black text-indigo-600 mr-2">{wh.id}</span><span className="font-bold text-sm text-slate-800">{wh.name}</span></div>
+                                                </div>
+                                                <button onClick={() => handleDeleteWarehouseCloud(wh.id, wh.name)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"><Trash2 className="w-4 h-4" /></button>
+                                            </div>
                                         ))}
-                                        {projectHistory.length === 0 && (<tr><td colSpan={5} className="p-8 text-center text-slate-400 font-medium">Belum ada project di Cloud Firestore.</td></tr>)}
-                                    </tbody>
-                                </table>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* TABEL LIVE FIRESTORE PROJECTS */}
+                            <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl shadow-slate-200/40 space-y-5">
+                                <h3 className="text-base font-black text-slate-800 flex items-center space-x-2"><Database className="w-5 h-5 text-indigo-600" /><span>Live Firestore Projects</span></h3>
+                                <div className="overflow-x-auto border border-slate-200 rounded-2xl scrollbar-thin">
+                                    <table className="w-full text-left text-sm min-w-full">
+                                        <thead className="bg-slate-50/80 font-bold text-slate-500 border-b border-slate-200">
+                                            <tr><th className="p-4">KODE PROJECT</th><th className="p-4">LOKASI WMS</th><th className="p-4">TANGGAL</th><th className="p-4 text-center">STATUS</th><th className="p-4 text-right">AKSI</th></tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-100 font-medium">
+                                            {projectHistory.map((proj) => (
+                                                <tr key={proj.id} className="hover:bg-slate-50/80 transition-colors group">
+                                                    <td className="p-4 font-bold font-mono text-indigo-600">{proj.sessionCode}</td>
+                                                    <td className="p-4 font-bold text-slate-800">{proj.locationName}</td>
+                                                    <td className="p-4 font-mono text-slate-500">{proj.opnameDate}</td>
+                                                    <td className="p-4 text-center"><span className="px-3 py-1 rounded-lg bg-emerald-100/80 text-emerald-700 font-black text-[11px] uppercase tracking-wider">{proj.status}</span></td>
+                                                    <td className="p-4 text-right space-x-2">
+                                                        <button onClick={() => handleOpenHistoricalProject(proj)} className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold inline-flex items-center space-x-1.5 shadow-md transition-transform active:scale-95"><PlayCircle className="w-4 h-4" /><span>Buka Dashboard</span></button>
+                                                        {effectiveRole === 'owner' && (<button onClick={() => setProjectToDelete(proj)} className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors"><Trash2 className="w-4 h-4" /></button>)}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                            {projectHistory.length === 0 && (<tr><td colSpan={5} className="p-8 text-center text-slate-400 font-medium">Belum ada project di Cloud Firestore.</td></tr>)}
+                                        </tbody>
+                                    </table>
+                                </div>
                             </div>
                         </div>
                     )}
@@ -560,7 +623,7 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                         <div className="space-y-2">
                             <label className="text-sm font-extrabold text-slate-800">1. Tipe Lokasi Opname:</label>
                             <select value={wizLocationId} onChange={(e) => setWizLocationId(e.target.value)} className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all">
-                                <optgroup label="Gudang WMS (WMS API)">{warehouseList.map(wh => (<option key={wh.id} value={wh.id}>{wh.name}</option>))}</optgroup>
+                                <optgroup label="Gudang WMS (Cloud Firestore)">{warehouseList.map(wh => (<option key={wh.id} value={wh.id}>{wh.name}</option>))}</optgroup>
                                 <optgroup label="Offline Store"><option value="CONSIGNMENT_GENERIC">[CONSIGNMENT STORE]</option></optgroup>
                             </select>
                         </div>
@@ -648,7 +711,7 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                                 </div>
                             </div>
 
-                            {/* DEDICATED REAL-TIME COUNTER PROGRESS SECTION */}
+                            {/* REAL-TIME COUNTER MONITORING */}
                             <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-xl shadow-slate-200/30 space-y-4">
                                 <div className="flex justify-between items-center border-b border-slate-100 pb-3">
                                     <h3 className="text-base font-black text-slate-900 flex items-center"><UserCheck className="w-5 h-5 mr-2 text-indigo-600" />Real-Time Monitoring Progress Per Counter PIC</h3>
@@ -682,9 +745,8 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                                 </div>
                             </div>
 
-                            {/* Detailed Analytics Rows */}
+                            {/* Analytics Rows */}
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                                {/* Level Progress */}
                                 <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-xl shadow-slate-200/30 space-y-5">
                                     <div className="flex justify-between items-center"><h3 className="text-base font-black text-slate-900">Progress per Level Rak</h3><button onClick={() => setShowLevelProgress(!showLevelProgress)} className="p-1.5 bg-slate-50 rounded-lg hover:bg-slate-100"><ChevronUp className={`w-4 h-4 text-slate-500 transition-transform ${showLevelProgress ? 'rotate-180' : ''}`} /></button></div>
                                     <div className={`space-y-4 transition-all ${showLevelProgress ? 'hidden' : 'block'}`}>
@@ -695,7 +757,6 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                                     </div>
                                 </div>
 
-                                {/* Brand Accuracy Search */}
                                 <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-xl shadow-slate-200/30 space-y-5">
                                     <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 border-b border-slate-100 pb-4">
                                         <h3 className="text-base font-black text-slate-900 flex items-center"><TrendingDown className="w-5 h-5 mr-2 text-indigo-500" />Akurasi Hitung per Brand</h3>
@@ -732,7 +793,6 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                                     <p className="text-sm text-slate-500">Edit, Assign PIC, dan lengkapi deskripsi barang.</p>
                                 </div>
 
-                                {/* PROTEKSI UPLOAD MASTER: HANYA OWNER YANG BISA LIHAT / UPLOAD[cite: 11] */}
                                 {effectiveRole === 'owner' ? (
                                     <div className="flex items-center space-x-3 w-full md:w-auto">
                                         <button onClick={handleDownloadTemplateXLSX} className="flex-1 md:flex-none px-4 py-2.5 bg-slate-50 text-slate-700 border border-slate-200 hover:bg-slate-100 rounded-xl text-sm font-bold flex items-center justify-center space-x-2 transition-colors">
@@ -745,12 +805,11 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                                     </div>
                                 ) : (
                                     <div className="px-4 py-2 bg-slate-100 text-slate-500 border border-slate-200 rounded-xl text-xs font-bold flex items-center">
-                                        🔒 Mode Supervisor (Read Only)[cite: 11]
+                                        🔒 Mode Supervisor (Read Only)
                                     </div>
                                 )}
                             </div>
 
-                            {/* TABEL DENGAN SCROLLER RAPI */}
                             <div className="overflow-x-auto border border-slate-200 rounded-2xl shadow-inner max-h-125 scrollbar-thin scrollbar-thumb-indigo-200">
                                 <table className="w-full text-left text-[11px] min-w-max border-collapse">
                                     <thead className="bg-slate-50/90 backdrop-blur-xs font-black text-slate-600 sticky top-0 z-20 shadow-xs border-b border-slate-200">
