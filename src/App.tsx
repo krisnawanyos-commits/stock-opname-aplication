@@ -26,9 +26,9 @@ export default function App() {
     return null;
   });
 
-  const [currentStep, setCurrentStep] = useState<1 | 2 | 3 | 4 | 'admin'>(() => {
+  const [currentStep, setCurrentStep] = useState<1 | 2 | 3 | 4 | 'admin' | 'admin_demo'>(() => {
     const savedStep = localStorage.getItem(STORAGE_KEYS.STEP);
-    if (savedStep === 'admin') return 'admin';
+    if (savedStep === 'admin' || savedStep === 'admin_demo') return savedStep;
     return savedStep ? (parseInt(savedStep, 10) as 1 | 2 | 3 | 4) : 1;
   });
 
@@ -44,7 +44,7 @@ export default function App() {
     return {
       sessionId: 'SO-2026-KOSAMBI',
       sessionName: 'Kosambi WH — SO Sesi Utama 2026',
-      primaryCounter: 'putri.so',
+      primaryCounter: 'bambang',
       partners: ['Budi Prasetyo'],
       mode: 'list-to-floor',
       role: 'counter',
@@ -85,7 +85,7 @@ export default function App() {
     setSessionData({
       sessionId: 'SO-2026-KOSAMBI',
       sessionName: 'Kosambi WH — SO Sesi Utama 2026',
-      primaryCounter: 'putri.so',
+      primaryCounter: 'bambang',
       partners: ['Budi Prasetyo'],
       mode: 'list-to-floor',
       role: 'counter',
@@ -93,6 +93,8 @@ export default function App() {
     setSelectedRack(null);
     setCurrentStep(1);
   };
+
+  const isDemoMode = currentStep === 'admin_demo';
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
@@ -120,7 +122,15 @@ export default function App() {
       {currentStep === 'admin' && (
         <AdminDashboard
           onBackToApp={handleLogout}
+          onSwitchToCounterView={() => {
+            setSessionData(prev => ({
+              ...prev,
+              primaryCounter: 'bambang' // Auto switch ke counter bambang untuk keperluan demo
+            }));
+            setCurrentStep('admin_demo');
+          }}
           currentUserRole={currentUser?.role || 'owner'}
+          currentUserEmail={currentUser?.username === 'owner' ? 'yos.krisnawan@anymindgroup.com' : ''}
         />
       )}
 
@@ -135,24 +145,56 @@ export default function App() {
         />
       )}
 
-      {currentStep === 3 && (
-        <Step3CountsheetList
-          sessionData={sessionData}
-          onLogout={handleLogout}
-          onSelectRack={(rack) => {
-            setSelectedRack(rack);
-            setCurrentStep(4);
-          }}
-        />
+      {(currentStep === 3 || currentStep === 'admin_demo') && (
+        <div className="relative">
+          {/* Banner Demo Mode */}
+          {isDemoMode && (
+            <div className="fixed top-0 left-0 right-0 z-50 bg-amber-500 text-slate-950 px-4 py-1.5 text-xs font-black flex justify-between items-center shadow-md">
+              <span>📱 DEMO MODE: HP Counter ({sessionData.primaryCounter})</span>
+              <button
+                onClick={() => setCurrentStep('admin')}
+                className="bg-slate-900 text-white px-3 py-1 rounded-lg text-[10px] font-bold hover:bg-slate-800 transition-colors"
+              >
+                🛡️ Kembali ke Admin
+              </button>
+            </div>
+          )}
+          {/* Tambahkan padding agar tidak tertutup banner saat mode demo */}
+          <div className={isDemoMode ? "pt-8" : ""}>
+            <Step3CountsheetList
+              sessionData={sessionData}
+              onLogout={handleLogout}
+              onSelectRack={(rack) => {
+                setSelectedRack(rack);
+                setCurrentStep(4);
+              }}
+            />
+          </div>
+        </div>
       )}
 
       {currentStep === 4 && selectedRack && (
-        <Step4CountDetail
-          sessionData={sessionData}
-          rack={selectedRack}
-          onLogout={handleLogout}
-          onBackToList={() => setCurrentStep(3)}
-        />
+        <div className="relative">
+          {isDemoMode && (
+            <div className="fixed top-0 left-0 right-0 z-50 bg-amber-500 text-slate-950 px-4 py-1.5 text-xs font-black flex justify-between items-center shadow-md">
+              <span>📱 DEMO MODE: HP Counter ({sessionData.primaryCounter})</span>
+              <button
+                onClick={() => setCurrentStep('admin')}
+                className="bg-slate-900 text-white px-3 py-1 rounded-lg text-[10px] font-bold hover:bg-slate-800 transition-colors"
+              >
+                🛡️ Kembali ke Admin
+              </button>
+            </div>
+          )}
+          <div className={isDemoMode ? "pt-8" : ""}>
+            <Step4CountDetail
+              sessionData={sessionData}
+              rack={selectedRack}
+              onLogout={handleLogout}
+              onBackToList={() => setCurrentStep(isDemoMode ? 'admin_demo' : 3)}
+            />
+          </div>
+        </div>
       )}
     </div>
   );

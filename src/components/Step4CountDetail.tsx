@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../firebase';
-import { collection, onSnapshot, query, where, doc, setDoc } from 'firebase/firestore';
+import { collection, onSnapshot, query, where, doc, writeBatch } from 'firebase/firestore';
 import type { SessionData, RackItem, CustomModalState, UnmappedItem } from '../types';
 import CustomModal from './CustomModal';
 
@@ -11,27 +11,29 @@ interface Step4CountDetailProps {
   onLogout: () => void;
 }
 
-interface SKUItem {
-  id: string;
+interface GroupedSKUItem {
   sku: string;
   upc: string;
-  upc2?: string;
   name: string;
   category: string;
   uom: 'PCS' | 'CARTON';
+  totalSystemQty: number;
   qtyGood: number;
   qtyBad: number;
-  expDateSystem?: string;
-  expDateActual?: string;
-  isBadStock?: boolean;
-  badRemarks?: string;
+  expDateSystem: string;
+  expDateActual: string;
+  isBadStock: boolean;
+  badRemarks: string;
+  isCounted: boolean;
+  docIds: string[];
+  batchCount: number;
 }
 
 export default function Step4CountDetail({ sessionData, rack, onBackToList, onLogout }: Step4CountDetailProps) {
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const barcodeScanInputRef = useRef<HTMLInputElement>(null);
 
-  const [skuList, setSkuList] = useState<SKUItem[]>([]);
+  const [skuList, setSkuList] = useState<GroupedSKUItem[]>([]);
   const [isSessionLocked, setIsSessionLocked] = useState<boolean>(false);
   const [unmappedDrawerOpen, setUnmappedDrawerOpen] = useState<boolean>(false);
   const [isLoadingSave, setIsLoadingSave] = useState<boolean>(false);
@@ -40,7 +42,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     isOpen: false, title: '', message: '',
   });
 
-  // REAL-TIME FIRESTORE DATA FETCHING DENGAN KONDISI DEFAULT QTY = 0 UNTUK BARANG BELUM DIHITUNG
+  // REAL-TIME FETCHING & AGGREGATION BERDASARKAN SKU
   useEffect(() => {
     const primaryCounter = (sessionData.primaryCounter || "Unassigned").toLowerCase().trim();
     const targetLocation = rack.rackNumber || rack.id;
@@ -52,31 +54,55 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     );
 
     const unsubscribe = onSnapshot(qTasks, (snapshot) => {
-      const items: SKUItem[] = snapshot.docs.map(docSnap => {
+      const groupedMap: Record<string, GroupedSKUItem> = {};
+
+      snapshot.docs.forEach(docSnap => {
         const data = docSnap.data();
+        const skuKey = (data.SKU || 'SKU_UNKNOWN').toUpperCase().trim();
+        const sysQty = parseInt(data.Qty || data.QTY_SYSTEM) || 0;
         const rawActQty = data.QTY_ACTUAL ?? data.countedQty;
         const numActQty = parseInt(rawActQty, 10);
-        const isCounted = !!data.isCounted || (rawActQty !== undefined && rawActQty !== null && !isNaN(numActQty));
+        const hasActQty = rawActQty !== undefined && rawActQty !== null && !isNaN(numActQty);
 
-        return {
-          id: docSnap.id,
-          sku: data.SKU || '',
-          upc: data.UPC1 || data.upc || '',
-          upc2: data.UPC2 || '',
-          name: data.Description || data.name || data.SKU || '',
-          category: `${data.Zone || 'RACKING'} • ${data.SKUBrand || 'General'}`,
-          uom: (data.satuanHitung as 'PCS' | 'CARTON') || 'PCS',
-          // TAMPILKAN 0 JIKA BARANG BELUM DIHITUNG DI LAPANGAN
-          qtyGood: isCounted ? (isNaN(numActQty) ? 0 : numActQty) : 0,
-          qtyBad: parseInt(data.QTY_BAD) || 0,
-          expDateSystem: data.expiredDateSystem || '',
-          expDateActual: data.expDateActual || data.expiredDateActual || '',
-          isBadStock: (parseInt(data.QTY_BAD) || 0) > 0 || !!data.badRemarks,
-          badRemarks: data.badRemarks || '',
-        };
+        if (!groupedMap[skuKey]) {
+          groupedMap[skuKey] = {
+            sku: skuKey,
+            upc: data.UPC1 || data.upc || 'N/A',
+            name: data.Description || data.name || skuKey,
+            category: `${data.Zone || 'RACKING'} • ${data.SKUBrand || 'General'}`,
+            uom: (data.satuanHitung as 'PCS' | 'CARTON') || 'PCS',
+            totalSystemQty: sysQty,
+            qtyGood: hasActQty ? numActQty : 0,
+            qtyBad: parseInt(data.QTY_BAD) || 0,
+            expDateSystem: data.expiredDateSystem || '',
+            expDateActual: data.expDateActual || data.expiredDateActual || '',
+            isBadStock: (parseInt(data.QTY_BAD) || 0) > 0 || !!data.badRemarks,
+            badRemarks: data.badRemarks || '',
+            isCounted: !!data.isCounted || hasActQty,
+            docIds: [docSnap.id],
+            batchCount: 1
+          };
+        } else {
+          // GABUNGKAN TOTAL QTY SYSTEM & SIMPAN SEMUA ID DOKUMEN
+          groupedMap[skuKey].totalSystemQty += sysQty;
+          groupedMap[skuKey].docIds.push(docSnap.id);
+          groupedMap[skuKey].batchCount += 1;
+
+          if (hasActQty) {
+            groupedMap[skuKey].qtyGood += numActQty;
+            groupedMap[skuKey].isCounted = true;
+          }
+
+          // PILIH EXPIRED DATE SYSTEM TERCEPAT (FEFO)
+          const currentEd = groupedMap[skuKey].expDateSystem;
+          const newEd = data.expiredDateSystem || '';
+          if (newEd && (!currentEd || newEd < currentEd)) {
+            groupedMap[skuKey].expDateSystem = newEd;
+          }
+        }
       });
 
-      setSkuList(items);
+      setSkuList(Object.values(groupedMap));
     });
 
     return () => unsubscribe();
@@ -94,7 +120,6 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
 
   const isBarcodeInSystem = unmappedBarcode.trim() !== '' && skuList.some(s =>
     s.upc === unmappedBarcode.trim() ||
-    s.upc2 === unmappedBarcode.trim() ||
     s.sku.toLowerCase() === unmappedBarcode.trim().toLowerCase()
   );
 
@@ -105,16 +130,10 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     );
   };
 
-  const adjustQty = (index: number, type: 'good' | 'bad', delta: number) => {
+  const adjustQty = (index: number, delta: number) => {
     if (isSessionLocked) return;
     setSkuList((prev) =>
-      prev.map((item, idx) => {
-        if (idx === index) {
-          if (type === 'good') return { ...item, qtyGood: Math.max(0, item.qtyGood + delta) };
-          if (type === 'bad') return { ...item, qtyBad: Math.max(0, item.qtyBad + delta) };
-        }
-        return item;
-      })
+      prev.map((item, idx) => (idx === index ? { ...item, qtyGood: Math.max(0, item.qtyGood + delta) } : item))
     );
   };
 
@@ -125,7 +144,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     );
   };
 
-  const updateItemField = (index: number, field: keyof SKUItem, value: any) => {
+  const updateItemField = (index: number, field: keyof GroupedSKUItem, value: any) => {
     if (isSessionLocked) return;
     setSkuList((prev) =>
       prev.map((item, idx) => (idx === index ? { ...item, [field]: value } : item))
@@ -186,23 +205,31 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     setUnmappedList((prev) => prev.filter((item) => item.id !== id));
   };
 
-  // SYNC MENGGUNAKAN ID DOKUMEN FIRESTORE ASLI UNTUK MENCEGAH DATA DOUBLE
+  // SIMPAN DAN DILAKUKAN BATCH WRITE UNTUK MENGUPDATE SEMUA DOKUMEN SKU DENGAN PRESISI
   const handleSaveAndNext = async () => {
     if (isSessionLocked) return;
     setIsLoadingSave(true);
 
     try {
-      for (const skuItem of skuList) {
-        await setDoc(doc(db, "master_tasks", skuItem.id), {
-          counter: (sessionData.primaryCounter || 'Unassigned').toLowerCase().trim(),
-          isCounted: true,
-          QTY_ACTUAL: skuItem.qtyGood,
-          QTY_BAD: skuItem.qtyBad,
-          badRemarks: skuItem.badRemarks || '',
-          expDateActual: skuItem.expDateActual || '',
-          updatedAt: new Date().toISOString()
-        }, { merge: true });
-      }
+      const batch = writeBatch(db);
+
+      skuList.forEach(skuItem => {
+        // Tulis total Qty Good ke dokumen pertama, dokumen turunan di-mark isCounted
+        skuItem.docIds.forEach((docId, i) => {
+          const taskRef = doc(db, "master_tasks", docId);
+          batch.set(taskRef, {
+            counter: (sessionData.primaryCounter || 'Unassigned').toLowerCase().trim(),
+            isCounted: true,
+            QTY_ACTUAL: i === 0 ? skuItem.qtyGood : 0,
+            QTY_BAD: i === 0 ? skuItem.qtyBad : 0,
+            badRemarks: i === 0 ? (skuItem.badRemarks || '') : '',
+            expDateActual: skuItem.expDateActual || '',
+            updatedAt: new Date().toISOString()
+          }, { merge: true });
+        });
+      });
+
+      await batch.commit();
 
       setModal({
         isOpen: true,
@@ -279,9 +306,9 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             </div>
           </div>
 
-          {/* LIST SKU DARI FIRESTORE REAL-TIME */}
+          {/* LIST SKU DIGABUNGKAN (1 KARTU PER SKU PER RAK) */}
           {skuList.map((currentSku, idx) => (
-            <div key={currentSku.id} className="bg-white rounded-xl p-space-md shadow-xs border border-slate-200 space-y-space-md relative overflow-hidden">
+            <div key={currentSku.sku} className="bg-white rounded-xl p-space-md shadow-xs border border-slate-200 space-y-space-md relative overflow-hidden">
               <div className="absolute top-0 left-0 right-0 h-1.5 bg-blue-600"></div>
 
               <div className="space-y-1 pt-1">
@@ -296,10 +323,11 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                 <p className="font-body-sm text-slate-500">{currentSku.category}</p>
               </div>
 
+              {/* INFORMASI EXPIRED DATE FEFO */}
               <div className="bg-blue-50/60 border border-blue-200 p-space-sm rounded-xl space-y-2">
                 <div className="flex justify-between items-center">
                   <span className="font-label-sm text-blue-900 font-bold flex items-center gap-1">
-                    <span className="material-symbols-outlined text-[16px] text-blue-700">event</span> Expired Date
+                    <span className="material-symbols-outlined text-[16px] text-blue-700">event</span> Expired Date System (FEFO)
                   </span>
                   <button type="button" disabled={isSessionLocked} onClick={() => handleSetSameExpAsSystem(idx)} className="px-2.5 py-1 bg-emerald-600 text-white rounded-lg text-[10px] font-bold active:scale-95">
                     Sama dgn System
@@ -307,8 +335,13 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                 </div>
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   <div>
-                    <label className="text-[10px] text-slate-500 font-bold block uppercase mb-0.5">ED System</label>
-                    <input type="text" readOnly value={currentSku.expDateSystem || '-'} className="w-full p-2 bg-white/80 border border-slate-200 rounded-lg text-slate-600 font-mono text-xs font-bold outline-none" />
+                    <label className="text-[10px] text-slate-500 font-bold block uppercase mb-0.5">ED System Terdekat</label>
+                    <div className="flex flex-col">
+                      <input type="text" readOnly value={currentSku.expDateSystem || '-'} className="w-full p-2 bg-white/80 border border-slate-200 rounded-lg text-slate-600 font-mono text-xs font-bold outline-none" />
+                      {currentSku.batchCount > 1 && (
+                        <span className="text-[9px] text-indigo-600 font-bold mt-0.5">*Gabungan {currentSku.batchCount} Batch ED (System: {currentSku.totalSystemQty} PCS)</span>
+                      )}
+                    </div>
                   </div>
                   <div>
                     <label className="text-[10px] text-blue-700 font-bold block uppercase mb-0.5">ED Actual (Fisik)</label>
@@ -317,20 +350,22 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                 </div>
               </div>
 
+              {/* INPUT KONDISI BAIK (DEFAULT 0) */}
               <div className="bg-slate-50 border border-slate-200 p-space-md rounded-xl space-y-space-sm">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-blue-600"></span><span className="font-headline-sm text-slate-900 font-bold">Kondisi Baik (Qty Good)</span></div>
                   <span className="font-label-sm text-slate-500 font-semibold">{currentSku.uom}</span>
                 </div>
                 <div className="flex items-center gap-space-sm">
-                  <button type="button" disabled={isSessionLocked} onClick={() => adjustQty(idx, 'good', -1)} className="w-14 h-14 bg-white border border-slate-300 text-slate-800 rounded-xl flex items-center justify-center text-xl shrink-0"><span className="material-symbols-outlined">remove</span></button>
+                  <button type="button" disabled={isSessionLocked} onClick={() => adjustQty(idx, -1)} className="w-14 h-14 bg-white border border-slate-300 text-slate-800 rounded-xl flex items-center justify-center text-xl shrink-0"><span className="material-symbols-outlined">remove</span></button>
                   <div className="flex-1 h-14 bg-white border-2 border-blue-500 rounded-xl flex items-center justify-center">
                     <input type="number" min="0" disabled={isSessionLocked} value={currentSku.qtyGood} onChange={(e) => updateItemField(idx, 'qtyGood', parseInt(e.target.value) || 0)} className="w-full text-center font-bold text-2xl outline-none" />
                   </div>
-                  <button type="button" disabled={isSessionLocked} onClick={() => adjustQty(idx, 'good', 1)} className="w-14 h-14 bg-blue-600 text-white rounded-xl flex items-center justify-center text-xl shrink-0"><span className="material-symbols-outlined">add</span></button>
+                  <button type="button" disabled={isSessionLocked} onClick={() => adjustQty(idx, 1)} className="w-14 h-14 bg-blue-600 text-white rounded-xl flex items-center justify-center text-xl shrink-0"><span className="material-symbols-outlined">add</span></button>
                 </div>
               </div>
 
+              {/* BAD STOCK DETECTED */}
               <div className="bg-amber-50/70 border border-amber-200 p-space-md rounded-xl space-y-space-sm">
                 <div className="flex items-center justify-between">
                   <span className="font-body-lg text-amber-900 font-bold">Bad Stock Detected?</span>
@@ -362,6 +397,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             </div>
           )}
 
+          {/* ITEM TAK TERDAFTAR / TEMUAN LAIN */}
           <div className="bg-white rounded-xl p-space-md shadow-xs border border-slate-200 space-y-space-md">
             <div className="flex items-center justify-between cursor-pointer" onClick={() => setUnmappedDrawerOpen(!unmappedDrawerOpen)}>
               <h3 className="font-headline-sm text-slate-900 font-bold">Item Tak Terdaftar / Temuan Lain</h3>

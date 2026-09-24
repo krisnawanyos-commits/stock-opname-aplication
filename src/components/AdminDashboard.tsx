@@ -11,12 +11,13 @@ import {
     CheckCircle2, XCircle, Search, Building2, DollarSign,
     Download, Scale, PlayCircle, Archive, ArrowLeft, AlertTriangle,
     LogOut, GripHorizontal, Contact, Eye, EyeOff, UserCheck, Clock, Store, Link2, KeyRound,
-    Mail, ExternalLink, Edit2
+    Mail, ExternalLink, Edit2, Smartphone
 } from 'lucide-react';
 import type { UserRole } from '../types';
 
 interface AdminDashboardProps {
     onBackToApp: () => void;
+    onSwitchToCounterView?: () => void;
     currentUserRole?: UserRole;
     currentUserEmail?: string;
 }
@@ -128,7 +129,7 @@ const SearchableSelect = ({ options, value, onChange, placeholder, className = "
     );
 };
 
-export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner', currentUserEmail = 'yos.krisnawan@anymindgroup.com' }: AdminDashboardProps) {
+export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, currentUserRole = 'owner', currentUserEmail = 'yos.krisnawan@anymindgroup.com' }: AdminDashboardProps) {
 
     const OWNER_WHITELIST = ['yos.krisnawan@anymindgroup.com', 'krisnawanyos@gmail.com'];
     const isWhitelistedOwner = currentUserRole === 'owner' && OWNER_WHITELIST.includes(currentUserEmail.toLowerCase().trim());
@@ -768,6 +769,16 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                             </div>
                         </div>
                         <div className="flex items-center space-x-3 w-full md:w-auto relative z-10">
+                            {onSwitchToCounterView && (
+                                <button
+                                    onClick={onSwitchToCounterView}
+                                    className="px-4 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl text-sm font-extrabold flex items-center justify-center space-x-2 shadow-lg shadow-emerald-600/20 transition-all hover:-translate-y-0.5 cursor-pointer"
+                                    title="Buka Tampilan HP Counter untuk Demo"
+                                >
+                                    <Smartphone className="w-5 h-5" />
+                                    <span className="hidden sm:inline">Demo Mode Counter</span>
+                                </button>
+                            )}
                             {effectiveRole === 'owner' && (
                                 <button onClick={() => setViewState('WIZARD_SETUP')} className="flex-1 md:flex-none px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl text-sm font-extrabold flex items-center justify-center space-x-2 shadow-xl">
                                     <Plus className="w-5 h-5" /><span>New Project</span>
@@ -851,9 +862,10 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                         </div>
                     )}
 
-                    {/* ACCOUNTS (KTP) TAB DENGAN TOMBOL EDIT */}
+                    {/* ACCOUNTS (KTP) TAB DENGAN OWNER SETTINGS */}
                     {landingTab === 'accounts' && effectiveRole === 'owner' && (
                         <div className="space-y-6">
+                            {/* FORM OWNER ACCOUNT UPDATE */}
                             <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl space-y-4">
                                 <div className="border-b border-slate-100 pb-3 flex justify-between items-center">
                                     <h3 className="text-base font-black text-slate-900 flex items-center space-x-2">
