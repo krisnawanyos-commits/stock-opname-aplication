@@ -156,10 +156,11 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
         setOrderedTabs(newTabs); setDraggedTabId(null);
     };
 
-    // FORM TAMBAH GUDANG CLOUD
+    // INPUT TAMBAH LOKASI
     const [newWhName, setNewWhName] = useState<string>('');
+    const [newStoreName, setNewStoreName] = useState<string>('');
 
-    const [wizLocationId, setWizLocationId] = useState<string>('WH-01');
+    const [wizLocationId, setWizLocationId] = useState<string>('');
     const [wizOpnameDate, setWizOpnameDate] = useState<string>('2026-09-22');
     const [wizSessionCode, setWizSessionCode] = useState<string>('SO-WRG-2026-09');
     const [wizMethod, setWizMethod] = useState<'LIST_TO_FLOOR' | 'FLOOR_TO_LIST'>('LIST_TO_FLOOR');
@@ -181,6 +182,7 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
     const [projectHistory, setProjectHistory] = useState<ProjectSession[]>([]);
     const [allProjectTeams, setAllProjectTeams] = useState<ProjectTeamMember[]>([]);
     const [warehouseList, setWarehouseList] = useState<LocationOption[]>([]);
+    const [consignmentStoreList, setConsignmentStoreList] = useState<LocationOption[]>([]);
     const [activeProject, setActiveProject] = useState<ProjectSession | null>(null);
 
     useEffect(() => {
@@ -188,21 +190,25 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
         const unsub2 = onSnapshot(collection(db, "projects"), (snap) => setProjectHistory(snap.docs.map(d => ({ id: d.id, ...d.data() } as ProjectSession))));
         const unsub3 = onSnapshot(collection(db, "project_teams"), (snap) => setAllProjectTeams(snap.docs.map(d => ({ id: d.id, ...d.data() } as ProjectTeamMember))));
 
-        // SYNC REAL-TIME FIRESTORE LOKASI GUDANG
+        // SYNC GUDANG UTAMA (ONLINE / WMS)
         const unsub4 = onSnapshot(collection(db, "warehouses"), (snap) => {
             const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as LocationOption));
-            if (list.length === 0) {
-                // Default jika database lokasi masih kosong
-                setWarehouseList([
-                    { id: 'WH-01', name: 'Gudang Utama Waringin (WMS)', type: 'NON_CONSIGNMENT' },
-                    { id: 'WH-02', name: 'Gudang Transit Jakarta (WMS)', type: 'NON_CONSIGNMENT' }
-                ]);
-            } else {
-                setWarehouseList(list);
-            }
+            setWarehouseList(list.length === 0 ? [
+                { id: 'WH-01', name: 'Gudang Utama Waringin (WMS)', type: 'NON_CONSIGNMENT' },
+                { id: 'WH-02', name: 'Gudang Transit Jakarta (WMS)', type: 'NON_CONSIGNMENT' }
+            ] : list);
         });
 
-        return () => { unsub1(); unsub2(); unsub3(); unsub4(); };
+        // SYNC TOKO CONSIGNMENT (OFFLINE STORE)
+        const unsub5 = onSnapshot(collection(db, "consignment_stores"), (snap) => {
+            const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as LocationOption));
+            setConsignmentStoreList(list.length === 0 ? [
+                { id: 'STORE-01', name: 'Store Central Park', type: 'CONSIGNMENT' },
+                { id: 'STORE-02', name: 'Store Grand Indonesia', type: 'CONSIGNMENT' }
+            ] : list);
+        });
+
+        return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); };
     }, []);
 
     // KTP GLOBAL MANAGEMENT
@@ -260,24 +266,90 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
         triggerNotification('Template KTP (.csv) diunduh!');
     };
 
-    // LOKASI GUDANG FIRESTORE HANDLERS
+    // 1. GUDANG WMS (ONLINE) HANDLERS
     const handleAddWarehouseCloud = async () => {
         if (newWhName.trim()) {
             const id = `WH-${(warehouseList.length + 1).toString().padStart(2, '0')}`;
-            await setDoc(doc(db, "warehouses", id), {
-                name: newWhName.trim(),
-                type: 'NON_CONSIGNMENT'
-            });
-            setNewWhName('');
-            triggerNotification(`Gudang Baru "${newWhName.trim()}" tersimpan di Cloud!`);
+            await setDoc(doc(db, "warehouses", id), { name: newWhName.trim(), type: 'NON_CONSIGNMENT' });
+            setNewWhName(''); triggerNotification(`Gudang WMS "${newWhName.trim()}" tersimpan di Cloud!`);
         }
     };
-
     const handleDeleteWarehouseCloud = async (whId: string, whName: string) => {
-        if (window.confirm(`Hapus gudang "${whName}" dari Cloud Firestore?`)) {
+        if (window.confirm(`Hapus gudang "${whName}" dari Cloud?`)) {
             await deleteDoc(doc(db, "warehouses", whId));
-            triggerNotification(`Gudang "${whName}" dihapus dari Cloud.`);
+            triggerNotification(`Gudang "${whName}" dihapus.`);
         }
+    };
+    const handleBulkyWarehouseUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = async (event) => {
+                const text = event.target?.result as string;
+                const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l !== '');
+                let count = 0;
+                const startIndex = lines[0]?.toLowerCase().includes('nama gudang') ? 1 : 0;
+                for (let i = startIndex; i < lines.length; i++) {
+                    const whName = lines[i];
+                    if (whName) {
+                        const id = `WH-${(warehouseList.length + i + 1).toString().padStart(2, '0')}`;
+                        await setDoc(doc(db, "warehouses", id), { name: whName, type: 'NON_CONSIGNMENT' });
+                        count++;
+                    }
+                }
+                if (count > 0) triggerNotification(`Upload Bulky Sukses! ${count} Gudang WMS tersimpan.`);
+            };
+            reader.readAsText(file);
+        }
+    };
+    const handleDownloadWarehouseTemplate = () => {
+        const blob = new Blob(["Nama Gudang\nGudang Utama Waringin\nGudang Transit Jakarta"], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a'); link.href = URL.createObjectURL(blob);
+        link.setAttribute('download', 'Template_Master_Gudang_WMS.csv'); link.click();
+        triggerNotification('Template Gudang WMS (.csv) diunduh!');
+    };
+
+    // 2. TOKO CONSIGNMENT (OFFLINE STORE) HANDLERS
+    const handleAddStoreCloud = async () => {
+        if (newStoreName.trim()) {
+            const id = `STORE-${(consignmentStoreList.length + 1).toString().padStart(2, '0')}`;
+            await setDoc(doc(db, "consignment_stores", id), { name: newStoreName.trim(), type: 'CONSIGNMENT' });
+            setNewStoreName(''); triggerNotification(`Toko Consignment "${newStoreName.trim()}" tersimpan di Cloud!`);
+        }
+    };
+    const handleDeleteStoreCloud = async (stId: string, stName: string) => {
+        if (window.confirm(`Hapus toko consignment "${stName}" dari Cloud?`)) {
+            await deleteDoc(doc(db, "consignment_stores", stId));
+            triggerNotification(`Toko "${stName}" dihapus.`);
+        }
+    };
+    const handleBulkyStoreUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = async (event) => {
+                const text = event.target?.result as string;
+                const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l !== '');
+                let count = 0;
+                const startIndex = lines[0]?.toLowerCase().includes('nama store') ? 1 : 0;
+                for (let i = startIndex; i < lines.length; i++) {
+                    const stName = lines[i];
+                    if (stName) {
+                        const id = `STORE-${(consignmentStoreList.length + i + 1).toString().padStart(2, '0')}`;
+                        await setDoc(doc(db, "consignment_stores", id), { name: stName, type: 'CONSIGNMENT' });
+                        count++;
+                    }
+                }
+                if (count > 0) triggerNotification(`Upload Bulky Sukses! ${count} Toko Offline tersimpan.`);
+            };
+            reader.readAsText(file);
+        }
+    };
+    const handleDownloadStoreTemplate = () => {
+        const blob = new Blob(["Nama Store\nStore Central Park\nStore Grand Indonesia"], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a'); link.href = URL.createObjectURL(blob);
+        link.setAttribute('download', 'Template_Master_Store_Consignment.csv'); link.click();
+        triggerNotification('Template Store Consignment (.csv) diunduh!');
     };
 
     // PROJECT CONTROL
@@ -290,12 +362,13 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
     };
 
     const handleStartNewProjectSession = async () => {
-        const isConsignment = wizLocationId === 'CONSIGNMENT_GENERIC';
-        const locName = isConsignment ? 'Consignment Global' : (warehouseList.find(l => l.id === wizLocationId)?.name || 'Gudang WMS');
+        const allLocs = [...warehouseList, ...consignmentStoreList];
+        const matched = allLocs.find(l => l.id === wizLocationId);
+        const locName = matched ? matched.name : (wizLocationId || 'Gudang Utama');
         const projId = `PROJ-${Date.now().toString().slice(-4)}`;
         const newSession = {
             sessionCode: wizSessionCode.trim() || `SO-${wizLocationId}-${wizOpnameDate}`,
-            locationId: wizLocationId, locationName: locName, opnameDate: wizOpnameDate,
+            locationId: wizLocationId || 'WH-01', locationName: locName, opnameDate: wizOpnameDate,
             method: wizMethod, status: 'LIVE_ACTIVE', createdAt: new Date().toLocaleString()
         };
         await setDoc(doc(db, "projects", projId), newSession);
@@ -506,30 +579,59 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
 
                     {landingTab === 'projects' && (
                         <div className="space-y-6">
-                            {/* MASTER KELOLA LOKASI GUDANG FIRESTORE (HANYA OWNER) */}
+                            {/* MASTER KELOLA LOKASI GUDANG (WMS & CONSIGNMENT STORE) - HANYA OWNER */}
                             {effectiveRole === 'owner' && (
-                                <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl shadow-slate-200/40 space-y-4">
-                                    <div className="border-b border-slate-100 pb-3 flex justify-between items-center">
-                                        <h3 className="text-base font-black text-slate-900 flex items-center space-x-2">
-                                            <Building2 className="w-5 h-5 text-indigo-600" />
-                                            <span>Master Cloud Lokasi & Gudang WMS</span>
-                                        </h3>
-                                        <span className="text-xs font-bold text-indigo-600 bg-indigo-50 px-3 py-1 rounded-xl">Real-Time Sync</span>
-                                    </div>
-                                    <div className="flex gap-3">
-                                        <input type="text" placeholder="Nama Gudang Baru (misal: Gudang Surabaya, WH-03)" value={newWhName} onChange={(e) => setNewWhName(e.target.value)} className="flex-1 px-4 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/20" />
-                                        <button onClick={handleAddWarehouseCloud} className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-bold shadow-md transition-all">+ Tambah Gudang Cloud</button>
-                                    </div>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
-                                        {warehouseList.map((wh) => (
-                                            <div key={wh.id} className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl flex justify-between items-center">
-                                                <div className="flex items-center space-x-2">
-                                                    <Store className="w-4 h-4 text-indigo-600" />
-                                                    <div><span className="font-mono text-xs font-black text-indigo-600 mr-2">{wh.id}</span><span className="font-bold text-sm text-slate-800">{wh.name}</span></div>
-                                                </div>
-                                                <button onClick={() => handleDeleteWarehouseCloud(wh.id, wh.name)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"><Trash2 className="w-4 h-4" /></button>
+                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                    {/* CARD 1: GUDANG UTAMA (ONLINE / WMS) */}
+                                    <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl shadow-slate-200/40 space-y-4">
+                                        <div className="border-b border-slate-100 pb-3 flex justify-between items-center">
+                                            <h3 className="text-base font-black text-slate-900 flex items-center space-x-2">
+                                                <Building2 className="w-5 h-5 text-indigo-600" />
+                                                <span>Master Gudang WMS (Online)</span>
+                                            </h3>
+                                            <div className="flex items-center space-x-2">
+                                                <button onClick={handleDownloadWarehouseTemplate} className="px-2.5 py-1 bg-slate-50 border border-slate-200 text-slate-700 rounded-lg text-xs font-bold hover:bg-slate-100"><FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600 inline mr-1" />Template</button>
+                                                <label className="px-2.5 py-1 bg-indigo-50 text-indigo-700 rounded-lg text-xs font-bold cursor-pointer hover:bg-indigo-100"><Upload className="w-3.5 h-3.5 inline mr-1" />Bulky<input type="file" accept=".csv" className="hidden" onChange={handleBulkyWarehouseUpload} /></label>
                                             </div>
-                                        ))}
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <input type="text" placeholder="Nama Gudang Baru (misal: WH-03 Surabaya)" value={newWhName} onChange={(e) => setNewWhName(e.target.value)} className="flex-1 px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl outline-none" />
+                                            <button onClick={handleAddWarehouseCloud} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold">+ Tambah</button>
+                                        </div>
+                                        <div className="max-h-48 overflow-y-auto space-y-2 pr-1 scrollbar-thin">
+                                            {warehouseList.map((wh) => (
+                                                <div key={wh.id} className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex justify-between items-center">
+                                                    <div className="flex items-center space-x-2"><Store className="w-4 h-4 text-indigo-600" /><span className="font-mono text-xs font-black text-indigo-600">{wh.id}</span><span className="font-bold text-xs text-slate-800">{wh.name}</span></div>
+                                                    <button onClick={() => handleDeleteWarehouseCloud(wh.id, wh.name)} className="p-1 text-slate-400 hover:text-red-600"><Trash2 className="w-3.5 h-3.5" /></button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    {/* CARD 2: TOKO CONSIGNMENT (OFFLINE STORE) */}
+                                    <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl shadow-slate-200/40 space-y-4">
+                                        <div className="border-b border-slate-100 pb-3 flex justify-between items-center">
+                                            <h3 className="text-base font-black text-slate-900 flex items-center space-x-2">
+                                                <Store className="w-5 h-5 text-purple-600" />
+                                                <span>Master Toko Consignment (Offline)</span>
+                                            </h3>
+                                            <div className="flex items-center space-x-2">
+                                                <button onClick={handleDownloadStoreTemplate} className="px-2.5 py-1 bg-slate-50 border border-slate-200 text-slate-700 rounded-lg text-xs font-bold hover:bg-slate-100"><FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600 inline mr-1" />Template</button>
+                                                <label className="px-2.5 py-1 bg-purple-50 text-purple-700 rounded-lg text-xs font-bold cursor-pointer hover:bg-purple-100"><Upload className="w-3.5 h-3.5 inline mr-1" />Bulky<input type="file" accept=".csv" className="hidden" onChange={handleBulkyStoreUpload} /></label>
+                                            </div>
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <input type="text" placeholder="Nama Toko Baru (misal: Store Senayan City)" value={newStoreName} onChange={(e) => setNewStoreName(e.target.value)} className="flex-1 px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl outline-none" />
+                                            <button onClick={handleAddStoreCloud} className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold">+ Tambah</button>
+                                        </div>
+                                        <div className="max-h-48 overflow-y-auto space-y-2 pr-1 scrollbar-thin">
+                                            {consignmentStoreList.map((st) => (
+                                                <div key={st.id} className="p-3 bg-purple-50/40 border border-purple-200/60 rounded-xl flex justify-between items-center">
+                                                    <div className="flex items-center space-x-2"><Store className="w-4 h-4 text-purple-600" /><span className="font-mono text-xs font-black text-purple-600">{st.id}</span><span className="font-bold text-xs text-slate-800">{st.name}</span></div>
+                                                    <button onClick={() => handleDeleteStoreCloud(st.id, st.name)} className="p-1 text-slate-400 hover:text-red-600"><Trash2 className="w-3.5 h-3.5" /></button>
+                                                </div>
+                                            ))}
+                                        </div>
                                     </div>
                                 </div>
                             )}
@@ -540,7 +642,7 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                                 <div className="overflow-x-auto border border-slate-200 rounded-2xl scrollbar-thin">
                                     <table className="w-full text-left text-sm min-w-full">
                                         <thead className="bg-slate-50/80 font-bold text-slate-500 border-b border-slate-200">
-                                            <tr><th className="p-4">KODE PROJECT</th><th className="p-4">LOKASI WMS</th><th className="p-4">TANGGAL</th><th className="p-4 text-center">STATUS</th><th className="p-4 text-right">AKSI</th></tr>
+                                            <tr><th className="p-4">KODE PROJECT</th><th className="p-4">LOKASI WMS / STORE</th><th className="p-4">TANGGAL</th><th className="p-4 text-center">STATUS</th><th className="p-4 text-right">AKSI</th></tr>
                                         </thead>
                                         <tbody className="divide-y divide-slate-100 font-medium">
                                             {projectHistory.map((proj) => (
@@ -612,7 +714,7 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                 </div>
             )}
 
-            {/* SCREEN 2: WIZARD SETUP */}
+            {/* SCREEN 2: WIZARD SETUP PROJECT */}
             {viewState === 'WIZARD_SETUP' && (
                 <div className="max-w-2xl mx-auto space-y-6 animate-in slide-in-from-bottom-4 duration-500">
                     <div className="bg-white p-6 rounded-3xl shadow-xl shadow-slate-200/40 border border-slate-100 flex items-center justify-between">
@@ -622,9 +724,12 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                     <div className="bg-white rounded-3xl p-8 shadow-xl shadow-slate-200/40 border border-slate-100 space-y-6">
                         <div className="space-y-2">
                             <label className="text-sm font-extrabold text-slate-800">1. Tipe Lokasi Opname:</label>
+
+                            {/* DROPDOWN DENGAN DUA OPTGROUP REAL-TIME FIRESTORE */}
                             <select value={wizLocationId} onChange={(e) => setWizLocationId(e.target.value)} className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all">
-                                <optgroup label="Gudang WMS (Cloud Firestore)">{warehouseList.map(wh => (<option key={wh.id} value={wh.id}>{wh.name}</option>))}</optgroup>
-                                <optgroup label="Offline Store"><option value="CONSIGNMENT_GENERIC">[CONSIGNMENT STORE]</option></optgroup>
+                                <option value="">-- Pilih Lokasi Gudang / Store --</option>
+                                <optgroup label="Gudang WMS (Online Store)">{warehouseList.map(wh => (<option key={wh.id} value={wh.id}>{wh.name}</option>))}</optgroup>
+                                <optgroup label="Toko Consignment (Offline Store)">{consignmentStoreList.map(st => (<option key={st.id} value={st.id}>{st.name}</option>))}</optgroup>
                             </select>
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -652,7 +757,7 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
             {viewState === 'DASHBOARD' && activeProject && (
                 <div className="space-y-6 animate-in fade-in duration-500">
 
-                    {/* Dashboard Header Bar + SCROLLER RAPI DENGAN SCROLLBAR-THIN */}
+                    {/* Dashboard Header Bar + SCROLLER */}
                     <div className="bg-white p-5 rounded-3xl shadow-xl shadow-slate-200/40 border border-slate-100 flex flex-col xl:flex-row justify-between xl:items-center gap-4">
                         <div className="flex items-center space-x-4">
                             <button onClick={() => setViewState('LANDING')} className="p-3 bg-slate-50 hover:bg-slate-100 rounded-2xl transition-colors"><ArrowLeft className="w-5 h-5 text-slate-700" /></button>
@@ -665,7 +770,6 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                             </div>
                         </div>
 
-                        {/* CONTAINER TAB NAVIGASI DENGAN SCROLLER */}
                         <div className="flex bg-slate-50/80 p-1.5 rounded-2xl border border-slate-200/80 w-full xl:w-auto overflow-x-auto scrollbar-thin scrollbar-thumb-indigo-200">
                             <div className="flex space-x-1.5 w-max">
                                 {orderedTabs.map(t => (
@@ -682,7 +786,6 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                     {activeTab === 'progress' && (
                         <div className="space-y-6 animate-in slide-in-from-bottom-2 duration-300">
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                                {/* Circular Progress Card */}
                                 <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-xl shadow-slate-200/30 flex items-center justify-between relative overflow-hidden">
                                     <div className="absolute -right-10 -bottom-10 w-40 h-40 bg-indigo-50 rounded-full blur-3xl opacity-60"></div>
                                     <div className="space-y-2 relative z-10">
@@ -694,14 +797,12 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                                         <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100"><circle cx="50" cy="50" r={38} className="text-slate-100" strokeWidth="12" stroke="currentColor" fill="transparent" /><circle cx="50" cy="50" r={38} className="text-indigo-600 transition-all duration-1000 ease-out" strokeWidth="12" strokeDasharray={2 * Math.PI * 38} strokeDashoffset={strokeDashoffset} strokeLinecap="round" stroke="currentColor" fill="transparent" /></svg>
                                     </div>
                                 </div>
-                                {/* Filter Round Card */}
                                 <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-xl shadow-slate-200/30 flex flex-col justify-center space-y-4">
                                     <h3 className="text-sm font-extrabold text-slate-500 uppercase tracking-wider flex items-center"><Filter className="w-4 h-4 mr-1.5 text-indigo-500" />Tampilan Ronde</h3>
                                     <select value={viewRoundFilter} onChange={(e) => setViewRoundFilter(e.target.value === 'overall' ? 'overall' : parseInt(e.target.value, 10) as 1 | 2 | 3 | 4)} className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-black text-indigo-700 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all cursor-pointer">
                                         <option value="overall">📊 Overall Keseluruhan</option><option value={1}>1️⃣ Ronde 1 (Internal)</option><option value={2}>2️⃣ Ronde 2 (Re-Count)</option><option value={3}>3️⃣ Ronde 3 (3rd Party)</option><option value={4}>🔥 Ronde 4 (RECOVERY)</option>
                                     </select>
                                 </div>
-                                {/* Live Dispute Alert */}
                                 <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-xl shadow-slate-200/30 flex flex-col justify-center space-y-3">
                                     <h3 className="text-sm font-extrabold text-slate-500 uppercase tracking-wider flex items-center"><AlertTriangle className="w-4 h-4 mr-1.5 text-red-500" />Live Dispute (Selisih)</h3>
                                     <div className="flex items-end space-x-3">
@@ -711,7 +812,6 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                                 </div>
                             </div>
 
-                            {/* REAL-TIME COUNTER MONITORING */}
                             <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-xl shadow-slate-200/30 space-y-4">
                                 <div className="flex justify-between items-center border-b border-slate-100 pb-3">
                                     <h3 className="text-base font-black text-slate-900 flex items-center"><UserCheck className="w-5 h-5 mr-2 text-indigo-600" />Real-Time Monitoring Progress Per Counter PIC</h3>
@@ -745,7 +845,6 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                                 </div>
                             </div>
 
-                            {/* Analytics Rows */}
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                                 <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-xl shadow-slate-200/30 space-y-5">
                                     <div className="flex justify-between items-center"><h3 className="text-base font-black text-slate-900">Progress per Level Rak</h3><button onClick={() => setShowLevelProgress(!showLevelProgress)} className="p-1.5 bg-slate-50 rounded-lg hover:bg-slate-100"><ChevronUp className={`w-4 h-4 text-slate-500 transition-transform ${showLevelProgress ? 'rotate-180' : ''}`} /></button></div>
