@@ -1,4 +1,6 @@
 import React, { useState, useRef } from 'react';
+import { db } from '../firebase';
+import { doc, setDoc } from 'firebase/firestore';
 import type { SessionData, RackItem, CustomModalState, UnmappedItem } from '../types';
 import CustomModal from './CustomModal';
 
@@ -43,6 +45,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       expDateSystem: '2026-10-18',
       expDateActual: '',
       isBadStock: false,
+      badRemarks: '',
     },
     {
       id: '2',
@@ -62,19 +65,27 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
 
   const [isSessionLocked, setIsSessionLocked] = useState<boolean>(false);
   const [unmappedDrawerOpen, setUnmappedDrawerOpen] = useState<boolean>(false);
+  const [isLoadingSave, setIsLoadingSave] = useState<boolean>(false);
   const companionName = sessionData.partners?.[0] || 'Budi Prasetyo';
 
   const [modal, setModal] = useState<CustomModalState>({
     isOpen: false, title: '', message: '',
   });
 
-  const [unmappedBarcode, setUnmappedBarcode] = useState<string>('8997012399912');
+  const [unmappedBarcode, setUnmappedBarcode] = useState<string>('');
+  const [unmappedQty, setUnmappedQty] = useState<number>(1);
   const [unmappedUnit, setUnmappedUnit] = useState<'PCS' | 'CARTON'>('PCS');
   const [unmappedExpDate, setUnmappedExpDate] = useState<string>('2026-10-15');
   const [unmappedBatchNumber, setUnmappedBatchNumber] = useState<string>('BATCH-2026-X9');
-  const [unmappedDesc, setUnmappedDesc] = useState<string>('Biskuit Cokelat Kemasan Plastik 100gr');
+  const [unmappedDesc, setUnmappedDesc] = useState<string>('');
   const [unmappedPhotoUrl, setUnmappedPhotoUrl] = useState<string>('');
   const [unmappedList, setUnmappedList] = useState<UnmappedItem[]>([]);
+
+  const isBarcodeInSystem = unmappedBarcode.trim() !== '' && skuList.some(s =>
+    s.upc === unmappedBarcode.trim() ||
+    s.upc2 === unmappedBarcode.trim() ||
+    s.sku.toLowerCase() === unmappedBarcode.trim().toLowerCase()
+  );
 
   const handleSetSameExpAsSystem = (index: number) => {
     if (isSessionLocked) return;
@@ -84,10 +95,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
   };
 
   const adjustQty = (index: number, type: 'good' | 'bad', delta: number) => {
-    if (isSessionLocked) {
-      setModal({ isOpen: true, type: 'warning', title: 'Sesi Terkunci', message: 'Sesi sedang terkunci oleh Admin WH.' });
-      return;
-    }
+    if (isSessionLocked) return;
     setSkuList((prev) =>
       prev.map((item, idx) => {
         if (idx === index) {
@@ -130,21 +138,25 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     if (file) {
       const randomBarcode = '899' + Math.floor(1000000000 + Math.random() * 9000000000);
       setUnmappedBarcode(randomBarcode);
-      setModal({ isOpen: true, type: 'success', title: 'Barcode Berhasil Dipindai', message: `Kamera membaca: ${randomBarcode}` });
     }
   };
 
   const handleAddUnmapped = () => {
     if (!unmappedBarcode.trim()) {
-      setModal({ isOpen: true, type: 'warning', title: 'Barcode Wajib Diisi', message: 'Mohon scan/ketik barcode temuan.' });
+      setModal({ isOpen: true, type: 'warning', title: 'Barcode Wajib Diisi', message: 'Mohon scan atau ketik barcode temuan terlebih dahulu.' });
+      return;
+    }
+
+    if (!isBarcodeInSystem && !unmappedPhotoUrl) {
+      setModal({ isOpen: true, type: 'error', title: 'Foto Fisik Wajib Lampir!', message: 'Barang ini TIDAK ADA di system! Kamu WAJIB mengambil foto barang sebelum menambahkannya.' });
       return;
     }
 
     const newItem: UnmappedItem = {
       id: Date.now().toString(),
-      barcode: unmappedBarcode.startsWith('UNKNOWN-') ? unmappedBarcode.trim() : `UNKNOWN-${unmappedBarcode.trim()}`,
-      name: unmappedDesc.trim() || 'Barang Fisik Unmapped',
-      qty: 1,
+      barcode: unmappedBarcode.trim(),
+      name: unmappedDesc.trim() || (isBarcodeInSystem ? 'Barang System Ditemukan' : 'Barang Fisik Baru Unmapped'),
+      qty: unmappedQty || 1,
       uom: unmappedUnit,
       expDate: unmappedExpDate,
       batchNumber: unmappedBatchNumber,
@@ -155,30 +167,49 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     setUnmappedBarcode('');
     setUnmappedDesc('');
     setUnmappedPhotoUrl('');
-    setModal({ isOpen: true, type: 'success', title: 'Item Temuan Ditambahkan', message: 'Item unmapped tersimpan ke rak ini.' });
+    setUnmappedQty(1);
+    setModal({ isOpen: true, type: 'success', title: 'Item Temuan Ditambahkan', message: 'Item berhasil disimpan ke daftar temuan rak ini.' });
   };
 
   const handleDeleteUnmapped = (id: string) => {
     setUnmappedList((prev) => prev.filter((item) => item.id !== id));
   };
 
-  const handleSaveAndNext = () => {
+  const handleSaveAndNext = async () => {
     if (isSessionLocked) return;
-    setModal({
-      isOpen: true,
-      type: 'success',
-      title: 'Hitungan Rak Tersimpan',
-      message: `Semua SKU (${skuList.length} Item) pada Rak ${rack.rackNumber} telah tersimpan.`,
-      confirmText: 'Lanjut ke Rak Berikutnya',
-      onConfirm: () => onBackToList(),
-    });
-  };
+    setIsLoadingSave(true);
 
-  const getInitials = (name: string) => {
-    if (!name) return 'SO';
-    const parts = name.split(/[\s.]+/).filter(Boolean);
-    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-    return name.substring(0, 2).toUpperCase();
+    try {
+      for (const skuItem of skuList) {
+        const taskId = `${rack.rackNumber}_${skuItem.sku}`;
+        await setDoc(doc(db, "master_tasks", taskId), {
+          Location: rack.rackNumber,
+          SKU: skuItem.sku,
+          Description: skuItem.name,
+          counter: sessionData.primaryCounter || 'Unassigned',
+          isCounted: true,
+          QTY_ACTUAL: skuItem.qtyGood,
+          QTY_BAD: skuItem.qtyBad,
+          badRemarks: skuItem.badRemarks || '',
+          expDateActual: skuItem.expDateActual || '',
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+      }
+
+      setModal({
+        isOpen: true,
+        type: 'success',
+        title: 'Hitungan Rak Berhasil Tersimpan!',
+        message: `Semua SKU pada Rak ${rack.rackNumber} telah di-sync ke Cloud Firestore secara real-time.`,
+        confirmText: 'Lanjut ke Rak Berikutnya',
+        onConfirm: () => onBackToList(),
+      });
+    } catch (err) {
+      console.error("Firestore Save Error:", err);
+      setModal({ isOpen: true, type: 'error', title: 'Gagal Menyimpan', message: 'Periksa koneksi internet kamu.' });
+    } finally {
+      setIsLoadingSave(false);
+    }
   };
 
   return (
@@ -195,10 +226,15 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
               <span className="material-symbols-outlined text-[20px]">chevron_left</span>
               <span className="font-label-md uppercase tracking-wider font-semibold">Countsheet List</span>
             </button>
-            <div className="flex items-center gap-space-sm">
+            <div className="flex items-center gap-2">
               <span className="px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 font-label-sm text-[11px] uppercase font-bold border border-amber-300">Round 1</span>
-              <button type="button" onClick={onLogout} className="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-xs shadow-xs">
-                {getInitials(sessionData.primaryCounter || 'SO')}
+              <button
+                type="button"
+                onClick={onLogout}
+                className="px-3 py-1 bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-[16px]">logout</span>
+                <span>Keluar</span>
               </button>
             </div>
           </div>
@@ -219,42 +255,22 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       <main className="flex-1 flex flex-col relative w-full px-margin pt-36 pb-32 bg-slate-50 min-h-screen max-w-md mx-auto">
         <div className="flex flex-col w-full pb-12 space-y-4">
 
-          {/* Banner Status Sesi (Buka/Kunci) */}
-          <div className="bg-white p-space-md rounded-xl flex items-center justify-between shadow-xs border border-slate-200">
-            <div className="flex items-center gap-space-sm min-w-0">
-              <span className={`w-2.5 h-2.5 rounded-full ${isSessionLocked ? 'bg-red-600' : 'bg-emerald-500 animate-pulse'} shrink-0`}></span>
-              <div className="min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <span className={`material-symbols-outlined ${isSessionLocked ? 'text-red-600' : 'text-emerald-600'} text-[18px]`}>
-                    {isSessionLocked ? 'lock' : 'verified_user'}
-                  </span>
-                  <span className={`font-headline-sm text-headline-sm ${isSessionLocked ? 'text-red-700' : 'text-slate-900'} truncate`}>
-                    {isSessionLocked ? 'Sesi Terkunci oleh Admin WH' : 'Sesi Terverifikasi Aktif'}
-                  </span>
-                </div>
-                <p className="font-body-sm text-body-sm text-slate-500 truncate">
-                  {isSessionLocked ? 'Finalisasi hitungan aktif • Mode Read-Only' : 'Putaran 1 Berjalan • Sinkronisasi cloud aktif'}
-                </p>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => setIsSessionLocked(!isSessionLocked)}
-              className="min-h-11 px-3 py-1.5 bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-300 rounded-lg font-label-sm text-xs uppercase flex items-center gap-1 shrink-0 font-semibold cursor-pointer"
-            >
-              <span className="material-symbols-outlined text-[16px]">{isSessionLocked ? 'lock' : 'lock_open'}</span>
-              <span>{isSessionLocked ? 'Buka Kunci' : 'Kunci Sesi'}</span>
-            </button>
-          </div>
-
           <div className="flex items-center justify-between pb-1">
             <h2 className="font-headline-sm font-bold text-slate-800 flex items-center gap-1">
               <span className="material-symbols-outlined text-emerald-600">pin_drop</span> BIN: {rack.rackNumber}
             </h2>
-            <span className="text-xs font-bold text-slate-500 bg-slate-200 px-2.5 py-1 rounded-full">{skuList.length} SKU</span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setIsSessionLocked(!isSessionLocked)}
+                className="text-[10px] font-bold text-slate-500 bg-slate-200 px-2 py-1 rounded-md"
+              >
+                {isSessionLocked ? 'Sesi Terkunci' : 'Kunci Sesi'}
+              </button>
+              <span className="text-xs font-bold text-slate-500 bg-slate-200 px-2.5 py-1 rounded-full">{skuList.length} SKU</span>
+            </div>
           </div>
 
-          {/* SPREAD LIST SKU VERTIKAL MEMANJANG */}
           {skuList.map((currentSku, idx) => (
             <div key={currentSku.id} className="bg-white rounded-xl p-space-md shadow-xs border border-slate-200 space-y-space-md relative overflow-hidden">
               <div className="absolute top-0 left-0 right-0 h-1.5 bg-blue-600"></div>
@@ -264,6 +280,9 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                   <span className="font-label-lg text-blue-700 tracking-wider font-bold">SKU: {currentSku.sku}</span>
                   <span className="bg-slate-100 text-slate-700 border border-slate-200 px-2 py-0.5 rounded font-label-sm">{currentSku.uom}</span>
                 </div>
+                <p className="font-mono text-xs font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded-md w-fit">
+                  Barcode/UPC: {currentSku.upc || 'N/A'}
+                </p>
                 <h3 className="font-headline-sm text-slate-900 font-bold leading-snug">{currentSku.name}</h3>
                 <p className="font-body-sm text-slate-500">{currentSku.category}</p>
               </div>
@@ -301,12 +320,6 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                   </div>
                   <button type="button" disabled={isSessionLocked} onClick={() => adjustQty(idx, 'good', 1)} className="w-14 h-14 bg-blue-600 text-white rounded-xl flex items-center justify-center text-xl shrink-0"><span className="material-symbols-outlined">add</span></button>
                 </div>
-                <div className="grid grid-cols-4 gap-space-xs pt-1">
-                  <button type="button" onClick={() => adjustQty(idx, 'good', 1)} className="min-h-11 bg-white border border-slate-200 rounded-lg text-sm font-semibold">+1</button>
-                  <button type="button" onClick={() => adjustQty(idx, 'good', 5)} className="min-h-11 bg-white border border-slate-200 rounded-lg text-sm font-semibold">+5</button>
-                  <button type="button" onClick={() => adjustQty(idx, 'good', 10)} className="min-h-11 bg-white border border-slate-200 rounded-lg text-sm font-semibold">+10</button>
-                  <button type="button" onClick={() => updateItemField(idx, 'qtyGood', 0)} className="min-h-11 bg-rose-50 text-rose-700 rounded-lg text-sm font-bold">Rst</button>
-                </div>
               </div>
 
               <div className="bg-amber-50/70 border border-amber-200 p-space-md rounded-xl space-y-space-sm">
@@ -318,6 +331,15 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                   <div className="pt-2 space-y-2 border-t border-amber-200">
                     <label className="text-xs font-bold text-amber-900">Jumlah Rusak (Qty Bad):</label>
                     <input type="number" min="0" value={currentSku.qtyBad} onChange={(e) => updateItemField(idx, 'qtyBad', parseInt(e.target.value) || 0)} className="w-full p-2 bg-white border border-amber-300 rounded-lg text-center font-bold text-lg" />
+
+                    <label className="text-xs font-bold text-amber-900 block mt-2">Catatan Detail Kerusakan (Free Text):</label>
+                    <textarea
+                      rows={2}
+                      value={currentSku.badRemarks || ''}
+                      onChange={(e) => updateItemField(idx, 'badRemarks', e.target.value)}
+                      placeholder="Contoh: Dus penyok, kemasan bocor terkena benturan..."
+                      className="w-full p-2 bg-white border border-amber-300 rounded-lg text-xs font-medium outline-none focus:ring-2 focus:ring-amber-500/20"
+                    />
                   </div>
                 )}
               </div>
@@ -325,7 +347,6 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             </div>
           ))}
 
-          {/* DRAWER UNMAPPED POPUP */}
           <div className="bg-white rounded-xl p-space-md shadow-xs border border-slate-200 space-y-space-md">
             <div className="flex items-center justify-between cursor-pointer" onClick={() => setUnmappedDrawerOpen(!unmappedDrawerOpen)}>
               <h3 className="font-headline-sm text-slate-900 font-bold">Item Tak Terdaftar / Temuan Lain</h3>
@@ -334,11 +355,17 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             {unmappedDrawerOpen && (
               <div className="space-y-3 pt-2">
                 <div className="flex gap-2">
-                  <input type="text" value={unmappedBarcode} onChange={(e) => setUnmappedBarcode(e.target.value)} placeholder="Barcode Fisik..." className="flex-1 h-11 border border-slate-300 px-3 rounded-lg text-sm font-mono font-bold" />
+                  <input type="text" value={unmappedBarcode} onChange={(e) => setUnmappedBarcode(e.target.value)} placeholder="Scan/Ketik Barcode..." className="flex-1 h-11 border border-slate-300 px-3 rounded-lg text-sm font-mono font-bold" />
                   <button type="button" onClick={triggerNativeBarcodeScan} className="px-3 min-h-11 bg-blue-600 text-white font-bold rounded-lg flex items-center gap-1 text-xs">
                     <span className="material-symbols-outlined text-[18px]">photo_camera</span> Scan
                   </button>
                 </div>
+
+                {unmappedBarcode.trim() !== '' && (
+                  <div className={`p-2.5 rounded-lg text-xs font-bold flex items-center justify-between ${isBarcodeInSystem ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-rose-50 text-rose-800 border border-rose-200'}`}>
+                    <span>{isBarcodeInSystem ? '✓ Ada di System (Foto Opsional)' : '⚠ TIDAK ADA di System (Wajib Foto!)'}</span>
+                  </div>
+                )}
 
                 <div className="grid grid-cols-2 gap-2">
                   <div>
@@ -351,14 +378,23 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                   </div>
                 </div>
 
-                <div className="flex gap-2">
-                  <button type="button" onClick={() => setUnmappedUnit('PCS')} className={`flex-1 h-10 rounded-lg text-xs font-bold ${unmappedUnit === 'PCS' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700'}`}>PCS</button>
-                  <button type="button" onClick={() => setUnmappedUnit('CARTON')} className={`flex-1 h-10 rounded-lg text-xs font-bold ${unmappedUnit === 'CARTON' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700'}`}>CARTON</button>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-600 block mb-0.5">Qty Temuan:</label>
+                    <input type="number" min="1" value={unmappedQty} onChange={(e) => setUnmappedQty(parseInt(e.target.value) || 1)} className="w-full h-10 border border-slate-300 px-2 rounded-lg text-xs font-bold text-center" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-600 block mb-0.5">Satuan (UOM):</label>
+                    <div className="flex gap-1 h-10">
+                      <button type="button" onClick={() => setUnmappedUnit('PCS')} className={`flex-1 rounded-lg text-xs font-bold ${unmappedUnit === 'PCS' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700'}`}>PCS</button>
+                      <button type="button" onClick={() => setUnmappedUnit('CARTON')} className={`flex-1 rounded-lg text-xs font-bold ${unmappedUnit === 'CARTON' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700'}`}>CARTON</button>
+                    </div>
+                  </div>
                 </div>
 
-                <button type="button" onClick={triggerNativeCamera} className="w-full h-11 bg-slate-100 border border-slate-300 text-slate-700 rounded-lg font-bold text-xs flex items-center justify-center gap-1">
+                <button type="button" onClick={triggerNativeCamera} className={`w-full h-11 border rounded-lg font-bold text-xs flex items-center justify-center gap-1 ${!isBarcodeInSystem && !unmappedPhotoUrl ? 'bg-rose-50 border-rose-300 text-rose-700 animate-pulse' : 'bg-slate-100 border-slate-300 text-slate-700'}`}>
                   <span className="material-symbols-outlined text-[18px]">add_a_photo</span>
-                  <span>{unmappedPhotoUrl ? 'Foto Terlampir (Foto Ulang)' : 'Ambil Foto Kamera HP'}</span>
+                  <span>{unmappedPhotoUrl ? 'Foto Terlampir ✓' : (!isBarcodeInSystem ? 'Ambil Foto Kamera (Wajib)' : 'Ambil Foto Kamera (Opsional)')}</span>
                 </button>
 
                 <button type="button" onClick={handleAddUnmapped} className="w-full min-h-11 bg-blue-600 text-white font-bold rounded-lg">+ Tambahkan Ke Temuan</button>
@@ -366,7 +402,6 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             )}
           </div>
 
-          {/* LIST ITEM UNMAPPED (Terhubung ke handleDeleteUnmapped) */}
           {unmappedList.length > 0 && (
             <div className="bg-white rounded-xl p-space-md shadow-xs border border-slate-200 space-y-2">
               <h4 className="font-bold text-sm text-slate-800 border-b pb-2">Daftar Temuan di Rak Ini ({unmappedList.length})</h4>
@@ -384,8 +419,13 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             </div>
           )}
 
-          <button type="button" onClick={handleSaveAndNext} className="w-full min-h-14 bg-blue-600 text-white rounded-xl font-bold text-lg shadow-md">
-            Simpan Semua &amp; Lanjut Rak Berikutnya
+          <button
+            type="button"
+            disabled={isLoadingSave}
+            onClick={handleSaveAndNext}
+            className="w-full min-h-14 bg-blue-600 text-white rounded-xl font-bold text-lg shadow-md cursor-pointer disabled:opacity-50"
+          >
+            {isLoadingSave ? "Menyimpan ke Cloud..." : "Simpan Semua & Lanjut Rak Berikutnya"}
           </button>
 
         </div>
