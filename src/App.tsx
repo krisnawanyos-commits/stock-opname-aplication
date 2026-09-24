@@ -80,11 +80,7 @@ export default function App() {
   }, [currentStep, sessionData, selectedRack, currentUser]);
 
   const handleLogout = () => {
-    localStorage.removeItem(STORAGE_KEYS.STEP);
-    localStorage.removeItem(STORAGE_KEYS.SESSION);
-    localStorage.removeItem(STORAGE_KEYS.RACK);
-    localStorage.removeItem(STORAGE_KEYS.USER);
-
+    localStorage.clear();
     setCurrentUser(null);
     setSessionData({
       sessionId: 'SO-2026-KOSAMBI',
@@ -99,18 +95,20 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-surface text-on-surface font-sans">
+    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
       {currentStep === 1 && (
         <Step1Login
           onSuccessLogin={(username: string, role: UserRole, name?: string) => {
-            setCurrentUser({ username, role, name });
+            const userObj = { username, role, name: name || username };
+            setCurrentUser(userObj);
+
             setSessionData(prev => ({
               ...prev,
               primaryCounter: username,
-              role: role === 'owner' || role === 'spv' ? 'admin' : 'counter'
+              role: (role === 'owner' || role === 'spv' || username === 'owner') ? 'admin' : 'counter'
             }));
 
-            if (role === 'owner' || role === 'spv') {
+            if (role === 'owner' || role === 'spv' || username === 'owner') {
               setCurrentStep('admin');
             } else {
               setCurrentStep(2);

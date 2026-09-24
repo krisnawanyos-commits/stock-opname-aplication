@@ -7,28 +7,14 @@ import type { UserRole } from '../types';
 export interface Step1LoginProps {
   onSuccessLogin?: (username: string, role: UserRole, name?: string) => void;
   onLogin?: (role: UserRole, email: string, username: string) => void;
-  onBackToApp?: () => void;
-  currentUserRole?: UserRole;
   [key: string]: any;
 }
 
-export default function Step1Login({ onSuccessLogin, onLogin, currentUsername }: Step1LoginProps) {
-  const [username, setUsername] = useState(currentUsername || '');
+export default function Step1Login({ onSuccessLogin, onLogin }: Step1LoginProps) {
+  const [username, setUsername] = useState('');
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-
-  const triggerLoginSuccess = (role: UserRole, email: string, userStr: string, nameStr?: string) => {
-    console.log("➡️ Executing Login Success:", { role, email, userStr, nameStr });
-
-    // Panggil kedua handler agar kompatibel dengan App.tsx versi manapun
-    if (onSuccessLogin) {
-      onSuccessLogin(userStr, role, nameStr || userStr);
-    }
-    if (onLogin) {
-      onLogin(role, email, userStr);
-    }
-  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -45,29 +31,29 @@ export default function Step1Login({ onSuccessLogin, onLogin, currentUsername }:
     setIsLoading(true);
 
     try {
-      // 1. Fallback Kredensial Super Admin / Owner Bawaan (Bypass Firestore)
+      // Direct Owner Bypass
       if ((cleanUsername === 'owner' || cleanUsername === 'admin') && cleanPin === '1234') {
-        triggerLoginSuccess('owner', 'yos.krisnawan@anymindgroup.com', 'owner', 'Yos Krisnawan');
-        return;
-      }
-      if (cleanUsername === 'spv.lead' && cleanPin === '1234') {
-        triggerLoginSuccess('spv', 'spv@anymindgroup.com', 'spv.lead', 'Supervisor Lead');
+        if (onSuccessLogin) onSuccessLogin('owner', 'owner', 'Yos Krisnawan');
+        if (onLogin) onLogin('owner', 'yos.krisnawan@anymindgroup.com', 'owner');
         return;
       }
 
-      // 2. Cek ke Cloud Firestore (Koleksi global_accounts)
+      if (cleanUsername === 'spv.lead' && cleanPin === '1234') {
+        if (onSuccessLogin) onSuccessLogin('spv.lead', 'spv', 'Supervisor Lead');
+        if (onLogin) onLogin('spv', 'spv@anymindgroup.com', 'spv.lead');
+        return;
+      }
+
+      // Cek Firestore untuk Counter
       const docRef = doc(db, "global_accounts", cleanUsername);
       const docSnap = await getDoc(docRef);
 
       if (docSnap.exists()) {
         const userData = docSnap.data();
         if (String(userData.pin).trim() === cleanPin) {
-          triggerLoginSuccess(
-            (userData.role as UserRole) || 'counter',
-            userData.email || `${cleanUsername}@anymindgroup.com`,
-            cleanUsername,
-            userData.name || cleanUsername
-          );
+          const roleVal: UserRole = (userData.role as UserRole) || 'counter';
+          if (onSuccessLogin) onSuccessLogin(cleanUsername, roleVal, userData.name || cleanUsername);
+          if (onLogin) onLogin(roleVal, userData.email || `${cleanUsername}@anymindgroup.com`, cleanUsername);
         } else {
           setError('PIN 4-digit salah! Silakan periksa kembali.');
         }
@@ -75,7 +61,7 @@ export default function Step1Login({ onSuccessLogin, onLogin, currentUsername }:
         setError(`Akun "${cleanUsername}" belum terdaftar di KTP Cloud.`);
       }
     } catch (err: any) {
-      console.error("❌ Login Error:", err);
+      console.error("Login Error:", err);
       setError('Gagal terhubung ke Cloud Firestore. Periksa koneksi internet.');
     } finally {
       setIsLoading(false);
@@ -91,7 +77,6 @@ export default function Step1Login({ onSuccessLogin, onLogin, currentUsername }:
     <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 font-sans">
       <div className="max-w-sm w-full bg-white rounded-3xl shadow-xl shadow-slate-200/50 p-8 space-y-6 border border-slate-100 relative overflow-hidden">
 
-        {/* Header Logo */}
         <div className="flex flex-col items-center space-y-3 relative z-10">
           <div className="w-14 h-14 bg-amber-50 text-amber-500 rounded-2xl flex items-center justify-center shadow-inner border border-amber-100">
             <ShieldCheck className="w-8 h-8" />
@@ -102,7 +87,6 @@ export default function Step1Login({ onSuccessLogin, onLogin, currentUsername }:
           </div>
         </div>
 
-        {/* Error Banner */}
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-xl flex items-start space-x-2.5 animate-in slide-in-from-top-2 relative z-10">
             <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
@@ -110,7 +94,6 @@ export default function Step1Login({ onSuccessLogin, onLogin, currentUsername }:
           </div>
         )}
 
-        {/* Form Login */}
         <form onSubmit={handleLogin} className="space-y-4 relative z-10">
           <div className="space-y-1.5">
             <label className="text-xs font-black text-slate-700 uppercase tracking-wider">Username Akun</label>
@@ -150,7 +133,6 @@ export default function Step1Login({ onSuccessLogin, onLogin, currentUsername }:
           </button>
         </form>
 
-        {/* Info Testing & Reset */}
         <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl space-y-2 relative z-10">
           <p className="text-xs font-black text-slate-700">Kredensial Cloud Aktif:</p>
           <ul className="text-[11px] text-slate-500 font-medium space-y-1 leading-relaxed">
