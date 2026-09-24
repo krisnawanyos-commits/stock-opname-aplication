@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../firebase';
 import {
-    collection, onSnapshot, doc, setDoc, deleteDoc, writeBatch
+    collection, onSnapshot, doc, setDoc, deleteDoc, writeBatch, getDocs
 } from 'firebase/firestore';
 import * as XLSX from 'xlsx';
 import {
@@ -11,7 +11,7 @@ import {
     CheckCircle2, XCircle, Search, Building2, DollarSign,
     Download, Scale, PlayCircle, Archive, ArrowLeft, AlertTriangle,
     LogOut, GripHorizontal, Contact, Eye, EyeOff, UserCheck, Clock, Store, Link2, KeyRound,
-    Mail, ExternalLink
+    Mail, ExternalLink, Edit2
 } from 'lucide-react';
 import type { UserRole } from '../types';
 
@@ -145,6 +145,9 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
     const [selectedCounterForDetail, setSelectedCounterForDetail] = useState<string | null>(null);
     const [ktpSearch, setKtpSearch] = useState<string>('');
 
+    // EDIT KTP CLOUD STATE
+    const [editingAccount, setEditingAccount] = useState<GlobalAccount | null>(null);
+
     const [assignUsername, setAssignUsername] = useState<string>('');
     const [assignRole, setAssignRole] = useState<UserRole>('counter');
 
@@ -272,6 +275,19 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
         }
     };
 
+    const handleSaveEditedGlobalAccount = async () => {
+        if (!editingAccount) return;
+        const uName = editingAccount.username.toLowerCase().trim();
+        await setDoc(doc(db, "global_accounts", uName), {
+            username: uName,
+            name: editingAccount.name,
+            email: editingAccount.email,
+            pin: editingAccount.pin || '1234'
+        }, { merge: true });
+        setEditingAccount(null);
+        triggerNotification(`Akun KTP ${uName} berhasil diperbarui!`);
+    };
+
     const handleBlastEmailCredentials = () => {
         if (globalAccounts.length === 0) {
             triggerNotification('Belum ada akun KTP Cloud terdaftar.');
@@ -326,7 +342,7 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
         acc.email.toLowerCase().includes(ktpSearch.toLowerCase())
     );
 
-    // PARSER EXCEL DENGAN SANITASI GARIS MIRING PADA DOCUMENT ID FIRESTORE
+    // PARSER EXCEL DENGAN HAPUS DATA LAMA SANGAT CEPAT UNTUK MENCEGAH DOUBLE / DUPLIKAT SKU
     const parseXLSXFile = (file: File, currentProjId?: string): Promise<MasterSKUItem[]> => {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
@@ -337,8 +353,15 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                     const worksheet = workbook.Sheets[workbook.SheetNames[0]];
                     const json = XLSX.utils.sheet_to_json(worksheet) as any[];
 
-                    triggerNotification("Mengunggah data ke Cloud Firestore...");
+                    triggerNotification("Reset data lama & mengunggah data baru ke Cloud...");
 
+                    // 1. Dapatkan dokumen lama & hapus agar tidak ada SKU ganda
+                    const oldDocsSnap = await getDocs(collection(db, "master_tasks"));
+                    const cleanBatch = writeBatch(db);
+                    oldDocsSnap.docs.forEach(oldDoc => cleanBatch.delete(oldDoc.ref));
+                    await cleanBatch.commit();
+
+                    // 2. Tulis data Excel baru via writeBatch
                     const batch = writeBatch(db);
                     const newMasterList: MasterSKUItem[] = [];
                     const pId = currentProjId || activeProject?.id;
@@ -349,7 +372,7 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                         const locStr = (row['Location'] || row['LOCATION'] || `LOC-${idx + 1}`).toString().trim();
                         const skuStr = (row['SKU'] || `SKU-${idx + 1}`).toString().trim();
 
-                        // SANITASI GARIS MIRING UNTUK ID DOKUMEN FIRESTORE
+                        // SANITASI ID DOKUMEN (Ubah '/' jadi '-')
                         const rawTaskId = `${locStr}_${skuStr}_${idx + 1}`;
                         const taskId = rawTaskId.replace(/\//g, '-');
 
@@ -643,6 +666,38 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                 </div>
             )}
 
+            {/* MODAL EDIT KTP CLOUD */}
+            {editingAccount && (
+                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-5 shadow-2xl border border-slate-200">
+                        <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+                            <h3 className="text-base font-black text-slate-900">Edit Akun KTP: {editingAccount.username}</h3>
+                            <button onClick={() => setEditingAccount(null)} className="p-2 text-slate-400 hover:text-slate-700 bg-slate-100 rounded-xl">✕</button>
+                        </div>
+
+                        <div className="space-y-3">
+                            <div>
+                                <label className="text-xs font-bold text-slate-600 block mb-1">Nama Pegawai:</label>
+                                <input type="text" value={editingAccount.name} onChange={(e) => setEditingAccount({ ...editingAccount, name: e.target.value })} className="w-full px-4 py-2 text-xs bg-slate-50 border rounded-xl outline-none" />
+                            </div>
+                            <div>
+                                <label className="text-xs font-bold text-slate-600 block mb-1">Email Pegawai:</label>
+                                <input type="email" value={editingAccount.email} onChange={(e) => setEditingAccount({ ...editingAccount, email: e.target.value })} className="w-full px-4 py-2 text-xs bg-slate-50 border rounded-xl outline-none" />
+                            </div>
+                            <div>
+                                <label className="text-xs font-bold text-slate-600 block mb-1">PIN Akses (4-Digit):</label>
+                                <input type="text" maxLength={4} value={editingAccount.pin} onChange={(e) => setEditingAccount({ ...editingAccount, pin: e.target.value })} className="w-full px-4 py-2 text-xs font-mono bg-slate-50 border rounded-xl outline-none" />
+                            </div>
+                        </div>
+
+                        <div className="flex justify-end space-x-2 pt-2">
+                            <button onClick={() => setEditingAccount(null)} className="px-4 py-2 bg-slate-100 text-slate-700 rounded-xl text-xs font-bold">Batal</button>
+                            <button onClick={handleSaveEditedGlobalAccount} className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md">Simpan Perubahan</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* MODAL POPUP DETAIL SELISIH COUNTER */}
             {selectedCounterForDetail && (
                 <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
@@ -796,10 +851,9 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                         </div>
                     )}
 
-                    {/* ACCOUNTS (KTP) TAB DENGAN OWNER SETTINGS */}
+                    {/* ACCOUNTS (KTP) TAB DENGAN TOMBOL EDIT */}
                     {landingTab === 'accounts' && effectiveRole === 'owner' && (
                         <div className="space-y-6">
-                            {/* FORM OWNER ACCOUNT UPDATE */}
                             <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl space-y-4">
                                 <div className="border-b border-slate-100 pb-3 flex justify-between items-center">
                                     <h3 className="text-base font-black text-slate-900 flex items-center space-x-2">
@@ -858,6 +912,7 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                                                         </button>
                                                     </td>
                                                     <td className="p-4 text-right space-x-2">
+                                                        <button onClick={() => setEditingAccount(acc)} className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-xl" title="Edit Akun KTP"><Edit2 className="w-4 h-4" /></button>
                                                         <button onClick={() => handleSendIndividualEmail(acc)} className="p-2 text-purple-600 hover:bg-purple-50 rounded-xl" title="Kirim Email Individual"><Mail className="w-4 h-4" /></button>
                                                         <button onClick={() => handleDeleteGlobalAccount(acc.username)} className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl"><Trash2 className="w-4 h-4" /></button>
                                                     </td>

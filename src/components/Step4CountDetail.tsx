@@ -40,7 +40,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     isOpen: false, title: '', message: '',
   });
 
-  // REAL-TIME FIRESTORE DATA FETCHING UNTUK RAK YANG DIPILIH
+  // REAL-TIME FIRESTORE DATA FETCHING DENGAN KONDISI DEFAULT QTY = 0 UNTUK BARANG BELUM DIHITUNG
   useEffect(() => {
     const primaryCounter = (sessionData.primaryCounter || "Unassigned").toLowerCase().trim();
     const targetLocation = rack.rackNumber || rack.id;
@@ -56,7 +56,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
         const data = docSnap.data();
         const rawActQty = data.QTY_ACTUAL ?? data.countedQty;
         const numActQty = parseInt(rawActQty, 10);
-        const hasActQty = rawActQty !== undefined && rawActQty !== null && !isNaN(numActQty);
+        const isCounted = !!data.isCounted || (rawActQty !== undefined && rawActQty !== null && !isNaN(numActQty));
 
         return {
           id: docSnap.id,
@@ -66,7 +66,8 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
           name: data.Description || data.name || data.SKU || '',
           category: `${data.Zone || 'RACKING'} • ${data.SKUBrand || 'General'}`,
           uom: (data.satuanHitung as 'PCS' | 'CARTON') || 'PCS',
-          qtyGood: hasActQty ? numActQty : (parseInt(data.Qty || data.QTY_SYSTEM) || 0),
+          // TAMPILKAN 0 JIKA BARANG BELUM DIHITUNG DI LAPANGAN
+          qtyGood: isCounted ? (isNaN(numActQty) ? 0 : numActQty) : 0,
           qtyBad: parseInt(data.QTY_BAD) || 0,
           expDateSystem: data.expiredDateSystem || '',
           expDateActual: data.expDateActual || data.expiredDateActual || '',
@@ -185,15 +186,14 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     setUnmappedList((prev) => prev.filter((item) => item.id !== id));
   };
 
-  // SYNC FIRESTORE COMPLETE PROGRESS UPDATE REAL-TIME
+  // SYNC MENGGUNAKAN ID DOKUMEN FIRESTORE ASLI UNTUK MENCEGAH DATA DOUBLE
   const handleSaveAndNext = async () => {
     if (isSessionLocked) return;
     setIsLoadingSave(true);
 
     try {
       for (const skuItem of skuList) {
-        const taskId = skuItem.id;
-        await setDoc(doc(db, "master_tasks", taskId), {
+        await setDoc(doc(db, "master_tasks", skuItem.id), {
           counter: (sessionData.primaryCounter || 'Unassigned').toLowerCase().trim(),
           isCounted: true,
           QTY_ACTUAL: skuItem.qtyGood,
