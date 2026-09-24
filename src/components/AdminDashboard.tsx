@@ -37,6 +37,7 @@ interface ProjectTeamMember {
 }
 
 interface MasterSKUItem {
+    id?: string;
     Owner: string;
     SKU: string;
     Description: string;
@@ -193,6 +194,7 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
     const [warehouseList, setWarehouseList] = useState<LocationOption[]>([]);
     const [consignmentStoreList, setConsignmentStoreList] = useState<LocationOption[]>([]);
     const [activeProject, setActiveProject] = useState<ProjectSession | null>(null);
+    const [masterDataList, setMasterDataList] = useState<MasterSKUItem[]>([]);
 
     useEffect(() => {
         const unsub1 = onSnapshot(collection(db, "global_accounts"), (snap) => setGlobalAccounts(snap.docs.map(d => ({ id: d.id, ...d.data() } as GlobalAccount))));
@@ -203,6 +205,52 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
 
         return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); };
     }, []);
+
+    useEffect(() => {
+        if (!activeProject) return;
+
+        const qTasks = collection(db, "master_tasks");
+        const unsubscribe = onSnapshot(qTasks, (snapshot) => {
+            const taskList: MasterSKUItem[] = snapshot.docs.map(docSnap => {
+                const data = docSnap.data();
+                const rawActQty = data.QTY_ACTUAL ?? data.countedQty;
+                const numActQty = parseInt(rawActQty, 10);
+                const isCounted = data.isCounted || (rawActQty !== undefined && rawActQty !== null && !isNaN(numActQty));
+
+                return {
+                    id: docSnap.id,
+                    Owner: data.Owner || 'DDI',
+                    SKU: data.SKU || '',
+                    Description: data.Description || data.name || '',
+                    UPC1: data.UPC1 || '',
+                    UPC2: data.UPC2 || '',
+                    SKUBrand: data.SKUBrand || '',
+                    satuanHitung: data.satuanHitung || 'PCS',
+                    Location: data.Location || '',
+                    level: data.level || '1',
+                    ailee: data.ailee || '',
+                    Zone: data.Zone || 'RACKING',
+                    LocationType: data.LocationType || 'RACK',
+                    counter: (data.counter || 'Unassigned').toLowerCase().trim(),
+                    Status: data.Status || 'Active',
+                    currentRound: data.currentRound || 1,
+                    expiredDateSystem: data.expiredDateSystem || '',
+                    expiredDateActual: data.expDateActual || '',
+                    Qty: parseInt(data.Qty || data.QTY_SYSTEM) || 0,
+                    countedQty: isCounted ? (isNaN(numActQty) ? 0 : numActQty) : undefined,
+                    Remarks: data.badRemarks || data.Remarks || '',
+                    isCounted: !!isCounted,
+                    unitPrice: parseInt(data.unitPrice) || 0
+                };
+            });
+
+            if (taskList.length > 0) {
+                setMasterDataList(taskList);
+            }
+        });
+
+        return () => unsubscribe();
+    }, [activeProject]);
 
     const combinedLocationOptions = [
         ...warehouseList.map(w => ({ value: w.id, label: `[Gudang WMS] ${w.name}` })),
@@ -276,37 +324,93 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
         acc.email.toLowerCase().includes(ktpSearch.toLowerCase())
     );
 
-    const [masterDataList, setMasterDataList] = useState<MasterSKUItem[]>([]);
-    const parseXLSXFile = (file: File) => {
+    const parseXLSXFile = async (file: File) => {
         const reader = new FileReader();
-        reader.onload = (e) => {
+        reader.onload = async (e) => {
             const data = new Uint8Array(e.target?.result as ArrayBuffer);
             const workbook = XLSX.read(data, { type: 'array' });
             const worksheet = workbook.Sheets[workbook.SheetNames[0]];
             const json = XLSX.utils.sheet_to_json(worksheet) as any[];
-            const parsed = json.map(row => {
+
+            triggerNotification("Mengunggah dan menyimpan Master Task ke Cloud...");
+
+            const newMasterList: MasterSKUItem[] = [];
+
+            for (let idx = 0; idx < json.length; idx++) {
+                const row = json[idx];
+                const rawCounter = (row['counter'] || row['Counter'] || row['COUNTER'] || 'Unassigned').toString().toLowerCase().trim();
+                const locStr = (row['Location'] || row['LOCATION'] || `LOC-${idx + 1}`).toString().trim();
+                const skuStr = (row['SKU'] || `SKU-${idx + 1}`).toString().trim();
+                const taskId = `${locStr}_${skuStr}`;
+
+                if (rawCounter !== 'unassigned' && activeProject) {
+                    await setDoc(doc(db, "project_teams", `${activeProject.id}_${rawCounter}`), {
+                        projectId: activeProject.id,
+                        username: rawCounter,
+                        role: 'counter'
+                    }, { merge: true });
+                }
+
                 const rawActQty = row['QTY ACTUAL'] ?? row['Qty Actual'] ?? row['ACTUAL QTY'];
                 const numActQty = parseInt(rawActQty, 10);
-                const countedQty = (rawActQty !== undefined && rawActQty !== null && rawActQty !== '' && !isNaN(numActQty)) ? numActQty : undefined;
+                const isCounted = rawActQty !== undefined && rawActQty !== null && rawActQty !== '' && !isNaN(numActQty);
 
-                return {
+                const taskDoc = {
                     Owner: row['Owner'] || 'DDI',
-                    SKU: row['SKU']?.toString() || '', Description: row['Description'] || '',
-                    UPC1: row['UPC 1']?.toString() || '', UPC2: row['UPC 2']?.toString() || '', SKUBrand: row['SKU Brand'] || '',
-                    satuanHitung: row['satuan hitung'] || 'PCS', Location: row['Location']?.toString() || '', level: row['level']?.toString() || '1',
-                    ailee: row['ailee']?.toString() || '', Zone: row['Zone']?.toString() || '', LocationType: row['Location Type'] || 'RACK',
-                    counter: row['counter'] || 'Unassigned', Status: row['Status'] || 'Active', currentRound: parseInt(row['current round']) || 1,
-                    expiredDateSystem: row['expired date by system'] || '', expiredDateActual: row['expired date by actual'] || '',
+                    SKU: skuStr,
+                    Description: row['Description'] || '',
+                    UPC1: row['UPC 1']?.toString() || '',
+                    UPC2: row['UPC 2']?.toString() || '',
+                    SKUBrand: row['SKU Brand'] || '',
+                    satuanHitung: row['satuan hitung'] || 'PCS',
+                    Location: locStr,
+                    level: row['level']?.toString() || '1',
+                    ailee: row['ailee']?.toString() || '',
+                    Zone: row['Zone']?.toString() || 'RACKING',
+                    LocationType: row['Location Type'] || 'RACK',
+                    counter: rawCounter,
+                    Status: row['Status'] || 'Active',
+                    currentRound: parseInt(row['current round']) || 1,
+                    expiredDateSystem: row['expired date by system'] || '',
+                    expiredDateActual: row['expired date by actual'] || '',
                     Qty: parseInt(row['Qty System'] || row['QTY SYSTEM']) || 0,
-                    countedQty,
-                    Remarks: row['REMARKS'] || '',
-                    isCounted: countedQty !== undefined,
-                    unitPrice: parseInt(row['Unit Price'] || '0')
+                    unitPrice: parseInt(row['Unit Price'] || '0'),
+                    isCounted,
+                    QTY_ACTUAL: isCounted ? numActQty : null,
+                    updatedAt: new Date().toISOString()
                 };
-            });
-            setMasterDataList(parsed); triggerNotification(`Upload ${parsed.length} SKU Sukses!`);
+
+                await setDoc(doc(db, "master_tasks", taskId), taskDoc, { merge: true });
+
+                newMasterList.push({
+                    id: taskId,
+                    ...taskDoc,
+                    countedQty: isCounted ? numActQty : undefined,
+                    Remarks: ''
+                });
+            }
+
+            setMasterDataList(newMasterList);
+            triggerNotification(`Upload Berhasil! ${newMasterList.length} SKU tersimpan di Firestore Cloud.`);
         };
         reader.readAsArrayBuffer(file);
+    };
+
+    const handleReassignCounter = async (taskIndex: number, newCounter: string) => {
+        const targetItem = masterDataList[taskIndex];
+        const cleanCounter = newCounter.toLowerCase().trim();
+        const taskId = targetItem.id || `${targetItem.Location}_${targetItem.SKU}`;
+
+        await setDoc(doc(db, "master_tasks", taskId), {
+            counter: cleanCounter,
+            updatedAt: new Date().toISOString()
+        }, { merge: true });
+
+        const updatedList = [...masterDataList];
+        updatedList[taskIndex].counter = cleanCounter;
+        setMasterDataList(updatedList);
+
+        triggerNotification(`Lokasi ${targetItem.Location} (${targetItem.SKU}) ditugaskan ke: ${cleanCounter}`);
     };
 
     const handleDownloadTemplateXLSX = () => {
@@ -316,7 +420,7 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
             'UPC 1': '12345678',
             'UPC 2': '',
             Status: 'Active',
-            Location: 'R-01',
+            Location: 'A01-50-A',
             level: '1',
             ailee: 'A',
             Zone: 'FOOD',
@@ -396,7 +500,7 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
             method: wizMethod, status: 'LIVE_ACTIVE', createdAt: new Date().toLocaleString()
         };
         await setDoc(doc(db, "projects", projId), newSession);
-        if (initialFileToUpload) parseXLSXFile(initialFileToUpload); else setMasterDataList([]);
+        if (initialFileToUpload) await parseXLSXFile(initialFileToUpload);
         setRecoveryAdjustments({}); setActiveProject({ id: projId, ...newSession } as ProjectSession);
         setViewState('DASHBOARD'); setActiveTab('progress');
         triggerNotification(`Project Baru Diluncurkan: ${newSession.sessionCode}`);
@@ -753,7 +857,6 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                             </div>
                         </div>
 
-                        {/* RESTORED CARD PRE-LOAD MASTER TASK EXCEL WITH DOWNLOAD TEMPLATE BUTTON */}
                         <div className="p-5 bg-linear-to-br from-indigo-50 to-blue-50 border border-indigo-100 rounded-2xl text-center space-y-3">
                             <div className="flex justify-center"><FileSpreadsheet className="w-8 h-8 text-indigo-600" /></div>
                             <div>
@@ -966,7 +1069,15 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                                                 <td className="p-3 font-mono font-black text-indigo-600">{row.SKU}</td>
                                                 <td className="p-3 truncate max-w-xs">{row.Description}</td>
                                                 <td className="p-3 font-mono font-bold">{row.Location}</td>
-                                                <td className="p-2"><SearchableSelect options={activeTeamMembers.map(t => ({ value: t.username, label: t.username }))} value={row.counter === 'Unassigned' ? '' : row.counter} onChange={(val: string) => { const nw = [...masterDataList]; nw[idx].counter = val; setMasterDataList(nw); }} placeholder="Assign..." className="w-32" /></td>
+                                                <td className="p-2">
+                                                    <SearchableSelect
+                                                        options={globalAccounts.map(acc => ({ value: acc.username, label: acc.username }))}
+                                                        value={row.counter === 'unassigned' ? '' : row.counter}
+                                                        onChange={(val: string) => handleReassignCounter(idx, val)}
+                                                        placeholder="Assign..."
+                                                        className="w-32"
+                                                    />
+                                                </td>
                                                 <td className="p-3 text-center font-bold text-slate-400">{row.Qty}</td>
                                                 <td className="p-3 text-center font-black text-sm">{(row.isCounted && row.countedQty !== undefined && !isNaN(row.countedQty)) ? row.countedQty : '-'}</td>
                                             </tr>
