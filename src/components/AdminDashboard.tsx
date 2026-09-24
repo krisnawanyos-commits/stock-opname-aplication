@@ -10,7 +10,8 @@ import {
     UserPlus, Filter, TrendingDown, Printer, SlidersHorizontal,
     CheckCircle2, XCircle, Search, Building2, DollarSign,
     Download, Scale, PlayCircle, Archive, ArrowLeft, AlertTriangle,
-    LogOut, GripHorizontal, Contact, Eye, EyeOff, UserCheck, Clock, Store, Link2, KeyRound
+    LogOut, GripHorizontal, Contact, Eye, EyeOff, UserCheck, Clock, Store, Link2, KeyRound,
+    Mail, ExternalLink
 } from 'lucide-react';
 import type { UserRole } from '../types';
 
@@ -138,6 +139,9 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
     const [orderedTabs, setOrderedTabs] = useState<TabDefinition[]>([]);
     const [draggedTabId, setDraggedTabId] = useState<string | null>(null);
 
+    // STATE UNTUK MODAL DETAIL SELISIH COUNTER
+    const [selectedCounterForDetail, setSelectedCounterForDetail] = useState<string | null>(null);
+
     useEffect(() => {
         setOrderedTabs(ALL_AVAILABLE_TABS.filter(tab => tab.roles.includes(effectiveRole)));
     }, [effectiveRole]);
@@ -160,7 +164,7 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
     const [newWhName, setNewWhName] = useState<string>('');
     const [newStoreName, setNewStoreName] = useState<string>('');
 
-    // FORM UPDATE AKUN OWNER (Global Settings)
+    // FORM UPDATE AKUN OWNER
     const [ownerNewName, setOwnerNewName] = useState<string>('Yos Krisnawan');
     const [ownerNewEmail, setOwnerNewEmail] = useState<string>(currentUserEmail || '');
     const [ownerNewPin, setOwnerNewPin] = useState<string>('');
@@ -225,6 +229,21 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
             });
             triggerNotification('Profil & Akun Owner Berhasil Diperbarui!');
         }
+    };
+
+    // BLAST EMAIL KREDENSIAL
+    const handleBlastEmailCredentials = () => {
+        if (globalAccounts.length === 0) {
+            triggerNotification('Belum ada akun KTP Cloud terdaftar untuk diblast.');
+            return;
+        }
+
+        const emailList = globalAccounts.map(a => a.email).filter(Boolean).join(',');
+        const subject = encodeURIComponent("Kredensial Login Sistem Stock Opname 360");
+        const body = encodeURIComponent("Halo Tim Stock Opname,\n\nBerikut informasi akun login kamu ke aplikasi Stock Opname 360:\n\nSilakan gunakan Username dan PIN 4-digit yang telah didaftarkan oleh Admin.\n\nTerima kasih.\nTim Operations WMS");
+
+        window.location.href = `mailto:${emailList}?subject=${subject}&body=${body}`;
+        triggerNotification(`Membuka pengiriman blast email ke ${globalAccounts.length} akun...`);
     };
 
     // KTP GLOBAL MANAGEMENT
@@ -454,7 +473,7 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
         link.setAttribute('download', 'Template_Assign_Tim_Project.csv'); link.click();
     };
 
-    // EXCEL PARSER TANPA MANDATORI OWNER UNTUK MASTER TASK
+    // EXCEL PARSER DENGAN SANITASI NaN PADA ACTUAL QTY
     const [masterDataList, setMasterDataList] = useState<MasterSKUItem[]>([]);
     const parseXLSXFile = (file: File) => {
         const reader = new FileReader();
@@ -463,50 +482,63 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
             const workbook = XLSX.read(data, { type: 'array' });
             const worksheet = workbook.Sheets[workbook.SheetNames[0]];
             const json = XLSX.utils.sheet_to_json(worksheet) as any[];
-            const parsed = json.map(row => ({
-                Owner: row['Owner'] || 'DDI',
-                SKU: row['SKU']?.toString() || '', Description: row['Description'] || '',
-                UPC1: row['UPC 1']?.toString() || '', UPC2: row['UPC 2']?.toString() || '', SKUBrand: row['SKU Brand'] || '',
-                satuanHitung: row['satuan hitung'] || 'PCS', Location: row['Location']?.toString() || '', level: row['level']?.toString() || '1',
-                ailee: row['ailee']?.toString() || '', Zone: row['Zone']?.toString() || '', LocationType: row['Location Type'] || 'RACK',
-                counter: row['counter'] || 'Unassigned', Status: row['Status'] || 'Active', currentRound: parseInt(row['current round']) || 1,
-                expiredDateSystem: row['expired date by system'] || '', expiredDateActual: row['expired date by actual'] || '',
-                Qty: parseInt(row['Qty System'] || row['QTY SYSTEM']) || 0, countedQty: row['QTY ACTUAL'] !== undefined ? parseInt(row['QTY ACTUAL']) : undefined,
-                Remarks: row['REMARKS'] || '', isCounted: row['QTY ACTUAL'] !== undefined, unitPrice: parseInt(row['Unit Price'] || '0')
-            }));
+            const parsed = json.map(row => {
+                const rawActQty = row['QTY ACTUAL'] ?? row['Qty Actual'] ?? row['ACTUAL QTY'];
+                const numActQty = parseInt(rawActQty, 10);
+                const countedQty = (rawActQty !== undefined && rawActQty !== null && rawActQty !== '' && !isNaN(numActQty)) ? numActQty : undefined;
+
+                return {
+                    Owner: row['Owner'] || 'DDI',
+                    SKU: row['SKU']?.toString() || '', Description: row['Description'] || '',
+                    UPC1: row['UPC 1']?.toString() || '', UPC2: row['UPC 2']?.toString() || '', SKUBrand: row['SKU Brand'] || '',
+                    satuanHitung: row['satuan hitung'] || 'PCS', Location: row['Location']?.toString() || '', level: row['level']?.toString() || '1',
+                    ailee: row['ailee']?.toString() || '', Zone: row['Zone']?.toString() || '', LocationType: row['Location Type'] || 'RACK',
+                    counter: row['counter'] || 'Unassigned', Status: row['Status'] || 'Active', currentRound: parseInt(row['current round']) || 1,
+                    expiredDateSystem: row['expired date by system'] || '', expiredDateActual: row['expired date by actual'] || '',
+                    Qty: parseInt(row['Qty System'] || row['QTY SYSTEM']) || 0,
+                    countedQty,
+                    Remarks: row['REMARKS'] || '',
+                    isCounted: countedQty !== undefined,
+                    unitPrice: parseInt(row['Unit Price'] || '0')
+                };
+            });
             setMasterDataList(parsed); triggerNotification(`Upload ${parsed.length} SKU Sukses!`);
         };
         reader.readAsArrayBuffer(file);
     };
 
-    const handleDownloadTemplateXLSX = () => {
-        const templateData = [{
-            SKU: 'ENFA-01',
-            Description: 'Susu Kaleng 400g',
-            'UPC 1': '12345678',
-            'UPC 2': '',
-            Status: 'Active',
-            Location: 'R-01',
-            level: '1',
-            ailee: 'A',
-            Zone: 'FOOD',
-            'Location Type': 'RACK',
-            counter: 'agus.lap',
-            'current round': 1,
-            'satuan hitung': 'PCS',
-            'SKU Brand': 'ENFAGROW',
-            'expired date by system': '2026-12-31',
-            'expired date by actual': '',
-            'QTY ACTUAL': '',
-            REMARKS: '',
-            'Qty System': 100,
-            'Unit Price': 150000
-        }];
-        const ws = XLSX.utils.json_to_sheet(templateData);
+    // EXPORT DATA MASTER TASK SAAT INI (TERISI PENUGASAN COUNTER & HASIL)
+    const handleExportCurrentMasterXLSX = () => {
+        if (masterDataList.length === 0) {
+            triggerNotification("Tidak ada data Master Task untuk diexport!");
+            return;
+        }
+
+        const exportData = masterDataList.map(item => ({
+            'SKU': item.SKU,
+            'Description': item.Description,
+            'SKU Brand': item.SKUBrand,
+            'Location': item.Location,
+            'Zone': item.Zone,
+            'level': item.level,
+            'Location Type': item.LocationType,
+            'counter': item.counter,
+            'expired date by system': item.expiredDateSystem,
+            'expired date by actual': item.expiredDateActual,
+            'Qty System': item.Qty,
+            'QTY ACTUAL': (item.countedQty !== undefined && !isNaN(item.countedQty)) ? item.countedQty : '',
+            'Unit Price': item.unitPrice || 0,
+            'REMARKS': item.Remarks || '',
+            'Status': item.Status || 'Active',
+            'current round': item.currentRound || 1,
+            'satuan hitung': item.satuanHitung || 'PCS'
+        }));
+
+        const ws = XLSX.utils.json_to_sheet(exportData);
         const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, "Master_Task");
-        XLSX.writeFile(wb, "Template_Master_Task.xlsx");
-        triggerNotification("Template Master Task (.xlsx) berhasil diunduh!");
+        XLSX.utils.book_append_sheet(wb, ws, "Master_Task_Terisi");
+        XLSX.writeFile(wb, `Master_Task_Data_${activeProject?.sessionCode || 'SO'}.xlsx`);
+        triggerNotification("Export data Master Task (.xlsx) berhasil diunduh!");
     };
 
     const handleSaveRecoveryOverride = (sku: string, newQty: number) => {
@@ -560,6 +592,11 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
     const varianceRecoveryCount = masterDataList.length - matchRecoveryCount;
     const totalFinancialVarianceValue = masterDataList.reduce((acc, m) => acc + (((recoveryAdjustments[m.SKU] !== undefined ? recoveryAdjustments[m.SKU] : (m.countedQty ?? m.Qty)) - m.Qty) * (m.unitPrice || 0)), 0);
 
+    // DATA SELISIH KHUSUS COUNTER DILIK
+    const counterDiscrepancies = selectedCounterForDetail
+        ? masterDataList.filter(m => m.counter === selectedCounterForDetail && m.isCounted && (m.countedQty ?? m.Qty) !== m.Qty)
+        : [];
+
     return (
         <div className="min-h-screen bg-slate-50 text-slate-800 p-4 lg:p-8 max-w-7xl mx-auto font-sans relative">
             <div className="absolute top-0 left-0 w-full h-2 bg-linear-to-r from-blue-600 via-indigo-600 to-purple-600 rounded-t-2xl hidden md:block"></div>
@@ -567,6 +604,51 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
             {showToast && (
                 <div className="fixed top-6 right-6 z-50 bg-slate-900 text-white px-5 py-3.5 rounded-2xl shadow-2xl flex items-center space-x-3 border border-slate-700 animate-in slide-in-from-top-4 duration-300">
                     <Check className="w-5 h-5 text-emerald-400" /><span className="text-sm font-semibold">{showToast}</span>
+                </div>
+            )}
+
+            {/* MODAL POPUP DETAIL SELISIH LOKASI PER COUNTER */}
+            {selectedCounterForDetail && (
+                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-3xl max-w-2xl w-full p-6 space-y-5 shadow-2xl border border-slate-200">
+                        <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+                            <div className="flex items-center space-x-3">
+                                <div className="p-2.5 bg-red-50 text-red-600 rounded-xl"><AlertTriangle className="w-6 h-6" /></div>
+                                <div>
+                                    <h3 className="text-base font-black text-slate-900">Detail Selisih: {selectedCounterForDetail}</h3>
+                                    <p className="text-xs text-slate-500 font-medium">Daftar lokasi rak dan SKU yang mengalami selisih hitung.</p>
+                                </div>
+                            </div>
+                            <button onClick={() => setSelectedCounterForDetail(null)} className="p-2 text-slate-400 hover:text-slate-700 bg-slate-100 rounded-xl">✕</button>
+                        </div>
+
+                        <div className="max-h-80 overflow-y-auto border border-slate-200 rounded-2xl scrollbar-thin">
+                            <table className="w-full text-left text-xs"><thead className="bg-slate-50 font-bold text-slate-600 border-b"><tr><th className="p-3">LOKASI RAK</th><th className="p-3">SKU</th><th className="p-3">DESKRIPSI</th><th className="p-3 text-center">SYSTEM</th><th className="p-3 text-center">AKTUAL</th><th className="p-3 text-center">SELISIH</th></tr></thead>
+                                <tbody className="divide-y divide-slate-100 font-medium">
+                                    {counterDiscrepancies.map((item, idx) => {
+                                        const diff = (item.countedQty || 0) - item.Qty;
+                                        return (
+                                            <tr key={idx} className="hover:bg-red-50/30">
+                                                <td className="p-3 font-mono font-bold text-indigo-600 flex items-center"><MapPin className="w-3.5 h-3.5 text-indigo-400 mr-1" />{item.Location}</td>
+                                                <td className="p-3 font-mono font-bold text-slate-900">{item.SKU}</td>
+                                                <td className="p-3 truncate max-w-xs">{item.Description}</td>
+                                                <td className="p-3 text-center text-slate-500">{item.Qty}</td>
+                                                <td className="p-3 text-center font-black">{item.countedQty}</td>
+                                                <td className="p-3 text-center font-black text-red-600">{diff > 0 ? `+${diff}` : diff}</td>
+                                            </tr>
+                                        );
+                                    })}
+                                    {counterDiscrepancies.length === 0 && (
+                                        <tr><td colSpan={6} className="p-8 text-center text-slate-400">Tidak ada selisih ditemukan pada counter ini. All match!</td></tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <div className="flex justify-end pt-2">
+                            <button onClick={() => setSelectedCounterForDetail(null)} className="px-5 py-2.5 bg-slate-900 text-white rounded-xl text-xs font-bold">Tutup</button>
+                        </div>
+                    </div>
                 </div>
             )}
 
@@ -702,11 +784,10 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                         </div>
                     )}
 
-                    {/* ACCOUNTS (KTP) TAB DENGAN OWNER SETTINGS DI ATAS */}
+                    {/* ACCOUNTS (KTP) TAB DENGAN TOMBOL BLAST EMAIL */}
                     {landingTab === 'accounts' && effectiveRole === 'owner' && (
                         <div className="space-y-6">
 
-                            {/* OWNER GLOBAL ACCOUNT SETTINGS PANEL */}
                             <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl shadow-slate-200/40 space-y-4">
                                 <div className="border-b border-slate-100 pb-3 flex justify-between items-center">
                                     <h3 className="text-base font-black text-slate-900 flex items-center space-x-2">
@@ -725,11 +806,13 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                                 </div>
                             </div>
 
-                            {/* GLOBAL ACCOUNTS (KTP) PANEL */}
                             <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl shadow-slate-200/40 space-y-6">
                                 <div className="flex flex-col md:flex-row justify-between md:items-center gap-4">
                                     <div><h3 className="text-base font-black text-slate-900">Master KTP & Otorisasi</h3><p className="text-sm text-slate-500 mt-1">Setup kredensial user untuk login counter/SPV lapangan.</p></div>
-                                    <button onClick={handleDownloadKTPTemplate} className="px-4 py-2.5 bg-slate-50 text-slate-700 border border-slate-200 rounded-xl text-sm font-bold flex items-center space-x-2 hover:bg-slate-100 transition-colors"><FileSpreadsheet className="w-4 h-4 text-emerald-600" /><span>Template KTP</span></button>
+                                    <div className="flex items-center space-x-2">
+                                        <button onClick={handleBlastEmailCredentials} className="px-4 py-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-sm font-bold flex items-center space-x-2 shadow-md transition-all active:scale-95"><Mail className="w-4 h-4" /><span>Blast Email Kredensial</span></button>
+                                        <button onClick={handleDownloadKTPTemplate} className="px-4 py-2.5 bg-slate-50 text-slate-700 border border-slate-200 rounded-xl text-sm font-bold flex items-center space-x-2 hover:bg-slate-100 transition-colors"><FileSpreadsheet className="w-4 h-4 text-emerald-600" /><span>Template KTP</span></button>
+                                    </div>
                                 </div>
 
                                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
@@ -814,7 +897,7 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
 
                             <div className="flex flex-col sm:flex-row justify-center items-center gap-3 pt-2">
                                 <button
-                                    onClick={handleDownloadTemplateXLSX}
+                                    onClick={handleExportCurrentMasterXLSX}
                                     className="px-4 py-2 bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-50 rounded-xl text-xs font-bold flex items-center space-x-1.5 shadow-xs transition-colors cursor-pointer"
                                 >
                                     <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
@@ -902,10 +985,17 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                                         const cData = counterGroups[cName];
                                         const pct = cData.total > 0 ? Math.round((cData.counted / cData.total) * 100) : 0;
                                         return (
-                                            <div key={idx} className="p-4 bg-slate-50/80 border border-slate-200/80 rounded-2xl space-y-3 hover:border-indigo-300 transition-all">
+                                            <div
+                                                key={idx}
+                                                onClick={() => setSelectedCounterForDetail(cName)}
+                                                className="p-4 bg-slate-50/80 border border-slate-200/80 rounded-2xl space-y-3 hover:border-indigo-400 hover:shadow-md transition-all cursor-pointer group"
+                                            >
                                                 <div className="flex justify-between items-start">
                                                     <div>
-                                                        <div className="text-sm font-black text-slate-900">{cName}</div>
+                                                        <div className="text-sm font-black text-slate-900 flex items-center gap-1">
+                                                            <span>{cName}</span>
+                                                            <ExternalLink className="w-3.5 h-3.5 text-indigo-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                                        </div>
                                                         <div className="text-xs text-slate-500 font-medium mt-0.5">{cData.counted} / {cData.total} SKU Terhitung</div>
                                                     </div>
                                                     <span className={`text-[10px] font-black px-2.5 py-1 rounded-lg ${pct === 100 ? 'bg-emerald-100 text-emerald-800' : 'bg-indigo-100 text-indigo-800'}`}>{pct}% Done</span>
@@ -914,7 +1004,10 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                                                     <div className="bg-linear-to-r from-indigo-500 to-blue-600 h-2 rounded-full transition-all duration-500" style={{ width: `${pct}%` }}></div>
                                                 </div>
                                                 {cData.errorCount > 0 && (
-                                                    <div className="text-[10px] font-bold text-red-600 bg-red-50 px-2.5 py-1 rounded-md w-fit">⚠️ {cData.errorCount} SKU Selisih Ditemukan</div>
+                                                    <div className="text-[10px] font-bold text-red-600 bg-red-50 px-2.5 py-1 rounded-md w-fit flex items-center space-x-1">
+                                                        <span>⚠️ {cData.errorCount} SKU Selisih Ditemukan</span>
+                                                        <span className="underline ml-1">(Klik Detail)</span>
+                                                    </div>
                                                 )}
                                             </div>
                                         );
@@ -974,8 +1067,8 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
 
                                 {effectiveRole === 'owner' ? (
                                     <div className="flex items-center space-x-3 w-full md:w-auto">
-                                        <button onClick={handleDownloadTemplateXLSX} className="flex-1 md:flex-none px-4 py-2.5 bg-slate-50 text-slate-700 border border-slate-200 hover:bg-slate-100 rounded-xl text-sm font-bold flex items-center justify-center space-x-2 transition-colors">
-                                            <FileSpreadsheet className="w-4 h-4 text-emerald-600" /><span>Template (.xlsx)</span>
+                                        <button onClick={handleExportCurrentMasterXLSX} className="flex-1 md:flex-none px-4 py-2.5 bg-slate-50 text-slate-700 border border-slate-200 hover:bg-slate-100 rounded-xl text-sm font-bold flex items-center justify-center space-x-2 transition-colors cursor-pointer">
+                                            <FileSpreadsheet className="w-4 h-4 text-emerald-600" /><span>Export Data Saat Ini (.xlsx)</span>
                                         </button>
                                         <label className="flex-1 md:flex-none px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-sm font-bold cursor-pointer inline-flex items-center justify-center space-x-2 shadow-md transition-transform active:scale-95">
                                             <Upload className="w-4 h-4" /><span>Upload Master</span>
@@ -1003,7 +1096,8 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                                                     <td className="p-3 font-mono font-bold bg-indigo-50/10 flex items-center"><MapPin className="w-3 h-3 text-indigo-400 mr-1" />{row.Location} <span className="text-[9px] text-slate-400 ml-1">({row.Zone})</span></td>
                                                     <td className="p-2 bg-indigo-50/10"><SearchableSelect options={allProjectTeams.filter(t => t.projectId === activeProject.id).map(t => ({ value: t.username, label: t.username }))} value={row.counter === 'Unassigned' ? '' : row.counter} onChange={(val: string) => { const nw = [...masterDataList]; nw[idx].counter = val; setMasterDataList(nw); }} placeholder="Assign..." className="w-32" /></td>
                                                     <td className="p-3 font-mono text-slate-500">{row.expiredDateSystem || '-'}</td>
-                                                    <td className="p-3 text-center font-bold text-slate-400">{row.Qty}</td><td className="p-3 text-center font-black text-sm">{row.isCounted ? row.countedQty : '-'}</td>
+                                                    <td className="p-3 text-center font-bold text-slate-400">{row.Qty}</td>
+                                                    <td className="p-3 text-center font-black text-sm">{(row.isCounted && row.countedQty !== undefined && !isNaN(row.countedQty)) ? row.countedQty : '-'}</td>
                                                 </tr>
                                             );
                                         })}
@@ -1068,7 +1162,7 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                         </div>
                     )}
 
-                    {/* TAB 4: PENGATURAN PROJECT (TIM, PRICING & GSHEET WEBHOOK) */}
+                    {/* TAB 4: PENGATURAN PROJECT */}
                     {activeTab === 'settings' && (
                         <div className="space-y-6 animate-in slide-in-from-bottom-2 duration-300">
                             <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl shadow-slate-200/40 space-y-4">
