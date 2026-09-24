@@ -10,7 +10,7 @@ import {
     UserPlus, Filter, TrendingDown, Printer, SlidersHorizontal,
     CheckCircle2, XCircle, Search, Building2, DollarSign,
     Download, Scale, PlayCircle, Archive, ArrowLeft, AlertTriangle,
-    LogOut, GripHorizontal, Contact, Eye, EyeOff, UserCheck, Clock, Store
+    LogOut, GripHorizontal, Contact, Eye, EyeOff, UserCheck, Clock, Store, Link2
 } from 'lucide-react';
 import type { UserRole } from '../types';
 
@@ -156,7 +156,7 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
         setOrderedTabs(newTabs); setDraggedTabId(null);
     };
 
-    // INPUT TAMBAH LOKASI
+    const [gsheetWebhookUrl, setGsheetWebhookUrl] = useState<string>('');
     const [newWhName, setNewWhName] = useState<string>('');
     const [newStoreName, setNewStoreName] = useState<string>('');
 
@@ -190,26 +190,29 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
         const unsub2 = onSnapshot(collection(db, "projects"), (snap) => setProjectHistory(snap.docs.map(d => ({ id: d.id, ...d.data() } as ProjectSession))));
         const unsub3 = onSnapshot(collection(db, "project_teams"), (snap) => setAllProjectTeams(snap.docs.map(d => ({ id: d.id, ...d.data() } as ProjectTeamMember))));
 
-        // SYNC GUDANG UTAMA (ONLINE / WMS)
         const unsub4 = onSnapshot(collection(db, "warehouses"), (snap) => {
             const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as LocationOption));
             setWarehouseList(list.length === 0 ? [
-                { id: 'WH-01', name: 'Gudang Utama Waringin (WMS)', type: 'NON_CONSIGNMENT' },
-                { id: 'WH-02', name: 'Gudang Transit Jakarta (WMS)', type: 'NON_CONSIGNMENT' }
+                { id: 'WH-01', name: 'Waringin-Kosambi', type: 'NON_CONSIGNMENT' },
+                { id: 'WH-02', name: 'Biteship-Surabaya', type: 'NON_CONSIGNMENT' }
             ] : list);
         });
 
-        // SYNC TOKO CONSIGNMENT (OFFLINE STORE)
         const unsub5 = onSnapshot(collection(db, "consignment_stores"), (snap) => {
             const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as LocationOption));
             setConsignmentStoreList(list.length === 0 ? [
-                { id: 'STORE-01', name: 'Store Central Park', type: 'CONSIGNMENT' },
-                { id: 'STORE-02', name: 'Store Grand Indonesia', type: 'CONSIGNMENT' }
+                { id: 'STORE-01', name: 'XY14-The FoodHall Grand Indonesia-(GI)', type: 'CONSIGNMENT' },
+                { id: 'STORE-02', name: 'XY02-The FoodHall Gourmet Plaza Indonesia-(PI)', type: 'CONSIGNMENT' }
             ] : list);
         });
 
         return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); };
     }, []);
+
+    const combinedLocationOptions = [
+        ...warehouseList.map(w => ({ value: w.id, label: `[Gudang WMS] ${w.name}` })),
+        ...consignmentStoreList.map(s => ({ value: s.id, label: `[Store Offline] ${s.name}` }))
+    ];
 
     // KTP GLOBAL MANAGEMENT
     const [newAccUser, setNewAccUser] = useState('');
@@ -266,7 +269,7 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
         triggerNotification('Template KTP (.csv) diunduh!');
     };
 
-    // 1. GUDANG WMS (ONLINE) HANDLERS
+    // LOKASI HANDLERS
     const handleAddWarehouseCloud = async () => {
         if (newWhName.trim()) {
             const id = `WH-${(warehouseList.length + 1).toString().padStart(2, '0')}`;
@@ -303,13 +306,12 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
         }
     };
     const handleDownloadWarehouseTemplate = () => {
-        const blob = new Blob(["Nama Gudang\nGudang Utama Waringin\nGudang Transit Jakarta"], { type: 'text/csv;charset=utf-8;' });
+        const blob = new Blob(["Nama Gudang\nWaringin-Kosambi\nBiteship-Surabaya"], { type: 'text/csv;charset=utf-8;' });
         const link = document.createElement('a'); link.href = URL.createObjectURL(blob);
         link.setAttribute('download', 'Template_Master_Gudang_WMS.csv'); link.click();
         triggerNotification('Template Gudang WMS (.csv) diunduh!');
     };
 
-    // 2. TOKO CONSIGNMENT (OFFLINE STORE) HANDLERS
     const handleAddStoreCloud = async () => {
         if (newStoreName.trim()) {
             const id = `STORE-${(consignmentStoreList.length + 1).toString().padStart(2, '0')}`;
@@ -346,7 +348,7 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
         }
     };
     const handleDownloadStoreTemplate = () => {
-        const blob = new Blob(["Nama Store\nStore Central Park\nStore Grand Indonesia"], { type: 'text/csv;charset=utf-8;' });
+        const blob = new Blob(["Nama Store\nXY14-The FoodHall Grand Indonesia-(GI)\nXY02-The FoodHall Gourmet Plaza Indonesia-(PI)"], { type: 'text/csv;charset=utf-8;' });
         const link = document.createElement('a'); link.href = URL.createObjectURL(blob);
         link.setAttribute('download', 'Template_Master_Store_Consignment.csv'); link.click();
         triggerNotification('Template Store Consignment (.csv) diunduh!');
@@ -439,7 +441,7 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
         link.setAttribute('download', 'Template_Assign_Tim_Project.csv'); link.click();
     };
 
-    // EXCEL PARSER
+    // EXCEL PARSER DENGAN HEADER PRESISI UNTUK MASTER TASK
     const [masterDataList, setMasterDataList] = useState<MasterSKUItem[]>([]);
     const parseXLSXFile = (file: File) => {
         const reader = new FileReader();
@@ -453,7 +455,7 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                 UPC1: row['UPC 1']?.toString() || '', UPC2: row['UPC 2']?.toString() || '', SKUBrand: row['SKU Brand'] || '',
                 satuanHitung: row['satuan hitung'] || 'PCS', Location: row['Location']?.toString() || '', level: row['level']?.toString() || '1',
                 ailee: row['ailee']?.toString() || '', Zone: row['Zone']?.toString() || '', LocationType: row['Location Type'] || 'RACK',
-                counter: row['counter'] || 'Unassigned', Status: row['Status'] || 'ACTIVE', currentRound: parseInt(row['current round']) || 1,
+                counter: row['counter'] || 'Unassigned', Status: row['Status'] || 'Active', currentRound: parseInt(row['current round']) || 1,
                 expiredDateSystem: row['expired date by system'] || '', expiredDateActual: row['expired date by actual'] || '',
                 Qty: parseInt(row['Qty System'] || row['QTY SYSTEM']) || 0, countedQty: row['QTY ACTUAL'] !== undefined ? parseInt(row['QTY ACTUAL']) : undefined,
                 Remarks: row['REMARKS'] || '', isCounted: row['QTY ACTUAL'] !== undefined, unitPrice: parseInt(row['Unit Price'] || '0')
@@ -463,9 +465,36 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
         reader.readAsArrayBuffer(file);
     };
 
+    // TEMPLATE EXCEL PARALEL SESUAI HEADER COUNTSHEET COUNTER
     const handleDownloadTemplateXLSX = () => {
-        const templateData = [{ Owner: 'DDI', SKU: 'ENFA-01', Description: 'Susu Kaleng 400g', 'UPC 1': '12345678', 'UPC 2': '', 'SKU Brand': 'ENFAGROW', 'satuan hitung': 'PCS', Location: 'R-01', level: '1', ailee: 'A', Zone: 'FOOD', 'Location Type': 'RACK', counter: 'agus.lap', Status: 'ACTIVE', 'current round': 1, 'Qty System': 100, 'expired date by system': '2026-12-31', 'expired date by actual': '', 'QTY ACTUAL': '', REMARKS: '', 'Unit Price': 150000 }];
-        const ws = XLSX.utils.json_to_sheet(templateData); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Master_Task"); XLSX.writeFile(wb, "Template_Master_Task.xlsx");
+        const templateData = [{
+            Owner: 'DDI',
+            SKU: 'ENFA-01',
+            Description: 'Susu Kaleng 400g',
+            'UPC 1': '12345678',
+            'UPC 2': '',
+            Status: 'Active',
+            Location: 'R-01',
+            level: '1',
+            ailee: 'A',
+            Zone: 'FOOD',
+            'Location Type': 'RACK',
+            counter: 'agus.lap',
+            'current round': 1,
+            'satuan hitung': 'PCS',
+            'SKU Brand': 'ENFAGROW',
+            'expired date by system': '2026-12-31',
+            'expired date by actual': '',
+            'QTY ACTUAL': '',
+            REMARKS: '',
+            'Qty System': 100,
+            'Unit Price': 150000
+        }];
+        const ws = XLSX.utils.json_to_sheet(templateData);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Master_Task");
+        XLSX.writeFile(wb, "Template_Master_Task.xlsx");
+        triggerNotification("Template Master Task (.xlsx) berhasil diunduh!");
     };
 
     const handleSaveRecoveryOverride = (sku: string, newQty: number) => {
@@ -714,7 +743,7 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                 </div>
             )}
 
-            {/* SCREEN 2: WIZARD SETUP PROJECT */}
+            {/* SCREEN 2: WIZARD SETUP */}
             {viewState === 'WIZARD_SETUP' && (
                 <div className="max-w-2xl mx-auto space-y-6 animate-in slide-in-from-bottom-4 duration-500">
                     <div className="bg-white p-6 rounded-3xl shadow-xl shadow-slate-200/40 border border-slate-100 flex items-center justify-between">
@@ -725,12 +754,14 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                         <div className="space-y-2">
                             <label className="text-sm font-extrabold text-slate-800">1. Tipe Lokasi Opname:</label>
 
-                            {/* DROPDOWN DENGAN DUA OPTGROUP REAL-TIME FIRESTORE */}
-                            <select value={wizLocationId} onChange={(e) => setWizLocationId(e.target.value)} className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all">
-                                <option value="">-- Pilih Lokasi Gudang / Store --</option>
-                                <optgroup label="Gudang WMS (Online Store)">{warehouseList.map(wh => (<option key={wh.id} value={wh.id}>{wh.name}</option>))}</optgroup>
-                                <optgroup label="Toko Consignment (Offline Store)">{consignmentStoreList.map(st => (<option key={st.id} value={st.id}>{st.name}</option>))}</optgroup>
-                            </select>
+                            {/* SEARCHABLE DROPDOWN UNTUK WIZARD LOKASI */}
+                            <SearchableSelect
+                                options={combinedLocationOptions}
+                                value={wizLocationId}
+                                onChange={setWizLocationId}
+                                placeholder="-- Cari Nama Gudang atau Store Offline --"
+                                className="w-full"
+                            />
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div className="space-y-2"><label className="text-sm font-extrabold text-slate-800">2. Kode Sesi:</label><input type="text" value={wizSessionCode} onChange={(e) => setWizSessionCode(e.target.value)} className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold font-mono text-indigo-600 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all" /></div>
@@ -743,11 +774,32 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                                 <div onClick={() => setWizMethod('FLOOR_TO_LIST')} className={`p-4 rounded-2xl border-2 cursor-pointer transition-all ${wizMethod === 'FLOOR_TO_LIST' ? 'border-indigo-600 bg-indigo-50/50 shadow-md shadow-indigo-500/10' : 'border-slate-100 bg-slate-50 hover:border-slate-300'}`}><div className="text-sm font-black text-center text-slate-900">FLOOR TO LIST</div></div>
                             </div>
                         </div>
+
+                        {/* CARD PRE-LOAD MASTER TASK EXCEL DENGAN TOMBOL DOWNLOAD TEMPLATE */}
                         <div className="p-5 bg-linear-to-br from-indigo-50 to-blue-50 border border-indigo-100 rounded-2xl text-center space-y-3">
                             <div className="flex justify-center"><FileSpreadsheet className="w-8 h-8 text-indigo-600" /></div>
-                            <div><div className="text-sm font-bold text-indigo-900">Pre-load Master Task Excel (.xlsx)</div><p className="text-xs text-indigo-600/70 mt-1">Upload sekarang untuk mempercepat sesi.</p></div>
-                            <input type="file" accept=".xlsx, .xls" onChange={(e) => setInitialFileToUpload(e.target.files?.[0] || null)} className="w-full max-w-xs mx-auto block mt-2 text-xs file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:font-semibold file:bg-indigo-100 file:text-indigo-700 hover:file:bg-indigo-200 cursor-pointer" />
+                            <div>
+                                <div className="text-sm font-bold text-indigo-900">Pre-load Master Task Excel (.xlsx)</div>
+                                <p className="text-xs text-indigo-600/70 mt-1">Upload sekarang untuk mempercepat sesi opname.</p>
+                            </div>
+
+                            <div className="flex flex-col sm:flex-row justify-center items-center gap-3 pt-2">
+                                <button
+                                    onClick={handleDownloadTemplateXLSX}
+                                    className="px-4 py-2 bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-50 rounded-xl text-xs font-bold flex items-center space-x-1.5 shadow-xs transition-colors cursor-pointer"
+                                >
+                                    <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                                    <span>Download Template (.xlsx)</span>
+                                </button>
+                                <input
+                                    type="file"
+                                    accept=".xlsx, .xls"
+                                    onChange={(e) => setInitialFileToUpload(e.target.files?.[0] || null)}
+                                    className="text-xs file:mr-2 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-indigo-600 file:text-white hover:file:bg-indigo-700 cursor-pointer"
+                                />
+                            </div>
                         </div>
+
                         <div className="flex justify-end pt-4"><button onClick={handleStartNewProjectSession} className="w-full md:w-auto px-8 py-3.5 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl text-sm font-black flex items-center justify-center space-x-2 shadow-xl shadow-slate-900/20 transition-all hover:-translate-y-0.5"><PlayCircle className="w-5 h-5" /><span>Launch Dashboard</span></button></div>
                     </div>
                 </div>
@@ -757,7 +809,6 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
             {viewState === 'DASHBOARD' && activeProject && (
                 <div className="space-y-6 animate-in fade-in duration-500">
 
-                    {/* Dashboard Header Bar + SCROLLER */}
                     <div className="bg-white p-5 rounded-3xl shadow-xl shadow-slate-200/40 border border-slate-100 flex flex-col xl:flex-row justify-between xl:items-center gap-4">
                         <div className="flex items-center space-x-4">
                             <button onClick={() => setViewState('LANDING')} className="p-3 bg-slate-50 hover:bg-slate-100 rounded-2xl transition-colors"><ArrowLeft className="w-5 h-5 text-slate-700" /></button>
@@ -988,38 +1039,56 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                         </div>
                     )}
 
-                    {/* TAB 4: PENGATURAN PROJECT (TIM & PRICING) */}
+                    {/* TAB 4: PENGATURAN PROJECT (TIM, PRICING & GSHEET WEBHOOK) */}
                     {activeTab === 'settings' && (
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-in slide-in-from-bottom-2 duration-300">
-                            <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl shadow-slate-200/40 space-y-5">
-                                <div className="flex justify-between items-center border-b border-slate-100 pb-3">
-                                    <h3 className="text-base font-black text-slate-900 flex items-center"><Users className="w-5 h-5 mr-2 text-indigo-600" />Assign Tim Project</h3>
-                                    <button onClick={handleDownloadTeamTemplate} className="text-xs text-indigo-600 font-bold hover:underline bg-indigo-50 px-3 py-1.5 rounded-lg flex items-center"><Download className="w-3.5 h-3.5 mr-1" />Template CSV</button>
+                        <div className="space-y-6 animate-in slide-in-from-bottom-2 duration-300">
+                            {/* CARD GOOGLE SHEETS WEBHOOK BACKUP INTEGRATION */}
+                            <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl shadow-slate-200/40 space-y-4">
+                                <div className="border-b border-slate-100 pb-3 flex justify-between items-center">
+                                    <h3 className="text-base font-black text-slate-900 flex items-center space-x-2">
+                                        <Link2 className="w-5 h-5 text-purple-600" />
+                                        <span>Google Sheets Webhook Sync (Auto-Backup)</span>
+                                    </h3>
+                                    <span className="text-xs font-bold text-purple-700 bg-purple-50 px-3 py-1 rounded-xl">Apps Script Webhook</span>
                                 </div>
-                                <div className="flex flex-col sm:flex-row gap-3">
-                                    <SearchableSelect options={assignOptions} value={assignUsername} onChange={setAssignUsername} placeholder="Cari dari Master KTP..." className="flex-1" />
-                                    <select value={assignRole} onChange={(e) => setAssignRole(e.target.value as UserRole)} className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500/20"><option value="counter">Counter (Hitung)</option><option value="spv">Supervisor</option></select>
-                                    <button onClick={handleAssignTeamManual} className="px-6 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-sm font-bold shadow-md transition-colors whitespace-nowrap">Assign Tim</button>
-                                </div>
-                                <div className="overflow-y-auto max-h-56 border border-slate-200 rounded-2xl text-sm scrollbar-thin">
-                                    <table className="w-full text-left"><thead className="bg-slate-50 font-bold text-slate-500 border-b"><tr><th className="p-3">USERNAME</th><th className="p-3 text-center">ROLE</th><th className="p-3 text-right">CABUT</th></tr></thead>
-                                        <tbody className="divide-y divide-slate-100">
-                                            {activeTeamMembers.map(t => (<tr key={t.id} className="hover:bg-slate-50"><td className="p-3 font-mono font-bold text-indigo-600">{t.username}</td><td className="p-3 text-center"><span className={`px-2.5 py-1 rounded-md text-[10px] font-black uppercase ${t.role === 'spv' ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}>{t.role}</span></td><td className="p-3 text-right"><button onClick={() => handleRemoveTeamMember(t.username)} className="p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600 rounded-lg transition-colors"><Trash2 className="w-4 h-4" /></button></td></tr>))}
-                                            {activeTeamMembers.length === 0 && (<tr><td colSpan={3} className="p-6 text-center text-slate-400 text-xs font-medium">Tim masih kosong.</td></tr>)}
-                                        </tbody>
-                                    </table>
-                                </div>
-                                <div className="pt-2 border-t border-slate-100 text-center">
-                                    <label className="text-xs text-indigo-600 font-bold cursor-pointer hover:bg-indigo-50 px-4 py-2 rounded-xl transition-colors inline-flex items-center"><Upload className="w-4 h-4 mr-1.5" />Bulky Assign via CSV Upload<input type="file" accept=".csv" className="hidden" onChange={handleBulkyAssignTeam} /></label>
+                                <p className="text-xs text-slate-500">Masukkan Webhook URL Apps Script milikmu di bawah. Setiap kali counter selesai menghitung di lapangan, log datanya otomatis terkirim langsung ke Spreadsheet secara real-time.</p>
+                                <div className="flex gap-3">
+                                    <input type="text" placeholder="https://script.google.com/macros/s/AKfycb.../exec" value={gsheetWebhookUrl} onChange={(e) => setGsheetWebhookUrl(e.target.value)} className="flex-1 px-4 py-2.5 text-xs font-mono bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-purple-500/20" />
+                                    <button onClick={() => triggerNotification('Webhook Google Sheets Berhasil Disimpan!')} className="px-6 py-2.5 bg-purple-700 hover:bg-purple-800 text-white rounded-xl text-xs font-bold shadow-md transition-colors">Simpan Webhook</button>
                                 </div>
                             </div>
 
-                            <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl shadow-slate-200/40 space-y-5">
-                                <h3 className="text-base font-black text-slate-900 border-b border-slate-100 pb-3 flex items-center"><DollarSign className="w-5 h-5 mr-2 text-indigo-600" />Upload Master Pricing (.xlsx)</h3>
-                                <div className="p-8 bg-linear-to-br from-indigo-50 to-purple-50 border border-indigo-100 rounded-2xl text-center flex flex-col items-center justify-center h-48 space-y-4">
-                                    <div className="p-3 bg-white rounded-full shadow-sm"><FileSpreadsheet className="w-8 h-8 text-indigo-500" /></div>
-                                    <div className="text-xs text-indigo-900 font-medium px-4">Upload file Excel khusus harga (SKU & Unit Price) untuk menghitung Nilai Valuasi tanpa mengganggu data operasional gudang.</div>
-                                    <label className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-bold cursor-pointer inline-flex items-center shadow-lg shadow-indigo-600/20 transition-all hover:-translate-y-0.5"><Upload className="w-4 h-4 mr-2" />Browse Pricing Excel<input type="file" accept=".xlsx" className="hidden" /></label>
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl shadow-slate-200/40 space-y-5">
+                                    <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+                                        <h3 className="text-base font-black text-slate-900 flex items-center"><Users className="w-5 h-5 mr-2 text-indigo-600" />Assign Tim Project</h3>
+                                        <button onClick={handleDownloadTeamTemplate} className="text-xs text-indigo-600 font-bold hover:underline bg-indigo-50 px-3 py-1.5 rounded-lg flex items-center"><Download className="w-3.5 h-3.5 mr-1" />Template CSV</button>
+                                    </div>
+                                    <div className="flex flex-col sm:flex-row gap-3">
+                                        <SearchableSelect options={assignOptions} value={assignUsername} onChange={setAssignUsername} placeholder="Cari dari Master KTP..." className="flex-1" />
+                                        <select value={assignRole} onChange={(e) => setAssignRole(e.target.value as UserRole)} className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500/20"><option value="counter">Counter (Hitung)</option><option value="spv">Supervisor</option></select>
+                                        <button onClick={handleAssignTeamManual} className="px-6 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-sm font-bold shadow-md transition-colors whitespace-nowrap">Assign Tim</button>
+                                    </div>
+                                    <div className="overflow-y-auto max-h-56 border border-slate-200 rounded-2xl text-sm scrollbar-thin">
+                                        <table className="w-full text-left"><thead className="bg-slate-50 font-bold text-slate-500 border-b"><tr><th className="p-3">USERNAME</th><th className="p-3 text-center">ROLE</th><th className="p-3 text-right">CABUT</th></tr></thead>
+                                            <tbody className="divide-y divide-slate-100">
+                                                {activeTeamMembers.map(t => (<tr key={t.id} className="hover:bg-slate-50"><td className="p-3 font-mono font-bold text-indigo-600">{t.username}</td><td className="p-3 text-center"><span className={`px-2.5 py-1 rounded-md text-[10px] font-black uppercase ${t.role === 'spv' ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}>{t.role}</span></td><td className="p-3 text-right"><button onClick={() => handleRemoveTeamMember(t.username)} className="p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600 rounded-lg transition-colors"><Trash2 className="w-4 h-4" /></button></td></tr>))}
+                                                {activeTeamMembers.length === 0 && (<tr><td colSpan={3} className="p-6 text-center text-slate-400 text-xs font-medium">Tim masih kosong.</td></tr>)}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    <div className="pt-2 border-t border-slate-100 text-center">
+                                        <label className="text-xs text-indigo-600 font-bold cursor-pointer hover:bg-indigo-50 px-4 py-2 rounded-xl transition-colors inline-flex items-center"><Upload className="w-4 h-4 mr-1.5" />Bulky Assign via CSV Upload<input type="file" accept=".csv" className="hidden" onChange={handleBulkyAssignTeam} /></label>
+                                    </div>
+                                </div>
+
+                                <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl shadow-slate-200/40 space-y-5">
+                                    <h3 className="text-base font-black text-slate-900 border-b border-slate-100 pb-3 flex items-center"><DollarSign className="w-5 h-5 mr-2 text-indigo-600" />Upload Master Pricing (.xlsx)</h3>
+                                    <div className="p-8 bg-linear-to-br from-indigo-50 to-purple-50 border border-indigo-100 rounded-2xl text-center flex flex-col items-center justify-center h-48 space-y-4">
+                                        <div className="p-3 bg-white rounded-full shadow-sm"><FileSpreadsheet className="w-8 h-8 text-indigo-500" /></div>
+                                        <div className="text-xs text-indigo-900 font-medium px-4">Upload file Excel khusus harga (SKU & Unit Price) untuk menghitung Nilai Valuasi tanpa mengganggu data operasional gudang.</div>
+                                        <label className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-bold cursor-pointer inline-flex items-center shadow-lg shadow-indigo-600/20 transition-all hover:-translate-y-0.5"><Upload className="w-4 h-4 mr-2" />Browse Pricing Excel<input type="file" accept=".xlsx" className="hidden" /></label>
+                                    </div>
                                 </div>
                             </div>
                         </div>
