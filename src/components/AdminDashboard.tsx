@@ -36,7 +36,7 @@ interface ProjectTeamMember {
 }
 
 interface MasterSKUItem {
-    Owner?: string;
+    Owner: string;
     SKU: string;
     Description: string;
     UPC1: string;
@@ -160,9 +160,9 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
     const [newWhName, setNewWhName] = useState<string>('');
     const [newStoreName, setNewStoreName] = useState<string>('');
 
-    // FORM UPDATE AKUN OWNER
+    // FORM UPDATE AKUN OWNER (Global Settings)
     const [ownerNewName, setOwnerNewName] = useState<string>('Yos Krisnawan');
-    const [ownerNewEmail, setOwnerNewEmail] = useState<string>(currentUserEmail);
+    const [ownerNewEmail, setOwnerNewEmail] = useState<string>(currentUserEmail || '');
     const [ownerNewPin, setOwnerNewPin] = useState<string>('');
 
     const [wizLocationId, setWizLocationId] = useState<string>('');
@@ -212,6 +212,20 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
         ...warehouseList.map(w => ({ value: w.id, label: `[Gudang WMS] ${w.name}` })),
         ...consignmentStoreList.map(s => ({ value: s.id, label: `[Store Offline] ${s.name}` }))
     ];
+
+    // OWNER GLOBAL ACCOUNT HANDLER
+    const handleUpdateOwnerAccount = async () => {
+        if (ownerNewEmail.trim()) {
+            const ownerKey = currentUserEmail?.toLowerCase().replace(/[^a-zA-Z0-9]/g, '_') || 'owner_default';
+            await setDoc(doc(db, "owner_profile", ownerKey), {
+                name: ownerNewName,
+                email: ownerNewEmail.trim(),
+                pin: ownerNewPin || '1234',
+                updatedAt: new Date().toLocaleString()
+            });
+            triggerNotification('Profil & Akun Owner Berhasil Diperbarui!');
+        }
+    };
 
     // KTP GLOBAL MANAGEMENT
     const [newAccUser, setNewAccUser] = useState('');
@@ -266,19 +280,6 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
         const link = document.createElement('a'); link.href = URL.createObjectURL(blob);
         link.setAttribute('download', 'Template_Import_KTP_Global.csv'); link.click();
         triggerNotification('Template KTP (.csv) diunduh!');
-    };
-
-    const handleUpdateOwnerAccount = async () => {
-        if (ownerNewEmail.trim()) {
-            const ownerKey = currentUserEmail.toLowerCase().replace(/[^a-zA-Z0-9]/g, '_');
-            await setDoc(doc(db, "owner_profile", ownerKey), {
-                name: ownerNewName,
-                email: ownerNewEmail.trim(),
-                pin: ownerNewPin || '1234',
-                updatedAt: new Date().toLocaleString()
-            });
-            triggerNotification('Profil & Akun Owner Berhasil Diperbarui!');
-        }
     };
 
     // LOKASI HANDLERS
@@ -478,7 +479,6 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
         reader.readAsArrayBuffer(file);
     };
 
-    // TEMPLATE EXCEL OPERASIONAL SIMPEL (ALIGN DENGAN LAYAR COUNTER)
     const handleDownloadTemplateXLSX = () => {
         const templateData = [{
             SKU: 'ENFA-01',
@@ -702,49 +702,73 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                         </div>
                     )}
 
+                    {/* ACCOUNTS (KTP) TAB DENGAN OWNER SETTINGS DI ATAS */}
                     {landingTab === 'accounts' && effectiveRole === 'owner' && (
-                        <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl shadow-slate-200/40 space-y-6">
-                            <div className="flex flex-col md:flex-row justify-between md:items-center gap-4">
-                                <div><h3 className="text-base font-black text-slate-900">Master KTP & Otorisasi</h3><p className="text-sm text-slate-500 mt-1">Setup kredensial user untuk login counter/SPV lapangan.</p></div>
-                                <button onClick={handleDownloadKTPTemplate} className="px-4 py-2.5 bg-slate-50 text-slate-700 border border-slate-200 rounded-xl text-sm font-bold flex items-center space-x-2 hover:bg-slate-100 transition-colors"><FileSpreadsheet className="w-4 h-4 text-emerald-600" /><span>Template KTP</span></button>
+                        <div className="space-y-6">
+
+                            {/* OWNER GLOBAL ACCOUNT SETTINGS PANEL */}
+                            <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl shadow-slate-200/40 space-y-4">
+                                <div className="border-b border-slate-100 pb-3 flex justify-between items-center">
+                                    <h3 className="text-base font-black text-slate-900 flex items-center space-x-2">
+                                        <KeyRound className="w-5 h-5 text-indigo-600" />
+                                        <span>Pengaturan Akun & Profil Owner</span>
+                                    </h3>
+                                    <span className="text-xs font-bold text-indigo-700 bg-indigo-50 px-3 py-1 rounded-xl">Otorisasi Master</span>
+                                </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                    <input type="text" placeholder="Nama Lengkap Owner" value={ownerNewName} onChange={(e) => setOwnerNewName(e.target.value)} className="px-4 py-2.5 text-xs bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/20" />
+                                    <input type="email" placeholder="Email Owner" value={ownerNewEmail} onChange={(e) => setOwnerNewEmail(e.target.value)} className="px-4 py-2.5 text-xs bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/20" />
+                                    <input type="password" maxLength={4} placeholder="PIN Akses Baru (4-Digit)" value={ownerNewPin} onChange={(e) => setOwnerNewPin(e.target.value)} className="px-4 py-2.5 text-xs font-mono bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/20" />
+                                </div>
+                                <div className="flex justify-end">
+                                    <button onClick={handleUpdateOwnerAccount} className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md transition-colors active:scale-95">Simpan Perubahan Profil Owner</button>
+                                </div>
                             </div>
 
-                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-                                <div className="lg:col-span-2 p-5 bg-slate-50/80 border border-slate-200 rounded-2xl space-y-4">
-                                    <h4 className="text-sm font-bold text-slate-800">Daftar KTP Manual</h4>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                        <input type="text" placeholder="Username (misal: rudi.wms)" value={newAccUser} onChange={(e) => setNewAccUser(e.target.value)} className="px-4 py-2.5 text-sm bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/20" />
-                                        <input type="text" placeholder="Nama Lengkap" value={newAccName} onChange={(e) => setNewAccName(e.target.value)} className="px-4 py-2.5 text-sm bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/20" />
-                                        <input type="password" maxLength={4} placeholder="PIN 4-Digit" value={newAccPin} onChange={(e) => setNewAccPin(e.target.value)} className="px-4 py-2.5 text-sm font-mono bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/20" />
-                                        <input type="email" placeholder="Email Karyawan" value={newAccEmail} onChange={(e) => setNewAccEmail(e.target.value)} className="px-4 py-2.5 text-sm bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/20" />
+                            {/* GLOBAL ACCOUNTS (KTP) PANEL */}
+                            <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl shadow-slate-200/40 space-y-6">
+                                <div className="flex flex-col md:flex-row justify-between md:items-center gap-4">
+                                    <div><h3 className="text-base font-black text-slate-900">Master KTP & Otorisasi</h3><p className="text-sm text-slate-500 mt-1">Setup kredensial user untuk login counter/SPV lapangan.</p></div>
+                                    <button onClick={handleDownloadKTPTemplate} className="px-4 py-2.5 bg-slate-50 text-slate-700 border border-slate-200 rounded-xl text-sm font-bold flex items-center space-x-2 hover:bg-slate-100 transition-colors"><FileSpreadsheet className="w-4 h-4 text-emerald-600" /><span>Template KTP</span></button>
+                                </div>
+
+                                <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+                                    <div className="lg:col-span-2 p-5 bg-slate-50/80 border border-slate-200 rounded-2xl space-y-4">
+                                        <h4 className="text-sm font-bold text-slate-800">Daftar KTP Manual</h4>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                            <input type="text" placeholder="Username (misal: rudi.wms)" value={newAccUser} onChange={(e) => setNewAccUser(e.target.value)} className="px-4 py-2.5 text-sm bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/20" />
+                                            <input type="text" placeholder="Nama Lengkap" value={newAccName} onChange={(e) => setNewAccName(e.target.value)} className="px-4 py-2.5 text-sm bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/20" />
+                                            <input type="password" maxLength={4} placeholder="PIN 4-Digit" value={newAccPin} onChange={(e) => setNewAccPin(e.target.value)} className="px-4 py-2.5 text-sm font-mono bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/20" />
+                                            <input type="email" placeholder="Email Karyawan" value={newAccEmail} onChange={(e) => setNewAccEmail(e.target.value)} className="px-4 py-2.5 text-sm bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/20" />
+                                        </div>
+                                        <div className="flex justify-end pt-2"><button onClick={handleAddGlobalAccount} className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-sm font-bold flex items-center space-x-2 shadow-md"><UserPlus className="w-4 h-4" /><span>Buat Akun KTP</span></button></div>
                                     </div>
-                                    <div className="flex justify-end pt-2"><button onClick={handleAddGlobalAccount} className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-sm font-bold flex items-center space-x-2 shadow-md"><UserPlus className="w-4 h-4" /><span>Buat Akun KTP</span></button></div>
+                                    <div className="p-5 bg-linear-to-b from-indigo-50 to-white border border-indigo-100 rounded-2xl text-center flex flex-col justify-center items-center space-y-3">
+                                        <div className="p-3 bg-indigo-100/50 rounded-full"><Upload className="w-6 h-6 text-indigo-600" /></div>
+                                        <div className="text-sm font-bold text-indigo-900">Bulky Import (.csv)</div>
+                                        <p className="text-xs text-slate-500 px-2 leading-relaxed">Buat ratusan akun sekaligus.</p>
+                                        <label className="px-5 py-2.5 mt-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-bold cursor-pointer inline-flex items-center space-x-2 shadow-lg shadow-indigo-600/20 transition-all hover:-translate-y-0.5"><Upload className="w-4 h-4" /><span>Upload CSV KTP</span><input type="file" accept=".csv" className="hidden" onChange={handleBulkyKTPUpload} /></label>
+                                    </div>
                                 </div>
-                                <div className="p-5 bg-linear-to-b from-indigo-50 to-white border border-indigo-100 rounded-2xl text-center flex flex-col justify-center items-center space-y-3">
-                                    <div className="p-3 bg-indigo-100/50 rounded-full"><Upload className="w-6 h-6 text-indigo-600" /></div>
-                                    <div className="text-sm font-bold text-indigo-900">Bulky Import (.csv)</div>
-                                    <p className="text-xs text-slate-500 px-2 leading-relaxed">Buat ratusan akun sekaligus.</p>
-                                    <label className="px-5 py-2.5 mt-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-bold cursor-pointer inline-flex items-center space-x-2 shadow-lg shadow-indigo-600/20 transition-all hover:-translate-y-0.5"><Upload className="w-4 h-4" /><span>Upload CSV KTP</span><input type="file" accept=".csv" className="hidden" onChange={handleBulkyKTPUpload} /></label>
-                                </div>
-                            </div>
 
-                            <div className="overflow-x-auto border border-slate-200 rounded-2xl scrollbar-thin">
-                                <table className="w-full text-left text-sm"><thead className="bg-slate-50 font-bold text-slate-500 border-b"><tr><th className="p-4">USERNAME</th><th className="p-4">NAMA PEGAWAI</th><th className="p-4">EMAIL</th><th className="p-4 text-center">PIN</th><th className="p-4 text-right">AKSI</th></tr></thead>
-                                    <tbody className="divide-y divide-slate-100 font-medium">
-                                        {globalAccounts.map((acc) => (
-                                            <tr key={acc.id} className="hover:bg-slate-50/80 group">
-                                                <td className="p-4 font-bold font-mono text-indigo-600">{acc.username}</td><td className="p-4 font-bold text-slate-800">{acc.name}</td><td className="p-4 text-slate-500 text-xs">{acc.email || '-'}</td>
-                                                <td className="p-4 text-center font-mono font-bold text-slate-600 flex justify-center items-center space-x-2">
-                                                    <span>{visiblePins[acc.id] ? acc.pin : '••••'}</span>
-                                                    <button onClick={() => togglePinVisibility(acc.id)} className="text-slate-400 hover:text-indigo-600">
-                                                        {visiblePins[acc.id] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                                                    </button>
-                                                </td>
-                                                <td className="p-4 text-right space-x-2"><button onClick={() => handleDeleteGlobalAccount(acc.username)} className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors"><Trash2 className="w-4 h-4" /></button></td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
+                                <div className="overflow-x-auto border border-slate-200 rounded-2xl scrollbar-thin">
+                                    <table className="w-full text-left text-sm"><thead className="bg-slate-50 font-bold text-slate-500 border-b"><tr><th className="p-4">USERNAME</th><th className="p-4">NAMA PEGAWAI</th><th className="p-4">EMAIL</th><th className="p-4 text-center">PIN</th><th className="p-4 text-right">AKSI</th></tr></thead>
+                                        <tbody className="divide-y divide-slate-100 font-medium">
+                                            {globalAccounts.map((acc) => (
+                                                <tr key={acc.id} className="hover:bg-slate-50/80 group">
+                                                    <td className="p-4 font-bold font-mono text-indigo-600">{acc.username}</td><td className="p-4 font-bold text-slate-800">{acc.name}</td><td className="p-4 text-slate-500 text-xs">{acc.email || '-'}</td>
+                                                    <td className="p-4 text-center font-mono font-bold text-slate-600 flex justify-center items-center space-x-2">
+                                                        <span>{visiblePins[acc.id] ? acc.pin : '••••'}</span>
+                                                        <button onClick={() => togglePinVisibility(acc.id)} className="text-slate-400 hover:text-indigo-600">
+                                                            {visiblePins[acc.id] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                                        </button>
+                                                    </td>
+                                                    <td className="p-4 text-right space-x-2"><button onClick={() => handleDeleteGlobalAccount(acc.username)} className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors"><Trash2 className="w-4 h-4" /></button></td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
                             </div>
                         </div>
                     )}
@@ -1044,30 +1068,9 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                         </div>
                     )}
 
-                    {/* TAB 4: PENGATURAN PROJECT (SETTINGS OWNER, TIM, PRICING & GSHEET WEBHOOK) */}
+                    {/* TAB 4: PENGATURAN PROJECT (TIM, PRICING & GSHEET WEBHOOK) */}
                     {activeTab === 'settings' && (
                         <div className="space-y-6 animate-in slide-in-from-bottom-2 duration-300">
-
-                            {/* PANEL PENGATURAN AKUN OWNER */}
-                            <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl shadow-slate-200/40 space-y-4">
-                                <div className="border-b border-slate-100 pb-3 flex justify-between items-center">
-                                    <h3 className="text-base font-black text-slate-900 flex items-center space-x-2">
-                                        <KeyRound className="w-5 h-5 text-indigo-600" />
-                                        <span>Pengaturan Akun & Profil Owner</span>
-                                    </h3>
-                                    <span className="text-xs font-bold text-indigo-700 bg-indigo-50 px-3 py-1 rounded-xl">Otorisasi Master</span>
-                                </div>
-                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                                    <input type="text" placeholder="Nama Lengkap Owner" value={ownerNewName} onChange={(e) => setOwnerNewName(e.target.value)} className="px-4 py-2.5 text-xs bg-slate-50 border border-slate-200 rounded-xl outline-none" />
-                                    <input type="email" placeholder="Email Owner" value={ownerNewEmail} onChange={(e) => setOwnerNewEmail(e.target.value)} className="px-4 py-2.5 text-xs bg-slate-50 border border-slate-200 rounded-xl outline-none" />
-                                    <input type="password" maxLength={4} placeholder="PIN Akses Baru (4-Digit)" value={ownerNewPin} onChange={(e) => setOwnerNewPin(e.target.value)} className="px-4 py-2.5 text-xs font-mono bg-slate-50 border border-slate-200 rounded-xl outline-none" />
-                                </div>
-                                <div className="flex justify-end">
-                                    <button onClick={handleUpdateOwnerAccount} className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md transition-colors">Simpan Perubahan Profil Owner</button>
-                                </div>
-                            </div>
-
-                            {/* CARD GOOGLE SHEETS WEBHOOK BACKUP INTEGRATION */}
                             <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl shadow-slate-200/40 space-y-4">
                                 <div className="border-b border-slate-100 pb-3 flex justify-between items-center">
                                     <h3 className="text-base font-black text-slate-900 flex items-center space-x-2">
