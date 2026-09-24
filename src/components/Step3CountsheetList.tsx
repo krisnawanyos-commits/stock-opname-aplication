@@ -25,50 +25,60 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
 
   // 1. SYNC REAL-TIME RAK DARI CLOUD FIRESTORE
   useEffect(() => {
-    // Mengambil task dari Firestore berdasarkan sesi aktif & counter login
+    const primaryCounter = sessionData.primaryCounter || "Unassigned";
     const qTasks = query(
       collection(db, "master_tasks"),
-      where("counter", "==", sessionData.primaryCounter || "Unassigned")
+      where("counter", "==", primaryCounter)
     );
 
     const unsubscribe = onSnapshot(qTasks, (snapshot) => {
       const taskList = snapshot.docs.map(doc => doc.data());
 
-      // Mengelompokkan task berdasarkan lokasi rak (Bin)
       const groupedRacks: Record<string, RackItem> = {};
 
       taskList.forEach((task: any) => {
         const rackLoc = task.Location || 'Z02-10-A';
-        if (!groupedRacks[rackLoc]) {
+        const isCounted = !!task.isCounted;
+
+        const existingRack = groupedRacks[rackLoc];
+        if (!existingRack) {
           groupedRacks[rackLoc] = {
             id: rackLoc,
             rackNumber: `${rackLoc} (Level ${task.level || '1'})`,
             level: parseInt(task.level || '1', 10),
             zone: task.Zone || 'RACKING',
             status: 'pending',
-            totalSKU: 0,
-            countedSKU: 0
+            totalSKU: 1,
+            countedSKU: isCounted ? 1 : 0
           };
-        }
-
-        groupedRacks[rackLoc].totalSKU += 1;
-        if (task.isCounted) {
-          groupedRacks[rackLoc].countedSKU += 1;
+        } else {
+          existingRack.totalSKU = (existingRack.totalSKU || 0) + 1;
+          if (isCounted) {
+            existingRack.countedSKU = (existingRack.countedSKU || 0) + 1;
+          }
         }
       });
 
-      // Menentukan status pengerjaan masing-masing rak
+      // AMAN DARI SANITASI TS TYPES
       const rackArray = Object.values(groupedRacks).map(r => {
+        const counted = r.countedSKU ?? 0;
+        const total = r.totalSKU ?? 0;
         let status: 'completed' | 'in-progress' | 'pending' = 'pending';
-        if (r.countedSKU === r.totalSKU && r.totalSKU > 0) {
+
+        if (counted === total && total > 0) {
           status = 'completed';
-        } else if (r.countedSKU > 0) {
+        } else if (counted > 0) {
           status = 'in-progress';
         }
-        return { ...r, status };
+
+        return {
+          ...r,
+          countedSKU: counted,
+          totalSKU: total,
+          status
+        };
       });
 
-      // Jika data di Firestore masih kosong, buatkan sampel rak awal agar UI tidak kosong
       if (rackArray.length === 0) {
         setRacks([
           { id: '1', rackNumber: 'Z02-10-A (Level 1)', level: 1, zone: 'RACKING', status: 'completed', totalSKU: 24, countedSKU: 24 },
@@ -107,7 +117,7 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
     return matchesFilter && matchesSearch;
   });
 
-  const getInitials = (name: string) => {
+  const getInitials = (name?: string) => {
     if (!name) return 'SO';
     const parts = name.split(/[\s.]+/).filter(Boolean);
     if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
@@ -117,10 +127,9 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
   const handleLockSubmit = async () => {
     setIsLocking(true);
 
-    // Kunci status di Cloud Firestore
     await setDoc(doc(db, "round_locks", sessionData.sessionName || "SESSION_01"), {
       status: 'LOCKED',
-      lockedBy: sessionData.primaryCounter,
+      lockedBy: sessionData.primaryCounter || 'Counter',
       timestamp: new Date().toLocaleString()
     }, { merge: true });
 
@@ -179,7 +188,7 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
               <span className="material-symbols-outlined text-[16px]">logout</span>
             </button>
             <div className="w-8 h-8 rounded-full bg-secondary-container text-on-secondary-container flex items-center justify-center font-bold text-xs shadow-xs ring-2 ring-surface-container-high">
-              {getInitials(sessionData.primaryCounter || "SO")}
+              {getInitials(sessionData.primaryCounter)}
             </div>
           </div>
         </div>
