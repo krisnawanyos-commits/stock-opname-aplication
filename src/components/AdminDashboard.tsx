@@ -4,13 +4,14 @@ import { doc, getDoc } from 'firebase/firestore';
 import { ShieldCheck, AlertCircle, Loader2 } from 'lucide-react';
 import type { UserRole } from '../types';
 
-interface Step1LoginProps {
+export interface Step1LoginProps {
     onLogin?: (role: UserRole, email: string, username: string) => void;
     onSuccessLogin?: (username: string, role: UserRole, name?: string) => void;
     onBackToApp?: () => void;
     currentUserRole?: UserRole;
     currentUserEmail?: string;
     currentUsername?: string;
+    [key: string]: any; // Mencegah error TS2322 'Property does not exist' di App.tsx
 }
 
 export default function Step1Login({
