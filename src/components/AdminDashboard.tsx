@@ -180,7 +180,7 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
     const [wizMethod, setWizMethod] = useState<'LIST_TO_FLOOR' | 'FLOOR_TO_LIST'>('LIST_TO_FLOOR');
 
     const [showToast, setShowToast] = useState<string | null>(null);
-    const triggerNotification = (message: string) => { setShowToast(message); setTimeout(() => setShowToast(null), 3000); };
+    const triggerNotification = (message: string) => { setShowToast(message); setTimeout(() => setShowToast(null), 4000); };
 
     const [showLevelProgress, setShowLevelProgress] = useState<boolean>(false);
     const [viewRoundFilter, setViewRoundFilter] = useState<'overall' | 1 | 2 | 3 | 4>('overall');
@@ -208,7 +208,6 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
         return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); };
     }, []);
 
-    // REAL-TIME FIRESTORE LISTENER UNTUK MASTER TASK PROJECT
     useEffect(() => {
         if (!activeProject) return;
 
@@ -327,7 +326,7 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
         acc.email.toLowerCase().includes(ktpSearch.toLowerCase())
     );
 
-    // PARSER EXCEL ATOMIC BATCH (CEPAT < 1 DETIK UTK 122+ SKUs)
+    // PARSER EXCEL DENGAN SANITASI GARIS MIRING PADA DOCUMENT ID FIRESTORE
     const parseXLSXFile = (file: File, currentProjId?: string): Promise<MasterSKUItem[]> => {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
@@ -338,7 +337,7 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                     const worksheet = workbook.Sheets[workbook.SheetNames[0]];
                     const json = XLSX.utils.sheet_to_json(worksheet) as any[];
 
-                    triggerNotification("Mengunggah seluruh data ke Cloud Firestore...");
+                    triggerNotification("Mengunggah data ke Cloud Firestore...");
 
                     const batch = writeBatch(db);
                     const newMasterList: MasterSKUItem[] = [];
@@ -349,7 +348,10 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                         const rawCounter = (row['counter'] || row['Counter'] || row['COUNTER'] || 'Unassigned').toString().toLowerCase().trim();
                         const locStr = (row['Location'] || row['LOCATION'] || `LOC-${idx + 1}`).toString().trim();
                         const skuStr = (row['SKU'] || `SKU-${idx + 1}`).toString().trim();
-                        const taskId = `${locStr}_${skuStr}_${idx + 1}`;
+
+                        // SANITASI GARIS MIRING UNTUK ID DOKUMEN FIRESTORE
+                        const rawTaskId = `${locStr}_${skuStr}_${idx + 1}`;
+                        const taskId = rawTaskId.replace(/\//g, '-');
 
                         if (rawCounter !== 'unassigned') {
                             const accRef = doc(db, "global_accounts", rawCounter);
@@ -414,9 +416,10 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
                     setMasterDataList(newMasterList);
                     triggerNotification(`Upload Berhasil! ${newMasterList.length} SKU tersimpan di Firestore Cloud.`);
                     resolve(newMasterList);
-                } catch (err) {
+                } catch (err: any) {
                     console.error("Batch commit error:", err);
-                    triggerNotification("Gagal upload ke Firestore!");
+                    const errorMsg = err?.message || String(err);
+                    triggerNotification(`Gagal upload ke Firestore: ${errorMsg}`);
                     reject(err);
                 }
             };
@@ -428,7 +431,8 @@ export default function AdminDashboard({ onBackToApp, currentUserRole = 'owner',
     const handleReassignCounter = async (taskIndex: number, newCounter: string) => {
         const targetItem = masterDataList[taskIndex];
         const cleanCounter = newCounter.toLowerCase().trim();
-        const taskId = targetItem.id || `${targetItem.Location}_${targetItem.SKU}_${taskIndex + 1}`;
+        const rawTaskId = targetItem.id || `${targetItem.Location}_${targetItem.SKU}_${taskIndex + 1}`;
+        const taskId = rawTaskId.replace(/\//g, '-');
 
         await setDoc(doc(db, "master_tasks", taskId), {
             counter: cleanCounter,
