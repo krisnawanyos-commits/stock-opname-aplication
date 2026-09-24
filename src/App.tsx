@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { db } from '../firebase';
+import { db } from './firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import { ShieldCheck, AlertCircle, Loader2 } from 'lucide-react';
-import type { UserRole } from '../types';
+import type { UserRole } from './types';
 
 export interface Step1LoginProps {
   onSuccessLogin?: (username: string, role: UserRole, name?: string) => void;
