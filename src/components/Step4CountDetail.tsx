@@ -18,8 +18,8 @@ interface GroupedSKUItem {
   category: string;
   uom: 'PCS' | 'CARTON';
   totalSystemQty: number;
-  qtyGood: number;
-  qtyBad: number;
+  qtyGood: string; // TIPE STRING AGAR BISA BISA BLANK ""
+  qtyBad: string;  // TIPE STRING AGAR BISA BISA BLANK ""
   expDateSystem: string;
   expDateActual: string;
   isBadStock: boolean;
@@ -46,7 +46,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     isOpen: false, title: '', message: '',
   });
 
-  // LISTENER STATUS PENGUNCIAN GLOBAL & PER-COUNTER DARI OWNER
+  // REAL-TIME LISTENER PENGUNCIAN GLOBAL ATAU PER-COUNTER DARI OWNER
   useEffect(() => {
     const lockRef = doc(db, "round_locks", sessionData.sessionName || "SESSION_01");
     const unsub = onSnapshot(lockRef, (docSnap) => {
@@ -56,7 +56,6 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
         const primaryCounter = (sessionData.primaryCounter || '').toLowerCase().trim();
         const isCounterLocked = !!(data.lockedCounters && data.lockedCounters[primaryCounter]);
 
-        // KUNCI JIKA SESI GLOBAL DIKUNCI ATAU COUNTER INI KHUSUS DIKUNCI OLEH OWNER
         setIsSessionLocked(isGlobalLocked || isCounterLocked);
       } else {
         setIsSessionLocked(false);
@@ -65,6 +64,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     return () => unsub();
   }, [sessionData.sessionName, sessionData.primaryCounter]);
 
+  // FETCH & AGGREGATE TASK BERDASARKAN SKU
   useEffect(() => {
     const primaryCounter = (sessionData.primaryCounter || "Unassigned").toLowerCase().trim();
     const targetLocation = rack.rackNumber || rack.id;
@@ -82,9 +82,14 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
         const data = docSnap.data();
         const skuKey = (data.SKU || 'SKU_UNKNOWN').toUpperCase().trim();
         const sysQty = parseInt(data.Qty || data.QTY_SYSTEM) || 0;
+
         const rawActQty = data.QTY_ACTUAL ?? data.countedQty;
         const numActQty = parseInt(rawActQty, 10);
         const hasActQty = rawActQty !== undefined && rawActQty !== null && !isNaN(numActQty);
+
+        const rawBadQty = data.QTY_BAD;
+        const numBadQty = parseInt(rawBadQty, 10);
+
         const edSys = data.expiredDateSystem || '';
 
         if (!groupedMap[skuKey]) {
@@ -95,11 +100,11 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             category: `${data.Zone || 'RACKING'} • ${data.SKUBrand || 'General'}`,
             uom: (data.satuanHitung as 'PCS' | 'CARTON') || 'PCS',
             totalSystemQty: sysQty,
-            qtyGood: hasActQty ? numActQty : 0,
-            qtyBad: parseInt(data.QTY_BAD) || 0,
+            qtyGood: hasActQty ? numActQty.toString() : "", // DEFAULT BLANK SAAT BELUM DIISI
+            qtyBad: !isNaN(numBadQty) && numBadQty > 0 ? numBadQty.toString() : "",
             expDateSystem: edSys,
             expDateActual: data.expDateActual || data.expiredDateActual || '',
-            isBadStock: (parseInt(data.QTY_BAD) || 0) > 0 || !!data.badRemarks,
+            isBadStock: (!isNaN(numBadQty) && numBadQty > 0) || !!data.badRemarks,
             badRemarks: data.badRemarks || '',
             isCounted: !!data.isCounted || hasActQty,
             docIds: [docSnap.id],
@@ -117,7 +122,8 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
           }
 
           if (hasActQty) {
-            groupedMap[skuKey].qtyGood += numActQty;
+            const currentGood = parseInt(groupedMap[skuKey].qtyGood || "0", 10);
+            groupedMap[skuKey].qtyGood = (currentGood + numActQty).toString();
             groupedMap[skuKey].isCounted = true;
           }
 
@@ -135,7 +141,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
   }, [rack, sessionData]);
 
   const [unmappedBarcode, setUnmappedBarcode] = useState<string>('');
-  const [unmappedQty, setUnmappedQty] = useState<number>(1);
+  const [unmappedQty, setUnmappedQty] = useState<string>("1");
   const [unmappedUnit, setUnmappedUnit] = useState<'PCS' | 'CARTON'>('PCS');
   const [unmappedExpDate, setUnmappedExpDate] = useState<string>('2026-10-15');
   const [unmappedBatchNumber, setUnmappedBatchNumber] = useState<string>('BATCH-2026-X9');
@@ -155,10 +161,24 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     );
   };
 
-  const adjustQty = (index: number, delta: number) => {
+  const adjustQty = (index: number, type: 'good' | 'bad', delta: number) => {
     if (isSessionLocked) return;
     setSkuList((prev) =>
-      prev.map((item, idx) => (idx === index ? { ...item, qtyGood: Math.max(0, item.qtyGood + delta) } : item))
+      prev.map((item, idx) => {
+        if (idx === index) {
+          if (type === 'good') {
+            const current = parseInt(item.qtyGood || "0", 10);
+            const nextVal = Math.max(0, current + delta);
+            return { ...item, qtyGood: nextVal === 0 ? "" : nextVal.toString() };
+          }
+          if (type === 'bad') {
+            const current = parseInt(item.qtyBad || "0", 10);
+            const nextVal = Math.max(0, current + delta);
+            return { ...item, qtyBad: nextVal === 0 ? "" : nextVal.toString() };
+          }
+        }
+        return item;
+      })
     );
   };
 
@@ -166,6 +186,19 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     if (isSessionLocked) return;
     setSkuList((prev) =>
       prev.map((item, idx) => (idx === index ? { ...item, isBadStock: !item.isBadStock } : item))
+    );
+  };
+
+  // INPUT TEKS BEBAS BISA KOSONG "" DAN BERSIH DARI LEADING ZERO
+  const handleInputText = (index: number, field: 'qtyGood' | 'qtyBad', rawVal: string) => {
+    if (isSessionLocked) return;
+
+    let cleanVal = rawVal.replace(/^0+/, '');
+    if (cleanVal === "" && rawVal !== "") cleanVal = "0";
+    if (rawVal === "") cleanVal = "";
+
+    setSkuList((prev) =>
+      prev.map((item, idx) => (idx === index ? { ...item, [field]: cleanVal } : item))
     );
   };
 
@@ -208,11 +241,13 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       return;
     }
 
+    const qtyNumber = parseInt(unmappedQty || "0", 10);
+
     const newItem: UnmappedItem = {
       id: Date.now().toString(),
       barcode: unmappedBarcode.trim(),
       name: unmappedDesc.trim() || (isBarcodeInSystem ? 'Barang System Ditemukan' : 'Barang Fisik Baru Unmapped'),
-      qty: unmappedQty || 1,
+      qty: qtyNumber > 0 ? qtyNumber : 1,
       uom: unmappedUnit,
       expDate: unmappedExpDate,
       batchNumber: unmappedBatchNumber,
@@ -223,7 +258,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     setUnmappedBarcode('');
     setUnmappedDesc('');
     setUnmappedPhotoUrl('');
-    setUnmappedQty(1);
+    setUnmappedQty("1");
     setModal({ isOpen: true, type: 'success', title: 'Item Temuan Ditambahkan', message: 'Item berhasil disimpan ke daftar temuan rak ini.' });
   };
 
@@ -240,13 +275,16 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       const batch = writeBatch(db);
 
       skuList.forEach(skuItem => {
+        const finalGoodQty = parseInt(skuItem.qtyGood || "0", 10);
+        const finalBadQty = parseInt(skuItem.qtyBad || "0", 10);
+
         skuItem.docIds.forEach((docId, i) => {
           const taskRef = doc(db, "master_tasks", docId);
           batch.set(taskRef, {
             counter: (sessionData.primaryCounter || 'Unassigned').toLowerCase().trim(),
             isCounted: true,
-            QTY_ACTUAL: i === 0 ? skuItem.qtyGood : 0,
-            QTY_BAD: i === 0 ? skuItem.qtyBad : 0,
+            QTY_ACTUAL: i === 0 ? finalGoodQty : 0,
+            QTY_BAD: i === 0 ? finalBadQty : 0,
             badRemarks: i === 0 ? (skuItem.badRemarks || '') : '',
             expDateActual: skuItem.expDateActual || '',
             updatedAt: new Date().toISOString()
@@ -343,12 +381,18 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                 <p className="font-body-sm text-slate-500">{currentSku.category}</p>
               </div>
 
+              {/* EXPIRED DATE FEFO */}
               <div className="bg-blue-50/60 border border-blue-200 p-space-sm rounded-xl space-y-2">
                 <div className="flex justify-between items-center">
                   <span className="font-label-sm text-blue-900 font-bold flex items-center gap-1">
                     <span className="material-symbols-outlined text-[16px] text-blue-700">event</span> Expired Date System (FEFO)
                   </span>
-                  <button type="button" disabled={isSessionLocked} onClick={() => handleSetSameExpAsSystem(idx)} className={`px-2.5 py-1 bg-emerald-600 text-white rounded-lg text-[10px] font-bold cursor-pointer ${isSessionLocked ? 'opacity-50 cursor-not-allowed' : 'active:scale-95'}`}>
+                  <button
+                    type="button"
+                    disabled={isSessionLocked}
+                    onClick={() => handleSetSameExpAsSystem(idx)}
+                    className={`px-2.5 py-1 text-white rounded-lg text-[10px] font-bold cursor-pointer ${isSessionLocked ? 'bg-slate-400 opacity-50 cursor-not-allowed' : 'bg-emerald-600 active:scale-95'}`}
+                  >
                     Sama dgn System
                   </button>
                 </div>
@@ -369,6 +413,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                   </div>
                 </div>
 
+                {/* DAFTAR VARIASI ED SYSTEM */}
                 {currentSku.allSystemEds.length > 0 && (
                   <div className="pt-2 border-t border-blue-200/60 space-y-1">
                     <span className="text-[10px] font-bold text-slate-600 block">
@@ -386,27 +431,30 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                 )}
               </div>
 
+              {/* INPUT KONDISI BAIK */}
               <div className="bg-slate-50 border border-slate-200 p-space-md rounded-xl space-y-space-sm">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-blue-600"></span><span className="font-headline-sm text-slate-900 font-bold">Kondisi Baik (Qty Good)</span></div>
                   <span className="font-label-sm text-slate-500 font-semibold">{currentSku.uom}</span>
                 </div>
                 <div className="flex items-center gap-space-sm">
-                  <button type="button" disabled={isSessionLocked} onClick={() => adjustQty(idx, -1)} className={`w-14 h-14 bg-white border border-slate-300 text-slate-800 rounded-xl flex items-center justify-center text-xl shrink-0 cursor-pointer ${isSessionLocked ? 'opacity-50 cursor-not-allowed' : ''}`}><span className="material-symbols-outlined">remove</span></button>
+                  <button type="button" disabled={isSessionLocked} onClick={() => adjustQty(idx, 'good', -1)} className={`w-14 h-14 bg-white border border-slate-300 text-slate-800 rounded-xl flex items-center justify-center text-xl shrink-0 cursor-pointer ${isSessionLocked ? 'opacity-50 cursor-not-allowed' : ''}`}><span className="material-symbols-outlined">remove</span></button>
                   <div className="flex-1 h-14 border-2 border-blue-500 rounded-xl flex items-center justify-center bg-white">
                     <input
-                      type="number"
-                      min="0"
+                      type="text"
+                      inputMode="numeric"
                       disabled={isSessionLocked}
                       value={currentSku.qtyGood}
-                      onChange={(e) => updateItemField(idx, 'qtyGood', parseInt(e.target.value) || 0)}
+                      onChange={(e) => handleInputText(idx, 'qtyGood', e.target.value)}
+                      placeholder="0"
                       className={`w-full text-center font-bold text-2xl outline-none ${isSessionLocked ? 'bg-slate-100 opacity-60' : 'bg-white'}`}
                     />
                   </div>
-                  <button type="button" disabled={isSessionLocked} onClick={() => adjustQty(idx, 1)} className={`w-14 h-14 text-white rounded-xl flex items-center justify-center text-xl shrink-0 cursor-pointer ${isSessionLocked ? 'bg-slate-400 opacity-50 cursor-not-allowed' : 'bg-blue-600'}`}><span className="material-symbols-outlined">add</span></button>
+                  <button type="button" disabled={isSessionLocked} onClick={() => adjustQty(idx, 'good', 1)} className={`w-14 h-14 text-white rounded-xl flex items-center justify-center text-xl shrink-0 cursor-pointer ${isSessionLocked ? 'bg-slate-400 opacity-50 cursor-not-allowed' : 'bg-blue-600'}`}><span className="material-symbols-outlined">add</span></button>
                 </div>
               </div>
 
+              {/* BAD STOCK DETECTED */}
               <div className="bg-amber-50/70 border border-amber-200 p-space-md rounded-xl space-y-space-sm">
                 <div className="flex items-center justify-between">
                   <span className="font-body-lg text-amber-900 font-bold">Bad Stock Detected?</span>
@@ -416,11 +464,12 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                   <div className="pt-2 space-y-2 border-t border-amber-200">
                     <label className="text-xs font-bold text-amber-900">Jumlah Rusak (Qty Bad):</label>
                     <input
-                      type="number"
-                      min="0"
+                      type="text"
+                      inputMode="numeric"
                       disabled={isSessionLocked}
                       value={currentSku.qtyBad}
-                      onChange={(e) => updateItemField(idx, 'qtyBad', parseInt(e.target.value) || 0)}
+                      onChange={(e) => handleInputText(idx, 'qtyBad', e.target.value)}
+                      placeholder="0"
                       className={`w-full p-2 border border-amber-300 rounded-lg text-center font-bold text-lg ${isSessionLocked ? 'bg-slate-100 opacity-60' : 'bg-white'}`}
                     />
 
@@ -446,6 +495,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             </div>
           )}
 
+          {/* ITEM TAK TERDAFTAR / TEMUAN LAIN */}
           <div className="bg-white rounded-xl p-space-md shadow-xs border border-slate-200 space-y-space-md">
             <div className="flex items-center justify-between cursor-pointer" onClick={() => setUnmappedDrawerOpen(!unmappedDrawerOpen)}>
               <h3 className="font-headline-sm text-slate-900 font-bold">Item Tak Terdaftar / Temuan Lain</h3>
@@ -480,7 +530,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="text-[10px] font-bold text-slate-600 block mb-0.5">Qty Temuan:</label>
-                    <input type="number" min="1" disabled={isSessionLocked} value={unmappedQty} onChange={(e) => setUnmappedQty(parseInt(e.target.value) || 1)} className={`w-full h-10 border border-slate-300 px-2 rounded-lg text-xs font-bold text-center ${isSessionLocked ? 'bg-slate-100 opacity-60' : 'bg-white'}`} />
+                    <input type="text" inputMode="numeric" disabled={isSessionLocked} value={unmappedQty} onChange={(e) => setUnmappedQty(e.target.value)} placeholder="0" className={`w-full h-10 border border-slate-300 px-2 rounded-lg text-xs font-bold text-center ${isSessionLocked ? 'bg-slate-100 opacity-60' : 'bg-white'}`} />
                   </div>
                   <div>
                     <label className="text-[10px] font-bold text-slate-600 block mb-0.5">Satuan (UOM):</label>

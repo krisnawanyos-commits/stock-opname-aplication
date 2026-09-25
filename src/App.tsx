@@ -113,7 +113,8 @@ export default function App() {
             if (role === 'owner' || role === 'spv' || username === 'owner') {
               setCurrentStep('admin');
             } else {
-              setCurrentStep(2);
+              // BYPASS LANGSUNG KE STEP 3 (COUNTSHEET LIST)
+              setCurrentStep(3);
             }
           }}
         />
@@ -125,7 +126,7 @@ export default function App() {
           onSwitchToCounterView={() => {
             setSessionData(prev => ({
               ...prev,
-              primaryCounter: 'bambang' // Auto switch ke counter bambang untuk keperluan demo
+              primaryCounter: 'bambang'
             }));
             setCurrentStep('admin_demo');
           }}
@@ -147,19 +148,17 @@ export default function App() {
 
       {(currentStep === 3 || currentStep === 'admin_demo') && (
         <div className="relative">
-          {/* Banner Demo Mode */}
           {isDemoMode && (
             <div className="fixed top-0 left-0 right-0 z-50 bg-amber-500 text-slate-950 px-4 py-1.5 text-xs font-black flex justify-between items-center shadow-md">
-              <span>📱 DEMO MODE: HP Counter ({sessionData.primaryCounter})</span>
+              <span>📱 DEMO MODE: Tampilan HP Counter ({sessionData.primaryCounter})</span>
               <button
                 onClick={() => setCurrentStep('admin')}
-                className="bg-slate-900 text-white px-3 py-1 rounded-lg text-[10px] font-bold hover:bg-slate-800 transition-colors"
+                className="bg-slate-900 text-white px-3 py-1 rounded-lg text-[10px] font-bold hover:bg-slate-800 transition-colors cursor-pointer"
               >
                 🛡️ Kembali ke Admin
               </button>
             </div>
           )}
-          {/* Tambahkan padding agar tidak tertutup banner saat mode demo */}
           <div className={isDemoMode ? "pt-8" : ""}>
             <Step3CountsheetList
               sessionData={sessionData}
@@ -177,10 +176,10 @@ export default function App() {
         <div className="relative">
           {isDemoMode && (
             <div className="fixed top-0 left-0 right-0 z-50 bg-amber-500 text-slate-950 px-4 py-1.5 text-xs font-black flex justify-between items-center shadow-md">
-              <span>📱 DEMO MODE: HP Counter ({sessionData.primaryCounter})</span>
+              <span>📱 DEMO MODE: Tampilan HP Counter ({sessionData.primaryCounter})</span>
               <button
                 onClick={() => setCurrentStep('admin')}
-                className="bg-slate-900 text-white px-3 py-1 rounded-lg text-[10px] font-bold hover:bg-slate-800 transition-colors"
+                className="bg-slate-900 text-white px-3 py-1 rounded-lg text-[10px] font-bold hover:bg-slate-800 transition-colors cursor-pointer"
               >
                 🛡️ Kembali ke Admin
               </button>
