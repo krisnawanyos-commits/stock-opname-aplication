@@ -13,6 +13,7 @@ export interface UserAccount {
 // Session & Login Data
 export interface SessionData {
   sessionId: string;
+  sessionCode?: string; // <-- Tambahkan baris ini
   sessionName: string;
   primaryCounter: string;
   partners: string[];

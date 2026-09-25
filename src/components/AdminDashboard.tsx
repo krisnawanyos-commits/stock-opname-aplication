@@ -7,11 +7,11 @@ import * as XLSX from 'xlsx';
 import {
     Users, Database, Upload, ShieldCheck, Check, FileSpreadsheet,
     PieChart, ChevronUp, Plus, Trash2, MapPin, Save,
-    UserPlus, Filter, TrendingDown, Printer, SlidersHorizontal,
+    UserPlus, Filter, TrendingDown, SlidersHorizontal,
     CheckCircle2, XCircle, Search, Building2, DollarSign,
     Download, Scale, PlayCircle, Archive, ArrowLeft, AlertTriangle,
     LogOut, GripHorizontal, Contact, Eye, EyeOff, UserCheck, Clock, Store, Link2, KeyRound,
-    Mail, ExternalLink, Edit2, Smartphone, Lock, Unlock, Repeat
+    Mail, Edit2, Smartphone, Lock, Unlock, Repeat
 } from 'lucide-react';
 import type { UserRole } from '../types';
 
@@ -58,6 +58,8 @@ interface MasterSKUItem {
     expiredDateActual: string;
     Qty: number;
     countedQty?: number;
+    qtyGood?: number;
+    qtyBad?: number;
     Remarks: string;
     thirdPartyQty?: number;
     unitPrice?: number;
@@ -92,6 +94,7 @@ const ALL_AVAILABLE_TABS: TabDefinition[] = [
     { id: 'progress', label: 'Progress & Analytics', icon: PieChart, roles: ['owner', 'spv'] },
     { id: 'master', label: 'Master Task & Rak', icon: Database, roles: ['owner', 'spv'] },
     { id: 'recon', label: 'Recon & Recovery', icon: Scale, roles: ['owner'] },
+    { id: 'audit', label: 'Audit Trail Countsheet', icon: Clock, roles: ['owner', 'spv'] },
     { id: 'settings', label: 'Tim & Configurations', icon: SlidersHorizontal, roles: ['owner'] },
 ];
 
@@ -145,18 +148,22 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
     const [selectedCounterForDetail, setSelectedCounterForDetail] = useState<string | null>(null);
     const [ktpSearch, setKtpSearch] = useState<string>('');
+    const [counterSearch, setCounterSearch] = useState<string>('');
 
     const [editingAccount, setEditingAccount] = useState<GlobalAccount | null>(null);
     const [assignUsername, setAssignUsername] = useState<string>('');
     const [assignRole, setAssignRole] = useState<UserRole>('counter');
 
-    // BULK REASSIGN TASK COUNTER ABSEN
+    // 3. BULK REASSIGN TASK COUNTER ABSEN STATE
     const [transferSourceCounter, setTransferSourceCounter] = useState<string | null>(null);
     const [transferTargetCounter, setTransferTargetCounter] = useState<string>('');
 
     // STATE PENGUNCIAN
     const [isProjectLocked, setIsProjectLocked] = useState(false);
     const [lockedCounters, setLockedCounters] = useState<Record<string, boolean>>({});
+
+    // AUDIT LOGS STATE
+    const [auditLogs, setAuditLogs] = useState<any[]>([]);
 
     useEffect(() => {
         setOrderedTabs(ALL_AVAILABLE_TABS.filter(tab => tab.roles.includes(effectiveRole)));
@@ -215,7 +222,14 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         const unsub4 = onSnapshot(collection(db, "warehouses"), (snap) => setWarehouseList(snap.docs.map(d => ({ id: d.id, ...d.data() } as LocationOption))));
         const unsub5 = onSnapshot(collection(db, "consignment_stores"), (snap) => setConsignmentStoreList(snap.docs.map(d => ({ id: d.id, ...d.data() } as LocationOption))));
 
-        return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); };
+        // Listener Audit Logs
+        const unsubAudit = onSnapshot(collection(db, "audit_logs"), (snap) => {
+            const logs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+            logs.sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+            setAuditLogs(logs);
+        });
+
+        return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); unsubAudit(); };
     }, []);
 
     useEffect(() => {
@@ -250,6 +264,8 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     expiredDateActual: data.expDateActual || data.expiredDateActual || '',
                     Qty: parseInt(data.Qty || data.QTY_SYSTEM) || 0,
                     countedQty: isCounted ? (isNaN(numActQty) ? 0 : numActQty) : undefined,
+                    qtyGood: data.QTY_GOOD ?? data.qtyGood,
+                    qtyBad: data.QTY_BAD ?? data.qtyBad,
                     Remarks: data.badRemarks || data.Remarks || '',
                     isCounted: !!isCounted,
                     unitPrice: parseInt(data.unitPrice) || 0
@@ -261,7 +277,8 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             }
         });
 
-        const lockUnsubscribe = onSnapshot(doc(db, "round_locks", activeProject.sessionCode), (docSnap) => {
+        const lockDocId = activeProject.id || activeProject.sessionCode;
+        const lockUnsubscribe = onSnapshot(doc(db, "round_locks", lockDocId), (docSnap) => {
             if (docSnap.exists()) {
                 const data = docSnap.data();
                 setIsProjectLocked(data.status === 'LOCKED');
@@ -272,11 +289,110 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         return () => { unsubscribe(); lockUnsubscribe(); };
     }, [activeProject]);
 
+    // 7. HANDLER DEPLOY RONDE 2 (KHUSUS SKU SELISIH)
+    const handleDeployRound2 = async () => {
+        if (!activeProject) return;
+        if (!window.confirm("AKSI OWNER: Deploy Ronde 2 hanya akan membawa SKU yang SELISIH. SKU yang MATCH akan dikunci. Lanjutkan?")) return;
+
+        try {
+            const disputeTasks = masterDataList.filter(item => {
+                const act = item.countedQty ?? item.Qty;
+                return item.isCounted && act !== item.Qty;
+            });
+
+            if (disputeTasks.length === 0) {
+                triggerNotification("Tidak ada SKU selisih untuk di-deploy ke Ronde 2.");
+                return;
+            }
+
+            const batch = writeBatch(db);
+            masterDataList.forEach((item) => {
+                if (!item.id) return;
+                const ref = doc(db, "master_tasks", item.id);
+                const act = item.countedQty ?? item.Qty;
+                if (item.isCounted && act !== item.Qty) {
+                    batch.update(ref, {
+                        currentRound: 2,
+                        QTY_ACTUAL: null,
+                        qtyGood: null,
+                        qtyBad: null,
+                        isCounted: false,
+                        round1Actual: act,
+                        updatedAt: new Date().toISOString()
+                    });
+                } else if (item.isCounted && act === item.Qty) {
+                    batch.update(ref, {
+                        isLocked: true,
+                        updatedAt: new Date().toISOString()
+                    });
+                }
+            });
+
+            batch.update(doc(db, "projects", activeProject.id), { currentRound: 2 });
+            await batch.commit();
+            triggerNotification(`🚀 Ronde 2 Berhasil Dideploy! Total ${disputeTasks.length} Task SKU Selisih disiapkan.`);
+        } catch (err: any) {
+            console.error("Deploy Round 2 Error:", err);
+            triggerNotification(`Gagal Deploy Ronde 2: ${err.message || String(err)}`);
+        }
+    };
+
+    // 9. HANDLER EXPORT RECON EXCEL LENGKAP (TERPISAH GOOD / BAD)
+    const handleExportReconXLSX = () => {
+        if (masterDataList.length === 0) {
+            triggerNotification("Tidak ada data untuk diexport!");
+            return;
+        }
+
+        const exportData = masterDataList.map((item, idx) => {
+            const sysQty = item.Qty || 0;
+            const actQty = item.countedQty !== undefined ? item.countedQty : sysQty;
+            const goodQty = item.qtyGood !== undefined ? item.qtyGood : (item.isCounted ? actQty : 0);
+            const badQty = item.qtyBad !== undefined ? item.qtyBad : 0;
+            const diff = actQty - sysQty;
+            const unitPrice = item.unitPrice || 0;
+            const valDiscrepancy = diff * unitPrice;
+
+            const overrideQty = recoveryAdjustments[item.SKU] !== undefined ? recoveryAdjustments[item.SKU] : actQty;
+            const finalValuation = (overrideQty - sysQty) * unitPrice;
+
+            return {
+                'NO': idx + 1,
+                'OWNER SKU': item.Owner || 'DDI',
+                'SKU BARANG': item.SKU,
+                'UPC 1 (ECERAN)': item.UPC1 || item.SKU,
+                'UPC 2 (KARDUS)': item.UPC2 || '-',
+                'DESKRIPSI PRODUK': item.Description,
+                'BRAND': item.SKUBrand || '',
+                'LOKASI RAK': item.Location,
+                'COUNTER PIC': item.counter,
+                'QTY SYSTEM (WMS)': sysQty,
+                'QTY GOOD': goodQty,
+                'QTY BAD': badQty,
+                'TOTAL QTY ACTUAL': actQty,
+                'SELISIH QTY': diff,
+                'STATUS SELISIH': diff === 0 ? 'Match' : (diff < 0 ? 'Shortage' : 'Overage'),
+                'HARGA SATUAN (RP)': unitPrice,
+                'VALUASI SELISIH (RP)': valDiscrepancy,
+                'QTY FINAL RECOVERY': overrideQty,
+                'VALUASI FINAL (RP)': finalValuation,
+                'CATATAN (REMARKS)': item.Remarks || ''
+            };
+        });
+
+        const ws = XLSX.utils.json_to_sheet(exportData);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Recon_Recovery_Report");
+        XLSX.writeFile(wb, `Laporan_Recon_SO_${activeProject?.sessionCode || '360'}_${new Date().toISOString().split('T')[0]}.xlsx`);
+        triggerNotification("Laporan Recon & Recovery (.xlsx) berhasil diunduh!");
+    };
+
     // HANDLERS PENGUNCIAN
     const handleToggleGlobalLock = async () => {
         if (!activeProject) return;
+        const lockDocId = activeProject.id || activeProject.sessionCode;
         const newStatus = isProjectLocked ? 'OPEN' : 'LOCKED';
-        await setDoc(doc(db, "round_locks", activeProject.sessionCode), {
+        await setDoc(doc(db, "round_locks", lockDocId), {
             status: newStatus,
             lockedBy: effectiveRole,
             timestamp: new Date().toISOString()
@@ -286,15 +402,16 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
     const handleToggleCounterLock = async (counterName: string, currentStatus: boolean) => {
         if (!activeProject) return;
+        const lockDocId = activeProject.id || activeProject.sessionCode;
         const newLocks = { ...lockedCounters, [counterName]: !currentStatus };
-        await setDoc(doc(db, "round_locks", activeProject.sessionCode), {
+        await setDoc(doc(db, "round_locks", lockDocId), {
             lockedCounters: newLocks,
             updatedAt: new Date().toISOString()
         }, { merge: true });
         triggerNotification(`Akses Counter ${counterName} ${!currentStatus ? 'Dikunci' : 'Dibuka'}!`);
     };
 
-    // HANDLER BULK TRANSFER TASK UNTUK COUNTER ABSEN
+    // 3. HANDLER BULK TRANSFER TASK UNTUK COUNTER ABSEN
     const handleExecuteBulkTransfer = async () => {
         if (!transferSourceCounter || !transferTargetCounter) return;
         const cleanTarget = transferTargetCounter.toLowerCase().trim();
@@ -530,6 +647,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
     const handleDownloadTemplateXLSX = () => {
         const templateData = [{
+            Owner: 'DDI',
             SKU: 'ENFA-01',
             Description: 'Susu Kaleng 400g',
             'UPC 1': '12345678',
@@ -565,8 +683,11 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         }
 
         const exportData = masterDataList.map(item => ({
+            'Owner': item.Owner || 'DDI',
             'SKU': item.SKU,
             'Description': item.Description,
+            'UPC 1': item.UPC1 || '',
+            'UPC 2': item.UPC2 || '',
             'SKU Brand': item.SKUBrand,
             'Location': item.Location,
             'Zone': item.Zone,
@@ -687,6 +808,10 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         return acc;
     }, {});
 
+    const filteredCounterNames = Object.keys(counterGroups).filter(cName =>
+        cName.toLowerCase().includes(counterSearch.toLowerCase())
+    );
+
     const counterDiscrepancies = selectedCounterForDetail
         ? masterDataList.filter(m => m.counter === selectedCounterForDetail && m.isCounted && (m.countedQty ?? m.Qty) !== m.Qty)
         : [];
@@ -725,7 +850,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 </div>
             )}
 
-            {/* MODAL POPUP BULK REASSIGN COUNTER ABSEN */}
+            {/* 3. MODAL POPUP BULK REASSIGN COUNTER ABSEN */}
             {transferSourceCounter && (
                 <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
                     <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-5 shadow-2xl border border-slate-200">
@@ -804,7 +929,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 </div>
             )}
 
-            {/* MODAL POPUP DETAIL SELISIH COUNTER */}
+            {/* 10. MODAL POPUP DETAIL SELISIH COUNTER */}
             {selectedCounterForDetail && (
                 <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
                     <div className="bg-white rounded-3xl max-w-2xl w-full p-6 space-y-5 shadow-2xl border border-slate-200">
@@ -967,10 +1092,8 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                         </div>
                     )}
 
-                    {/* ACCOUNTS (KTP) TAB DENGAN OWNER SETTINGS */}
                     {landingTab === 'accounts' && effectiveRole === 'owner' && (
                         <div className="space-y-6">
-                            {/* FORM OWNER ACCOUNT UPDATE */}
                             <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl space-y-4">
                                 <div className="border-b border-slate-100 pb-3 flex justify-between items-center">
                                     <h3 className="text-base font-black text-slate-900 flex items-center space-x-2">
@@ -1098,7 +1221,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 </div>
             )}
 
-            {/* SCREEN 3: DASHBOARD MAIN (4 TABS) */}
+            {/* SCREEN 3: DASHBOARD MAIN */}
             {viewState === 'DASHBOARD' && activeProject && (
                 <div className="space-y-6 animate-in fade-in duration-500">
                     <div className="bg-white p-5 rounded-3xl shadow-xl border border-slate-100 flex flex-col xl:flex-row justify-between xl:items-center gap-4">
@@ -1122,6 +1245,17 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                             className={`ml-2 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 shadow-sm border transition-colors cursor-pointer ${isProjectLocked ? 'bg-red-50 text-red-700 border-red-200 hover:bg-red-100' : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'}`}
                                         >
                                             {isProjectLocked ? <><Unlock className="w-3.5 h-3.5" />Buka Sesi Global</> : <><Lock className="w-3.5 h-3.5" />Kunci Sesi Global</>}
+                                        </button>
+                                    )}
+                                    {/* 7. TOMBOL DEPLOY RONDE 2 KHUSUS OWNER */}
+                                    {effectiveRole === 'owner' && (
+                                        <button
+                                            onClick={handleDeployRound2}
+                                            className="ml-2 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 shadow-md bg-red-600 hover:bg-red-700 text-white transition-colors cursor-pointer animate-pulse"
+                                            title="Deploy Ronde 2 khusus SKU Selisih"
+                                        >
+                                            <Repeat className="w-3.5 h-3.5" />
+                                            <span>Deploy Ronde 2</span>
                                         </button>
                                     )}
                                 </div>
@@ -1155,6 +1289,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                     <select value={viewRoundFilter} onChange={(e) => setViewRoundFilter(e.target.value === 'overall' ? 'overall' : parseInt(e.target.value, 10) as 1 | 2 | 3 | 4)} className="w-full p-3.5 bg-slate-50 border rounded-2xl text-sm font-black text-indigo-700 outline-none">
                                         <option value="overall">📊 Overall Keseluruhan</option>
                                         <option value={1}>1️⃣ Ronde 1</option>
+                                        <option value={2}>2️⃣ Ronde 2</option>
                                     </select>
                                 </div>
                                 <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-xl space-y-3">
@@ -1164,29 +1299,37 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                             </div>
 
                             <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-xl space-y-4">
-                                <div className="flex justify-between items-center border-b pb-3">
+                                <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b pb-3 gap-3">
                                     <h3 className="text-base font-black text-slate-900 flex items-center"><UserCheck className="w-5 h-5 mr-2 text-indigo-600" />Real-Time Monitoring Progress Per Counter PIC</h3>
-                                    <span className="text-xs font-bold text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-xl flex items-center">
-                                        <Clock className="w-3.5 h-3.5 mr-1" />
-                                        Live Sync Firestore
-                                    </span>
+
+                                    {/* SEARCH BAR PIC COUNTER */}
+                                    <div className="relative w-full md:w-64">
+                                        <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-2.5" />
+                                        <input
+                                            type="text"
+                                            placeholder="Cari PIC Counter..."
+                                            value={counterSearch}
+                                            onChange={(e) => setCounterSearch(e.target.value)}
+                                            className="w-full pl-9 pr-4 py-1.5 bg-slate-50 border rounded-xl text-xs font-bold outline-none"
+                                        />
+                                    </div>
                                 </div>
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                    {Object.keys(counterGroups).map((cName, idx) => {
+                                    {filteredCounterNames.map((cName, idx) => {
                                         const cData = counterGroups[cName];
                                         const pct = cData.total > 0 ? Math.round((cData.counted / cData.total) * 100) : 0;
                                         const isLocked = lockedCounters[cName];
                                         return (
                                             <div key={idx} className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3 hover:border-indigo-400">
                                                 <div className="flex justify-between items-start">
-                                                    <div className="text-sm font-black text-slate-900 flex items-center gap-1 cursor-pointer" onClick={() => setSelectedCounterForDetail(cName)}>
-                                                        <span>{cName}</span><ExternalLink className="w-3.5 h-3.5 text-indigo-400" />
+                                                    <div className="text-sm font-black text-slate-900 capitalize">
+                                                        <span>{cName}</span>
                                                     </div>
                                                     <div className="flex items-center space-x-1.5">
                                                         <span className="text-[10px] font-black px-2.5 py-1 rounded-lg bg-indigo-100 text-indigo-800">{pct}% Done</span>
                                                         {effectiveRole === 'owner' && (
                                                             <>
-                                                                {/* TOMBOL BULK REASSIGN UNTUK COUNTER ABSEN */}
+                                                                {/* 3. TOMBOL BULK REASSIGN UNTUK COUNTER ABSEN */}
                                                                 <button
                                                                     onClick={(e) => { e.stopPropagation(); setTransferSourceCounter(cName); }}
                                                                     title="Transfer Seluruh Tugas Counter Ini (Jika Absen)"
@@ -1206,7 +1349,16 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                         )}
                                                     </div>
                                                 </div>
-                                                {cData.errorCount > 0 && <div className="text-[10px] font-bold text-red-600 bg-red-50 px-2.5 py-1 rounded-md">⚠️ {cData.errorCount} SKU Selisih Ditemukan (Klik Detail)</div>}
+                                                {cData.errorCount > 0 && <div className="text-[10px] font-bold text-red-600 bg-red-50 px-2.5 py-1 rounded-md">⚠️ {cData.errorCount} SKU Selisih Ditemukan</div>}
+
+                                                {/* 10. TOMBOL LIHAT DETAIL FISIK DENGAN POPUP MODAL */}
+                                                <button
+                                                    onClick={() => setSelectedCounterForDetail(cName)}
+                                                    className="w-full mt-2 px-3 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs flex items-center justify-center space-x-1.5 shadow-sm transition-all cursor-pointer"
+                                                >
+                                                    <Eye className="w-3.5 h-3.5" />
+                                                    <span>Lihat Detail</span>
+                                                </button>
                                             </div>
                                         );
                                     })}
@@ -1307,12 +1459,15 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                 </div>
                             </div>
                             <div className="overflow-x-auto border rounded-2xl max-h-125">
-                                <table className="w-full text-left text-[11px] min-w-max"><thead className="bg-slate-50 font-black text-slate-600 border-b"><tr><th className="p-3">SKU</th><th className="p-3">DESKRIPSI</th><th className="p-3">LOKASI RAK</th><th className="p-3">COUNTER PIC</th><th className="p-3 text-center">WMS QTY</th><th className="p-3 text-center">ACTUAL QTY</th></tr></thead>
+                                <table className="w-full text-left text-[11px] min-w-max"><thead className="bg-slate-50 font-black text-slate-600 border-b"><tr><th className="p-3">OWNER SKU</th><th className="p-3">SKU</th><th className="p-3">DESKRIPSI</th><th className="p-3">UPC 1</th><th className="p-3">UPC 2</th><th className="p-3">LOKASI RAK</th><th className="p-3">COUNTER PIC</th><th className="p-3 text-center">WMS QTY</th><th className="p-3 text-center">ACTUAL QTY</th></tr></thead>
                                     <tbody className="divide-y divide-slate-100 font-medium">
                                         {masterDataList.map((row, idx) => (
                                             <tr key={idx} className="hover:bg-slate-50">
+                                                <td className="p-3 font-bold text-slate-800">{row.Owner || 'DDI'}</td>
                                                 <td className="p-3 font-mono font-black text-indigo-600">{row.SKU}</td>
                                                 <td className="p-3 truncate max-w-xs">{row.Description}</td>
+                                                <td className="p-3 font-mono">{row.UPC1 || '-'}</td>
+                                                <td className="p-3 font-mono">{row.UPC2 || '-'}</td>
                                                 <td className="p-3 font-mono font-bold">{row.Location}</td>
                                                 <td className="p-2">
                                                     <SearchableSelect
@@ -1345,10 +1500,15 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                             <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl space-y-4">
                                 <div className="flex justify-between items-center border-b pb-3">
                                     <h3 className="text-base font-black text-slate-900 flex items-center"><Scale className="w-5 h-5 mr-2 text-indigo-600" />Laporan Selisih & Override Recovery</h3>
-                                    <button className="px-4 py-2 bg-slate-50 text-slate-700 border border-slate-200 hover:bg-slate-100 rounded-xl text-sm font-bold flex items-center"><Printer className="w-4 h-4 mr-2" />Cetak Laporan</button>
+
+                                    {/* 9. EKSPOR EXCEL RECON */}
+                                    <button onClick={handleExportReconXLSX} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center space-x-2 shadow-md cursor-pointer">
+                                        <FileSpreadsheet className="w-4 h-4" />
+                                        <span>Download Recon (.xlsx)</span>
+                                    </button>
                                 </div>
                                 <div className="overflow-x-auto border rounded-2xl">
-                                    <table className="w-full text-left text-sm"><thead className="bg-slate-50 font-black text-slate-600 border-b"><tr><th className="p-4">SKU BARANG</th><th className="p-4 text-center">WMS QTY</th><th className="p-4 text-center">ACTUAL QTY</th><th className="p-4 text-center">SELISIH</th><th className="p-4 text-right bg-amber-50">VALUASI (Rp)</th><th className="p-4 text-right bg-indigo-50">OVERRIDE RECOVERY</th></tr></thead>
+                                    <table className="w-full text-left text-sm"><thead className="bg-slate-50 font-black text-slate-600 border-b"><tr><th className="p-4">SKU BARANG</th><th className="p-4 text-center">WMS QTY</th><th className="p-4 text-center">QTY GOOD</th><th className="p-4 text-center text-red-600">QTY BAD</th><th className="p-4 text-center">ACTUAL QTY</th><th className="p-4 text-center">SELISIH</th><th className="p-4 text-right bg-amber-50">VALUASI (Rp)</th><th className="p-4 text-right bg-indigo-50">OVERRIDE RECOVERY</th></tr></thead>
                                         <tbody className="divide-y divide-slate-100 font-medium">
                                             {masterDataList.filter(i => i.isCounted && ((i.countedQty || 0) - i.Qty) !== 0).map((item, i) => {
                                                 const diff = (item.countedQty || 0) - item.Qty;
@@ -1357,6 +1517,8 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                     <tr key={i} className="hover:bg-slate-50">
                                                         <td className="p-4 font-mono font-bold text-indigo-600">{item.SKU}</td>
                                                         <td className="p-4 text-center text-slate-500">{item.Qty}</td>
+                                                        <td className="p-4 text-center font-bold text-emerald-600">{item.qtyGood ?? item.countedQty}</td>
+                                                        <td className="p-4 text-center font-bold text-red-600">{item.qtyBad ?? 0}</td>
                                                         <td className="p-4 text-center font-black">{item.countedQty}</td>
                                                         <td className="p-4 text-center text-red-600 font-black">{diff > 0 ? `+${diff}` : diff}</td>
                                                         <td className="p-4 text-right font-mono text-amber-700 font-bold bg-amber-50/20">Rp {val.toLocaleString('id-ID')}</td>
@@ -1376,7 +1538,69 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                         </div>
                     )}
 
-                    {/* TAB 4: SETTINGS */}
+                    {/* TAB 4: AUDIT TRAIL COUNTSHEET (SNAPSHOT FINAL) */}
+                    {activeTab === 'audit' && (
+                        <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl space-y-5">
+                            <div className="flex justify-between items-center border-b pb-4">
+                                <h3 className="text-base font-black text-slate-900 flex items-center">
+                                    <Clock className="w-5 h-5 mr-2 text-indigo-600" />
+                                    Audit Trail Countsheet (Snapshot Final)
+                                </h3>
+                                <span className="text-xs font-bold text-slate-500 bg-slate-100 px-3 py-1 rounded-lg">
+                                    Total {auditLogs.length} Entri Log
+                                </span>
+                            </div>
+                            <div className="overflow-x-auto border rounded-2xl max-h-125">
+                                <table className="w-full text-left text-[11px] min-w-max border-collapse">
+                                    <thead className="bg-slate-50 font-black text-slate-600 border-b">
+                                        <tr>
+                                            <th className="p-3 border-r whitespace-nowrap">TIMESTAMP (JAM SUBMIT)</th>
+                                            <th className="p-3 border-r">LOKASI RAK</th>
+                                            <th className="p-3 border-r">OWNER SKU</th>
+                                            <th className="p-3 border-r">SKU & DESKRIPSI</th>
+                                            <th className="p-3 border-r">UPC 1</th>
+                                            <th className="p-3 border-r">UPC 2</th>
+                                            <th className="p-3 border-r">COUNTER PIC</th>
+                                            <th className="p-3 border-r text-center">RONDE</th>
+                                            <th className="p-3 border-r text-center text-emerald-700">QTY GOOD</th>
+                                            <th className="p-3 border-r text-center text-red-700">QTY BAD</th>
+                                            <th className="p-3 border-r text-center font-black">TOTAL FINAL SUBMITTED</th>
+                                            <th className="p-3 border-r">ED ACTUAL</th>
+                                            <th className="p-3">REMARKS</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100 font-medium">
+                                        {auditLogs.map((log, idx) => (
+                                            <tr key={log.id || idx} className="hover:bg-slate-50">
+                                                <td className="p-3 border-r font-mono whitespace-nowrap">{log.timestamp ? new Date(log.timestamp).toLocaleString('id-ID') : '-'}</td>
+                                                <td className="p-3 border-r font-bold font-mono text-indigo-600">{log.rackLocation || log.Location}</td>
+                                                <td className="p-3 border-r font-bold">{log.ownerSku || log.Owner || 'DDI'}</td>
+                                                <td className="p-3 border-r max-w-xs truncate"><span className="font-mono font-bold text-slate-900">{log.sku || log.SKU}</span> - {log.description || log.Description}</td>
+                                                <td className="p-3 border-r font-mono">{log.upc1 || log.UPC1 || '-'}</td>
+                                                <td className="p-3 border-r font-mono">{log.upc2 || log.UPC2 || '-'}</td>
+                                                <td className="p-3 border-r font-bold uppercase">{log.counterPic || log.counter}</td>
+                                                <td className="p-3 border-r text-center font-bold">Round {log.round || log.currentRound || 1}</td>
+                                                <td className="p-3 border-r text-center font-black text-emerald-600">{log.qtyGood ?? log.totalFinalSubmitted ?? 0}</td>
+                                                <td className="p-3 border-r text-center font-black text-red-600">{log.qtyBad ?? 0}</td>
+                                                <td className="p-3 border-r text-center font-black bg-slate-50">{log.totalFinalSubmitted ?? log.qtyActual ?? 0} PCS</td>
+                                                <td className="p-3 border-r font-mono">{log.edActual || log.expiredDateActual || '-'}</td>
+                                                <td className="p-3 text-slate-500">{log.remarks || log.Remarks || '-'}</td>
+                                            </tr>
+                                        ))}
+                                        {auditLogs.length === 0 && (
+                                            <tr>
+                                                <td colSpan={13} className="p-8 text-center text-slate-400 font-medium">
+                                                    Belum ada riwayat hitungan countsheet yang tercatat di Cloud.
+                                                </td>
+                                            </tr>
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* TAB 5: SETTINGS */}
                     {activeTab === 'settings' && (
                         <div className="space-y-6">
                             <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl space-y-4">

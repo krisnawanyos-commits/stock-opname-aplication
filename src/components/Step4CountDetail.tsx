@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../firebase';
-import { collection, onSnapshot, query, where, doc, writeBatch } from 'firebase/firestore';
+import { collection, onSnapshot, query, where, doc, writeBatch, getDocs } from 'firebase/firestore';
 import type { SessionData, RackItem, CustomModalState, UnmappedItem } from '../types';
 import CustomModal from './CustomModal';
 
@@ -9,17 +9,19 @@ interface Step4CountDetailProps {
   rack: RackItem;
   onBackToList: () => void;
   onLogout: () => void;
+  onSelectNextRack?: (nextRack: RackItem) => void;
 }
 
 interface GroupedSKUItem {
   sku: string;
   upc: string;
+  upc2?: string;
   name: string;
   category: string;
   uom: 'PCS' | 'CARTON';
   totalSystemQty: number;
-  qtyGood: string; // TIPE STRING AGAR BISA BISA BLANK ""
-  qtyBad: string;  // TIPE STRING AGAR BISA BISA BLANK ""
+  qtyGood: string;
+  qtyBad: string;
   expDateSystem: string;
   expDateActual: string;
   isBadStock: boolean;
@@ -30,15 +32,12 @@ interface GroupedSKUItem {
   allSystemEds: string[];
 }
 
-export default function Step4CountDetail({ sessionData, rack, onBackToList, onLogout }: Step4CountDetailProps) {
+export default function Step4CountDetail({ sessionData, rack, onBackToList, onLogout, onSelectNextRack }: Step4CountDetailProps) {
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const barcodeScanInputRef = useRef<HTMLInputElement>(null);
 
   const [skuList, setSkuList] = useState<GroupedSKUItem[]>([]);
-
-  // STATE GLOBAL & PER-COUNTER LOCK
   const [isSessionLocked, setIsSessionLocked] = useState<boolean>(false);
-
   const [unmappedDrawerOpen, setUnmappedDrawerOpen] = useState<boolean>(false);
   const [isLoadingSave, setIsLoadingSave] = useState<boolean>(false);
 
@@ -46,9 +45,11 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     isOpen: false, title: '', message: '',
   });
 
-  // REAL-TIME LISTENER PENGUNCIAN GLOBAL ATAU PER-COUNTER DARI OWNER
+  // 2. REAL-TIME LISTENER PENGUNCIAN GLOBAL & COUNTER INDIVIDU
   useEffect(() => {
-    const lockRef = doc(db, "round_locks", sessionData.sessionName || "SESSION_01");
+    const lockDocId = sessionData.sessionId || sessionData.sessionCode || "SO-SESSION-DEFAULT";
+    const lockRef = doc(db, "round_locks", lockDocId);
+
     const unsub = onSnapshot(lockRef, (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
@@ -62,9 +63,9 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       }
     });
     return () => unsub();
-  }, [sessionData.sessionName, sessionData.primaryCounter]);
+  }, [sessionData.sessionId, sessionData.sessionCode, sessionData.primaryCounter]);
 
-  // FETCH & AGGREGATE TASK BERDASARKAN SKU
+  // FETCH & AGGREGATE TASK BERDASARKAN SKU ATAS LOKASI RAK
   useEffect(() => {
     const primaryCounter = (sessionData.primaryCounter || "Unassigned").toLowerCase().trim();
     const targetLocation = rack.rackNumber || rack.id;
@@ -87,7 +88,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
         const numActQty = parseInt(rawActQty, 10);
         const hasActQty = rawActQty !== undefined && rawActQty !== null && !isNaN(numActQty);
 
-        const rawBadQty = data.QTY_BAD;
+        const rawBadQty = data.QTY_BAD ?? data.qtyBad;
         const numBadQty = parseInt(rawBadQty, 10);
 
         const edSys = data.expiredDateSystem || '';
@@ -96,11 +97,12 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
           groupedMap[skuKey] = {
             sku: skuKey,
             upc: data.UPC1 || data.upc || 'N/A',
+            upc2: data.UPC2 || '',
             name: data.Description || data.name || skuKey,
             category: `${data.Zone || 'RACKING'} • ${data.SKUBrand || 'General'}`,
             uom: (data.satuanHitung as 'PCS' | 'CARTON') || 'PCS',
             totalSystemQty: sysQty,
-            qtyGood: hasActQty ? numActQty.toString() : "", // DEFAULT BLANK SAAT BELUM DIISI
+            qtyGood: hasActQty ? numActQty.toString() : "",
             qtyBad: !isNaN(numBadQty) && numBadQty > 0 ? numBadQty.toString() : "",
             expDateSystem: edSys,
             expDateActual: data.expDateActual || data.expiredDateActual || '',
@@ -149,8 +151,10 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
   const [unmappedPhotoUrl, setUnmappedPhotoUrl] = useState<string>('');
   const [unmappedList, setUnmappedList] = useState<UnmappedItem[]>([]);
 
+  // 5. SMART DUAL-UPC MATCHING
   const isBarcodeInSystem = unmappedBarcode.trim() !== '' && skuList.some(s =>
     s.upc === unmappedBarcode.trim() ||
+    (s.upc2 && s.upc2 === unmappedBarcode.trim()) ||
     s.sku.toLowerCase() === unmappedBarcode.trim().toLowerCase()
   );
 
@@ -189,7 +193,6 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     );
   };
 
-  // INPUT TEKS BEBAS BISA KOSONG "" DAN BERSIH DARI LEADING ZERO
   const handleInputText = (index: number, field: 'qtyGood' | 'qtyBad', rawVal: string) => {
     if (isSessionLocked) return;
 
@@ -267,21 +270,25 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     setUnmappedList((prev) => prev.filter((item) => item.id !== id));
   };
 
+  // 4 & 8. SAVE, AUDIT SNAPSHOT, & AUTO-NEXT RAK
   const handleSaveAndNext = async () => {
     if (isSessionLocked) return;
     setIsLoadingSave(true);
 
     try {
       const batch = writeBatch(db);
+      const cleanCounter = (sessionData.primaryCounter || 'Unassigned').toLowerCase().trim();
 
       skuList.forEach(skuItem => {
         const finalGoodQty = parseInt(skuItem.qtyGood || "0", 10);
         const finalBadQty = parseInt(skuItem.qtyBad || "0", 10);
+        const totalSubmitted = finalGoodQty + finalBadQty;
 
+        // 1. Update Master Tasks
         skuItem.docIds.forEach((docId, i) => {
           const taskRef = doc(db, "master_tasks", docId);
           batch.set(taskRef, {
-            counter: (sessionData.primaryCounter || 'Unassigned').toLowerCase().trim(),
+            counter: cleanCounter,
             isCounted: true,
             QTY_ACTUAL: i === 0 ? finalGoodQty : 0,
             QTY_BAD: i === 0 ? finalBadQty : 0,
@@ -290,17 +297,70 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             updatedAt: new Date().toISOString()
           }, { merge: true });
         });
+
+        // 8. WRITE AUDIT TRAIL LOG SNAPSHOT (13 COLUMNS FORMAT)
+        const logId = `${sessionData.sessionId || 'SO'}_${rack.rackNumber}_${skuItem.sku}`;
+        const auditRef = doc(db, "audit_logs", logId);
+
+        batch.set(auditRef, {
+          timestamp: new Date().toISOString(),
+          rackLocation: rack.rackNumber,
+          ownerSku: 'DDI',
+          sku: skuItem.sku,
+          description: skuItem.name,
+          upc1: skuItem.upc,
+          upc2: skuItem.upc2 || '-',
+          counterPic: cleanCounter,
+          round: 1,
+          qtyGood: finalGoodQty,
+          qtyBad: finalBadQty,
+          totalFinalSubmitted: totalSubmitted,
+          edActual: skuItem.expDateActual || '-',
+          remarks: skuItem.badRemarks || '-'
+        }, { merge: true });
       });
 
       await batch.commit();
+
+      // 4. CHECK UNCOUNTED RAK NEXT AUTOMATICALLY
+      const remainingTasksQuery = query(
+        collection(db, "master_tasks"),
+        where("counter", "==", cleanCounter),
+        where("isCounted", "==", false)
+      );
+
+      const snap = await getDocs(remainingTasksQuery);
+      let nextRackItem: RackItem | null = null;
+
+      if (!snap.empty) {
+        const nextTask = snap.docs[0].data();
+        const nextRackNumber = nextTask.Location;
+        if (nextRackNumber && nextRackNumber !== rack.rackNumber) {
+          nextRackItem = {
+            id: nextRackNumber,
+            rackNumber: nextRackNumber,
+            level: parseInt(nextTask.level || '1', 10),
+            zone: nextTask.Zone || 'RACKING',
+            status: 'pending',
+            totalSKU: 1,
+            countedSKU: 0
+          };
+        }
+      }
 
       setModal({
         isOpen: true,
         type: 'success',
         title: 'Hitungan Rak Berhasil Tersimpan!',
-        message: `Semua SKU pada Rak ${rack.rackNumber} telah di-sync ke Cloud Firestore secara real-time.`,
-        confirmText: 'Lanjut ke Rak Berikutnya',
-        onConfirm: () => onBackToList(),
+        message: `Semua SKU pada Rak ${rack.rackNumber} telah di-sync ke Cloud Firestore dan tercatat di Audit Trail.`,
+        confirmText: nextRackItem ? `Lanjut Otomatis ke Rak ${nextRackItem.rackNumber}` : 'Kembali ke Countsheet List',
+        onConfirm: () => {
+          if (nextRackItem && onSelectNextRack) {
+            onSelectNextRack(nextRackItem);
+          } else {
+            onBackToList();
+          }
+        },
       });
     } catch (err) {
       console.error("Firestore Save Error:", err);
@@ -375,7 +435,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                   <span className="bg-slate-100 text-slate-700 border border-slate-200 px-2 py-0.5 rounded font-label-sm">{currentSku.uom}</span>
                 </div>
                 <p className="font-mono text-xs font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded-md w-fit">
-                  Barcode/UPC: {currentSku.upc || 'N/A'}
+                  UPC1: {currentSku.upc || 'N/A'} {currentSku.upc2 ? `• UPC2: ${currentSku.upc2}` : ''}
                 </p>
                 <h3 className="font-headline-sm text-slate-900 font-bold leading-snug">{currentSku.name}</h3>
                 <p className="font-body-sm text-slate-500">{currentSku.category}</p>
@@ -413,7 +473,6 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                   </div>
                 </div>
 
-                {/* DAFTAR VARIASI ED SYSTEM */}
                 {currentSku.allSystemEds.length > 0 && (
                   <div className="pt-2 border-t border-blue-200/60 space-y-1">
                     <span className="text-[10px] font-bold text-slate-600 block">
@@ -504,7 +563,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             {unmappedDrawerOpen && (
               <div className="space-y-3 pt-2">
                 <div className="flex gap-2">
-                  <input type="text" disabled={isSessionLocked} value={unmappedBarcode} onChange={(e) => setUnmappedBarcode(e.target.value)} placeholder="Scan/Ketik Barcode..." className={`flex-1 h-11 border border-slate-300 px-3 rounded-lg text-sm font-mono font-bold ${isSessionLocked ? 'bg-slate-100 opacity-60' : 'bg-white'}`} />
+                  <input type="text" disabled={isSessionLocked} value={unmappedBarcode} onChange={(e) => setUnmappedBarcode(e.target.value)} placeholder="Scan/Ketik Barcode/UPC..." className={`flex-1 h-11 border border-slate-300 px-3 rounded-lg text-sm font-mono font-bold ${isSessionLocked ? 'bg-slate-100 opacity-60' : 'bg-white'}`} />
                   <button type="button" disabled={isSessionLocked} onClick={triggerNativeBarcodeScan} className={`px-3 min-h-11 text-white font-bold rounded-lg flex items-center gap-1 text-xs cursor-pointer ${isSessionLocked ? 'bg-slate-400 opacity-50 cursor-not-allowed' : 'bg-blue-600'}`}>
                     <span className="material-symbols-outlined text-[18px]">photo_camera</span> Scan
                   </button>
@@ -568,14 +627,21 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             </div>
           )}
 
+          {/* 6. TOMBOL EDIT ULANG / RE-AUDIT */}
           {skuList.length > 0 && (
             <button
               type="button"
               disabled={isLoadingSave || isSessionLocked}
               onClick={handleSaveAndNext}
-              className={`w-full min-h-14 text-white rounded-xl font-bold text-lg shadow-md cursor-pointer ${isSessionLocked || isLoadingSave ? 'bg-slate-400 opacity-50 cursor-not-allowed' : 'bg-blue-600'}`}
+              className={`w-full min-h-14 text-white rounded-xl font-bold text-lg shadow-md cursor-pointer transition-all ${isSessionLocked || isLoadingSave ? 'bg-slate-400 opacity-50 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}
             >
-              {isLoadingSave ? "Menyimpan ke Cloud..." : (isSessionLocked ? "🔒 Sesi Terkunci oleh Admin" : "Simpan Semua & Lanjut Rak Berikutnya")}
+              {isLoadingSave
+                ? "Menyimpan ke Cloud..."
+                : isSessionLocked
+                  ? "🔒 Sesi Terkunci oleh Admin"
+                  : skuList.some(s => s.isCounted)
+                    ? "Update Hitungan (Re-Audit) & Simpan"
+                    : "Simpan Semua & Lanjut Rak Berikutnya"}
             </button>
           )}
 

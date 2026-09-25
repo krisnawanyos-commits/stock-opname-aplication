@@ -31,7 +31,7 @@ export default function Step1Login({ onSuccessLogin, onLogin }: Step1LoginProps)
     setIsLoading(true);
 
     try {
-      // Direct Owner Bypass
+      // Direct Owner / Admin Bypass
       if ((cleanUsername === 'owner' || cleanUsername === 'admin') && cleanPin === '1234') {
         if (onSuccessLogin) onSuccessLogin('owner', 'owner', 'Yos Krisnawan');
         if (onLogin) onLogin('owner', 'yos.krisnawan@anymindgroup.com', 'owner');

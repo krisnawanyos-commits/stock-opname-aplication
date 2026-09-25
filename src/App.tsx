@@ -113,7 +113,7 @@ export default function App() {
             if (role === 'owner' || role === 'spv' || username === 'owner') {
               setCurrentStep('admin');
             } else {
-              // BYPASS LANGSUNG KE STEP 3 (COUNTSHEET LIST)
+              // 1. BYPASS STEP 2: DIRECT COUNTER NAVIGATION TO STEP 3
               setCurrentStep(3);
             }
           }}
@@ -191,6 +191,10 @@ export default function App() {
               rack={selectedRack}
               onLogout={handleLogout}
               onBackToList={() => setCurrentStep(isDemoMode ? 'admin_demo' : 3)}
+              onSelectNextRack={(nextRack) => {
+                setSelectedRack(nextRack);
+                setCurrentStep(4);
+              }}
             />
           </div>
         </div>
