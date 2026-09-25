@@ -11,7 +11,7 @@ import {
     CheckCircle2, XCircle, Search, Building2, DollarSign,
     Download, Scale, PlayCircle, Archive, ArrowLeft, AlertTriangle,
     LogOut, GripHorizontal, Contact, Eye, EyeOff, UserCheck, Clock, Store, Link2, KeyRound,
-    Mail, ExternalLink, Edit2, Smartphone
+    Mail, ExternalLink, Edit2, Smartphone, Lock, Unlock
 } from 'lucide-react';
 import type { UserRole } from '../types';
 
@@ -146,11 +146,13 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
     const [selectedCounterForDetail, setSelectedCounterForDetail] = useState<string | null>(null);
     const [ktpSearch, setKtpSearch] = useState<string>('');
 
-    // EDIT KTP CLOUD STATE
     const [editingAccount, setEditingAccount] = useState<GlobalAccount | null>(null);
-
     const [assignUsername, setAssignUsername] = useState<string>('');
     const [assignRole, setAssignRole] = useState<UserRole>('counter');
+
+    // STATE PENGUNCIAN
+    const [isProjectLocked, setIsProjectLocked] = useState(false);
+    const [lockedCounters, setLockedCounters] = useState<Record<string, boolean>>({});
 
     useEffect(() => {
         setOrderedTabs(ALL_AVAILABLE_TABS.filter(tab => tab.roles.includes(effectiveRole)));
@@ -255,8 +257,38 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             }
         });
 
-        return () => unsubscribe();
+        const lockUnsubscribe = onSnapshot(doc(db, "round_locks", activeProject.sessionCode), (docSnap) => {
+            if (docSnap.exists()) {
+                const data = docSnap.data();
+                setIsProjectLocked(data.status === 'LOCKED');
+                setLockedCounters(data.lockedCounters || {});
+            }
+        });
+
+        return () => { unsubscribe(); lockUnsubscribe(); };
     }, [activeProject]);
+
+    // HANDLERS PENGUNCIAN
+    const handleToggleGlobalLock = async () => {
+        if (!activeProject) return;
+        const newStatus = isProjectLocked ? 'OPEN' : 'LOCKED';
+        await setDoc(doc(db, "round_locks", activeProject.sessionCode), {
+            status: newStatus,
+            lockedBy: effectiveRole,
+            timestamp: new Date().toISOString()
+        }, { merge: true });
+        triggerNotification(`Sesi Opname ${newStatus === 'LOCKED' ? 'Terkunci' : 'Terbuka'} secara Global!`);
+    };
+
+    const handleToggleCounterLock = async (counterName: string, currentStatus: boolean) => {
+        if (!activeProject) return;
+        const newLocks = { ...lockedCounters, [counterName]: !currentStatus };
+        await setDoc(doc(db, "round_locks", activeProject.sessionCode), {
+            lockedCounters: newLocks,
+            updatedAt: new Date().toISOString()
+        }, { merge: true });
+        triggerNotification(`Akses Counter ${counterName} ${!currentStatus ? 'Dikunci' : 'Dibuka'}!`);
+    };
 
     const combinedLocationOptions = [
         ...warehouseList.map(w => ({ value: w.id, label: `[Gudang WMS] ${w.name}` })),
@@ -343,7 +375,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         acc.email.toLowerCase().includes(ktpSearch.toLowerCase())
     );
 
-    // PARSER EXCEL DENGAN HAPUS DATA LAMA SANGAT CEPAT UNTUK MENCEGAH DOUBLE / DUPLIKAT SKU
     const parseXLSXFile = (file: File, currentProjId?: string): Promise<MasterSKUItem[]> => {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
@@ -356,13 +387,11 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
                     triggerNotification("Reset data lama & mengunggah data baru ke Cloud...");
 
-                    // 1. Dapatkan dokumen lama & hapus agar tidak ada SKU ganda
                     const oldDocsSnap = await getDocs(collection(db, "master_tasks"));
                     const cleanBatch = writeBatch(db);
                     oldDocsSnap.docs.forEach(oldDoc => cleanBatch.delete(oldDoc.ref));
                     await cleanBatch.commit();
 
-                    // 2. Tulis data Excel baru via writeBatch
                     const batch = writeBatch(db);
                     const newMasterList: MasterSKUItem[] = [];
                     const pId = currentProjId || activeProject?.id;
@@ -373,7 +402,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                         const locStr = (row['Location'] || row['LOCATION'] || `LOC-${idx + 1}`).toString().trim();
                         const skuStr = (row['SKU'] || `SKU-${idx + 1}`).toString().trim();
 
-                        // SANITASI ID DOKUMEN (Ubah '/' jadi '-')
                         const rawTaskId = `${locStr}_${skuStr}_${idx + 1}`;
                         const taskId = rawTaskId.replace(/\//g, '-');
 
@@ -772,7 +800,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                             {onSwitchToCounterView && (
                                 <button
                                     onClick={onSwitchToCounterView}
-                                    className="px-4 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl text-sm font-extrabold flex items-center justify-center space-x-2 shadow-lg shadow-emerald-600/20 transition-all hover:-translate-y-0.5 cursor-pointer"
+                                    className="px-4 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl text-sm font-extrabold flex items-center justify-center space-x-2 shadow-lg transition-all cursor-pointer"
                                     title="Buka Tampilan HP Counter untuk Demo"
                                 >
                                     <Smartphone className="w-5 h-5" />
@@ -1010,6 +1038,15 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                     ) : (
                                         <span className="bg-slate-100 text-slate-600 text-[10px] font-black px-2.5 py-1 rounded-lg border border-slate-200">SUPERVISOR</span>
                                     )}
+                                    {/* TOMBOL PENGUNCIAN GLOBAL UNTUK OWNER */}
+                                    {effectiveRole === 'owner' && (
+                                        <button
+                                            onClick={handleToggleGlobalLock}
+                                            className={`ml-2 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 shadow-sm border transition-colors cursor-pointer ${isProjectLocked ? 'bg-red-50 text-red-700 border-red-200 hover:bg-red-100' : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'}`}
+                                        >
+                                            {isProjectLocked ? <><Unlock className="w-3.5 h-3.5" />Buka Sesi Global</> : <><Lock className="w-3.5 h-3.5" />Kunci Sesi Global</>}
+                                        </button>
+                                    )}
                                 </div>
                                 <p className="text-sm text-slate-500 font-medium flex items-center space-x-2 mt-1"><MapPin className="w-3.5 h-3.5" /><span>{activeProject.locationName}</span></p>
                             </div>
@@ -1061,11 +1098,25 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                     {Object.keys(counterGroups).map((cName, idx) => {
                                         const cData = counterGroups[cName];
                                         const pct = cData.total > 0 ? Math.round((cData.counted / cData.total) * 100) : 0;
+                                        const isLocked = lockedCounters[cName];
                                         return (
-                                            <div key={idx} onClick={() => setSelectedCounterForDetail(cName)} className="p-4 bg-slate-50 border rounded-2xl space-y-3 hover:border-indigo-400 cursor-pointer">
+                                            <div key={idx} className="p-4 bg-slate-50 border rounded-2xl space-y-3 hover:border-indigo-400">
                                                 <div className="flex justify-between items-start">
-                                                    <div className="text-sm font-black text-slate-900 flex items-center gap-1"><span>{cName}</span><ExternalLink className="w-3.5 h-3.5 text-indigo-400" /></div>
-                                                    <span className="text-[10px] font-black px-2.5 py-1 rounded-lg bg-indigo-100 text-indigo-800">{pct}% Done</span>
+                                                    <div className="text-sm font-black text-slate-900 flex items-center gap-1 cursor-pointer" onClick={() => setSelectedCounterForDetail(cName)}>
+                                                        <span>{cName}</span><ExternalLink className="w-3.5 h-3.5 text-indigo-400" />
+                                                    </div>
+                                                    <div className="flex items-center space-x-2">
+                                                        <span className="text-[10px] font-black px-2.5 py-1 rounded-lg bg-indigo-100 text-indigo-800">{pct}% Done</span>
+                                                        {effectiveRole === 'owner' && (
+                                                            <button
+                                                                onClick={(e) => { e.stopPropagation(); handleToggleCounterLock(cName, isLocked); }}
+                                                                title={isLocked ? "Buka Akses Input Counter" : "Kunci Akses Input Counter"}
+                                                                className={`p-1.5 rounded-md cursor-pointer transition-colors ${isLocked ? 'bg-red-100 text-red-600 hover:bg-red-200' : 'bg-slate-200 text-slate-500 hover:bg-slate-300'}`}
+                                                            >
+                                                                {isLocked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
+                                                            </button>
+                                                        )}
+                                                    </div>
                                                 </div>
                                                 {cData.errorCount > 0 && <div className="text-[10px] font-bold text-red-600 bg-red-50 px-2.5 py-1 rounded-md">⚠️ {cData.errorCount} SKU Selisih Ditemukan (Klik Detail)</div>}
                                             </div>
