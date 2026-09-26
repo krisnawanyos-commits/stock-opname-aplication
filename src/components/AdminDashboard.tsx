@@ -11,7 +11,7 @@ import {
     CheckCircle2, XCircle, Search, Building2, DollarSign,
     Download, Scale, PlayCircle, Archive, ArrowLeft, AlertTriangle,
     LogOut, GripHorizontal, Contact, Eye, EyeOff, UserCheck, Clock, Store, Link2, KeyRound,
-    Mail, Edit2, Smartphone, Lock, Unlock, Repeat, Copy
+    Mail, Edit2, Smartphone, Lock, Unlock, Repeat, Copy, Tag
 } from 'lucide-react';
 import type { UserRole } from '../types';
 
@@ -94,6 +94,7 @@ interface TabDefinition {
 const ALL_AVAILABLE_TABS: TabDefinition[] = [
     { id: 'progress', label: 'Progress & Analytics', icon: PieChart, roles: ['owner', 'spv'] },
     { id: 'master', label: 'Master Task & Rak', icon: Database, roles: ['owner', 'spv'] },
+    { id: 'sku_catalog', label: 'Master SKU Katalog', icon: Tag, roles: ['owner', 'spv'] },
     { id: 'recon', label: 'Recon & Recovery', icon: Scale, roles: ['owner'] },
     { id: 'audit', label: 'Audit Trail Countsheet', icon: Clock, roles: ['owner', 'spv'] },
     { id: 'settings', label: 'Tim & Configurations', icon: SlidersHorizontal, roles: ['owner'] },
@@ -150,6 +151,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
     const [selectedCounterForDetail, setSelectedCounterForDetail] = useState<string | null>(null);
     const [ktpSearch, setKtpSearch] = useState<string>('');
     const [counterSearch, setCounterSearch] = useState<string>('');
+    const [catalogSearch, setCatalogSearch] = useState<string>('');
 
     const [editingAccount, setEditingAccount] = useState<GlobalAccount | null>(null);
     const [assignUsername, setAssignUsername] = useState<string>('');
@@ -641,21 +643,15 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         triggerNotification(`Akun KTP ${uName} berhasil diperbarui!`);
     };
 
+    // 3. FIX MAILTO PERBAIKAN BROWSER (TANPA TARGET BLANK LALU MANDET)
     const triggerMailto = (url: string) => {
         try {
-            const link = document.createElement('a');
-            link.href = url;
-            link.target = '_blank';
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
+            window.location.href = url;
         } catch (e) {
             console.error("Error triggering mailto:", e);
-            window.location.href = url;
         }
     };
 
-    // 4. SIMPLIFIKASI TEMPLATE EMAIL SIMPEL DEFAULT
     const handleBlastEmailCredentials = () => {
         if (globalAccounts.length === 0) {
             triggerNotification('Belum ada akun KTP Cloud terdaftar.');
@@ -673,7 +669,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
         const mailtoUrl = `mailto:?bcc=${emailList}&subject=${subject}&body=${bodyContent}`;
         triggerMailto(mailtoUrl);
-        triggerNotification(`Membuka email blast ke ${validAccounts.length} akun...`);
+        triggerNotification(`Membuka aplikasi email blast ke ${validAccounts.length} akun...`);
     };
 
     const handleSendIndividualEmail = (acc: GlobalAccount) => {
@@ -1017,6 +1013,25 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         ? masterDataList.filter(m => m.counter === selectedCounterForDetail && m.isCounted && (m.countedQty ?? m.Qty) !== m.Qty)
         : [];
 
+    // UNIQUE MASTER SKU LIST UNTUK REFERENSI KATALOG
+    const uniqueSKUCatalog = Array.from(new Set(masterDataList.map(m => m.SKU))).map(sku => {
+        const matched = masterDataList.find(m => m.SKU === sku);
+        return {
+            SKU: sku,
+            Owner: matched?.Owner || 'DDI',
+            Description: matched?.Description || '-',
+            UPC1: matched?.UPC1 || '-',
+            UPC2: matched?.UPC2 || '-',
+            SKUBrand: matched?.SKUBrand || '-',
+            satuanHitung: matched?.satuanHitung || 'PCS',
+            unitPrice: matched?.unitPrice || 0
+        };
+    }).filter(c =>
+        c.SKU.toLowerCase().includes(catalogSearch.toLowerCase()) ||
+        c.Description.toLowerCase().includes(catalogSearch.toLowerCase()) ||
+        c.UPC1.toLowerCase().includes(catalogSearch.toLowerCase())
+    );
+
     const totalSKUs = masterDataList.length;
     const totalCounted = masterDataList.filter(i => i.isCounted).length;
     const overallPercentage = totalSKUs > 0 ? Math.round((totalCounted / totalSKUs) * 100) : 0;
@@ -1033,7 +1048,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         return { name, total: group.total, counted: group.counted, percentage: Math.round((group.counted / group.total) * 100) };
     });
 
-    // 2. REVISI KALKULASI AKURASI BRAND (SKU BELUM DIHITUNG TIDAK BOLEH 100% MATCH)
+    // REVISI KALKULASI AKURASI BRAND
     const brandAccuracyList = Array.from(new Set(masterDataList.map(m => m.SKUBrand))).map(brandName => {
         const brandSKUs = masterDataList.filter(m => m.SKUBrand === brandName);
         const countedSKUs = brandSKUs.filter(m => m.isCounted);
@@ -1061,7 +1076,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             (brandStatusFilter === 'selisih' ? b.diffSKUs > 0 :
                 (brandStatusFilter === 'match' ? (!b.isFullyUncounted && b.diffSKUs === 0) : b.isFullyUncounted)))
     );
-
     const matchRecoveryCount = masterDataList.filter(m => m.isCounted && (m.countedQty ?? m.Qty) === m.Qty).length;
     const varianceRecoveryCount = masterDataList.filter(m => m.isCounted && (m.countedQty ?? m.Qty) !== m.Qty).length;
     const totalFinancialVarianceValue = masterDataList.reduce((acc, m) => acc + (m.isCounted ? (((m.countedQty ?? m.Qty) - m.Qty) * (m.unitPrice || 0)) : 0), 0);
@@ -1740,7 +1754,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                         </div>
                     )}
 
-                    {/* TAB 2: MASTER TASK */}
+                    {/* TAB 2: MASTER TASK DENGAN SCROLLBAR MAX HEIGHT */}
                     {activeTab === 'master' && (
                         <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl space-y-5">
                             <div className="flex justify-between items-center border-b pb-4">
@@ -1750,8 +1764,10 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                     <label className="px-4 py-2.5 bg-slate-900 text-white rounded-xl text-sm font-bold cursor-pointer flex items-center space-x-2"><Upload className="w-4 h-4" /><span>Upload Master</span><input type="file" accept=".xlsx, .xls" className="hidden" onChange={(e) => { if (e.target.files?.[0]) parseXLSXFile(e.target.files[0]); }} /></label>
                                 </div>
                             </div>
-                            <div className="overflow-x-auto border rounded-2xl max-h-125">
-                                <table className="w-full text-left text-[11px] min-w-max"><thead className="bg-slate-50 font-black text-slate-600 border-b"><tr><th className="p-3">OWNER SKU</th><th className="p-3">SKU</th><th className="p-3">DESKRIPSI</th><th className="p-3">UPC 1</th><th className="p-3">UPC 2</th><th className="p-3">LOKASI RAK</th><th className="p-3">COUNTER PIC</th><th className="p-3 text-center">WMS QTY</th><th className="p-3 text-center">ACTUAL QTY</th></tr></thead>
+
+                            {/* 1. PENAMBAHAN SCROLLBAR DENGAN MAX-HEIGHT DI MASTER TASK */}
+                            <div className="overflow-x-auto overflow-y-auto border rounded-2xl max-h-125 scrollbar-thin">
+                                <table className="w-full text-left text-[11px] min-w-max"><thead className="bg-slate-50 font-black text-slate-600 border-b sticky top-0 z-10"><tr><th className="p-3 bg-slate-50">OWNER SKU</th><th className="p-3 bg-slate-50">SKU</th><th className="p-3 bg-slate-50">DESKRIPSI</th><th className="p-3 bg-slate-50">UPC 1</th><th className="p-3 bg-slate-50">UPC 2</th><th className="p-3 bg-slate-50">LOKASI RAK</th><th className="p-3 bg-slate-50">COUNTER PIC</th><th className="p-3 text-center bg-slate-50">WMS QTY</th><th className="p-3 text-center bg-slate-50">ACTUAL QTY</th></tr></thead>
                                     <tbody className="divide-y divide-slate-100 font-medium">
                                         {masterDataList.map((row, idx) => (
                                             <tr key={idx} className="hover:bg-slate-50">
@@ -1774,6 +1790,52 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                 <td className="p-3 text-center font-black text-sm">{(row.isCounted && row.countedQty !== undefined && !isNaN(row.countedQty)) ? row.countedQty : '-'}</td>
                                             </tr>
                                         ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* 2. TAB BARU: MASTER SKU KATALOG (REFERENSI NAMA & HARGA) */}
+                    {activeTab === 'sku_catalog' && (
+                        <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl space-y-5">
+                            <div className="flex flex-col sm:flex-row justify-between sm:items-center border-b pb-4 gap-4">
+                                <div>
+                                    <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
+                                        <Tag className="w-5 h-5 text-indigo-600" />
+                                        <span>Master Katalog SKU & Referensi Produk</span>
+                                    </h3>
+                                    <p className="text-xs text-slate-500 font-medium">Basis data referensi resmi untuk pencocokan barcode temuan di HP Counter.</p>
+                                </div>
+                                <div className="relative w-full sm:w-72">
+                                    <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-2.5" />
+                                    <input
+                                        type="text"
+                                        placeholder="Cari SKU, Barcode, Deskripsi..."
+                                        value={catalogSearch}
+                                        onChange={(e) => setCatalogSearch(e.target.value)}
+                                        className="w-full pl-9 pr-4 py-2 bg-slate-50 border rounded-xl text-xs font-bold outline-none"
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="overflow-x-auto overflow-y-auto border rounded-2xl max-h-125 scrollbar-thin">
+                                <table className="w-full text-left text-xs"><thead className="bg-slate-50 font-bold text-slate-600 border-b sticky top-0 z-10"><tr><th className="p-3 bg-slate-50">OWNER</th><th className="p-3 bg-slate-50">SKU BARANG</th><th className="p-3 bg-slate-50">DESKRIPSI PRODUK</th><th className="p-3 bg-slate-50">UPC 1 (ECERAN)</th><th className="p-3 bg-slate-50">UPC 2 (KARDUS)</th><th className="p-3 bg-slate-50">BRAND</th><th className="p-3 text-right bg-slate-50">HARGA SATUAN (RP)</th></tr></thead>
+                                    <tbody className="divide-y divide-slate-100 font-medium">
+                                        {uniqueSKUCatalog.map((item, idx) => (
+                                            <tr key={idx} className="hover:bg-slate-50">
+                                                <td className="p-3 font-bold text-slate-800">{item.Owner}</td>
+                                                <td className="p-3 font-mono font-black text-indigo-600">{item.SKU}</td>
+                                                <td className="p-3 font-bold text-slate-900">{item.Description}</td>
+                                                <td className="p-3 font-mono">{item.UPC1}</td>
+                                                <td className="p-3 font-mono">{item.UPC2}</td>
+                                                <td className="p-3 font-semibold text-slate-600">{item.SKUBrand}</td>
+                                                <td className="p-3 text-right font-mono font-bold text-amber-700">Rp {item.unitPrice.toLocaleString('id-ID')}</td>
+                                            </tr>
+                                        ))}
+                                        {uniqueSKUCatalog.length === 0 && (
+                                            <tr><td colSpan={7} className="p-8 text-center text-slate-400">Tidak ada Katalog SKU ditemukan.</td></tr>
+                                        )}
                                     </tbody>
                                 </table>
                             </div>
@@ -1829,7 +1891,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                         </div>
                     )}
 
-                    {/* TAB 4: AUDIT TRAIL COUNTSHEET DENGAN SCROLLBAR DAN MAX HEIGHT */}
+                    {/* TAB 4: AUDIT TRAIL COUNTSHEET */}
                     {activeTab === 'audit' && (
                         <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl space-y-5">
                             <div className="flex justify-between items-center border-b pb-4">
@@ -1851,7 +1913,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                 </div>
                             </div>
 
-                            {/* 1. SCROLLBAR UNTUK AUDIT LOG */}
                             <div className="overflow-x-auto overflow-y-auto border rounded-2xl max-h-125 scrollbar-thin">
                                 <table className="w-full text-left text-[11px] min-w-max border-collapse">
                                     <thead className="bg-slate-50 font-black text-slate-600 border-b sticky top-0 z-10">
