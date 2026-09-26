@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { db } from './firebase';
+import { doc, onSnapshot, collection, query, where } from 'firebase/firestore';
 import Step1Login from './components/Step1Login';
 import Step2TeamSetup from './components/Step2TeamSetup';
 import Step3CountsheetList from './components/Step3CountsheetList';
@@ -64,6 +66,42 @@ export default function App() {
     return null;
   });
 
+  // LISTEN ROLE REAL-TIME DARI FIRESTORE UNTUK USER AKTIF (SPV REDIRECT INSTAN)
+  useEffect(() => {
+    if (!currentUser?.username) return;
+    const cleanUser = currentUser.username.toLowerCase().trim();
+
+    if (cleanUser === 'owner' || cleanUser === 'admin') return;
+
+    // 1. Listen global_accounts
+    const unsubGlobal = onSnapshot(doc(db, "global_accounts", cleanUser), (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data.role === 'spv' && currentUser.role !== 'spv') {
+          setCurrentUser(prev => prev ? { ...prev, role: 'spv' } : null);
+          setCurrentStep('admin');
+        }
+      }
+    });
+
+    // 2. Listen project_teams
+    const qTeam = query(
+      collection(db, "project_teams"),
+      where("username", "==", cleanUser)
+    );
+    const unsubTeam = onSnapshot(qTeam, (snap) => {
+      if (!snap.empty) {
+        const tData = snap.docs[0].data();
+        if (tData.role === 'spv' && currentUser.role !== 'spv') {
+          setCurrentUser(prev => prev ? { ...prev, role: 'spv' } : null);
+          setCurrentStep('admin');
+        }
+      }
+    });
+
+    return () => { unsubGlobal(); unsubTeam(); };
+  }, [currentUser?.username, currentUser?.role]);
+
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.STEP, currentStep.toString());
     localStorage.setItem(STORAGE_KEYS.SESSION, JSON.stringify(sessionData));
@@ -112,7 +150,6 @@ export default function App() {
               role: (role === 'owner' || role === 'spv' || username === 'owner') ? 'admin' : 'counter'
             }));
 
-            // BILA USER OWNER / SPV -> LANGSUNG KE DASHBOARD ADMIN
             if (role === 'owner' || role === 'spv' || username === 'owner') {
               setCurrentStep('admin');
             } else {

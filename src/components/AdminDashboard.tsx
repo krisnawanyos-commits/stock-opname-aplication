@@ -1076,7 +1076,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         c.UPC1.toLowerCase().includes(catalogSearch.toLowerCase())
     );
 
-    // KALKULASI TOTAL SKU TERMASUK TASK TEMUAN BARU
+    // FIX KALKULASI PROGRESS: Sertakan semua task terhitung (termasuk temuan baru)
     const totalSKUs = masterDataList.length;
     const totalCounted = masterDataList.filter(i => i.isCounted).length;
     const overallPercentage = totalSKUs > 0 ? Math.round((totalCounted / totalSKUs) * 100) : 0;

@@ -166,7 +166,6 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
   const [unmappedDesc, setUnmappedDesc] = useState<string>('');
   const [unmappedPhotoUrl, setUnmappedPhotoUrl] = useState<string>('');
 
-  // STATE BAD STOCK PADA ITEM TEMUAN BARU
   const [unmappedIsBadStock, setUnmappedIsBadStock] = useState<boolean>(false);
   const [unmappedBadQty, setUnmappedBadQty] = useState<string>("0");
   const [unmappedBadRemarks, setUnmappedBadRemarks] = useState<string>('');
@@ -270,7 +269,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     const qtyNumber = parseInt(unmappedQty || "0", 10);
     const badQtyNum = unmappedIsBadStock ? parseInt(unmappedBadQty || "0", 10) : 0;
 
-    const newItem: UnmappedItem & { badQty?: number; badRemarks?: string } = {
+    const newItem: UnmappedItem & { badQty?: number; badRemarks?: string; skuBrand?: string } = {
       id: Date.now().toString(),
       barcode: unmappedBarcode.trim(),
       name: unmappedDesc.trim() || (matchedMasterSKU ? (matchedMasterSKU.Description || matchedMasterSKU.SKU) : 'Barang Fisik Baru Unmapped'),
@@ -281,6 +280,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       expDate: unmappedExpDate,
       batchNumber: unmappedBatchNumber,
       photoUrl: unmappedPhotoUrl,
+      skuBrand: matchedMasterSKU?.SKUBrand || 'General'
     };
 
     setUnmappedList((prev) => [...prev, newItem]);
@@ -349,11 +349,12 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
         }, { merge: true });
       });
 
-      // SIMPAN ITEM TEMUAN DENGAN QTY GOOD & BAD STOCK LENGKAP
+      // SIMPAN ITEM TEMUAN DENGAN WE WARISKAN SKUBRAND RESMI DARI MASTER
       unmappedList.forEach((unm: any) => {
         const unmSku = (matchedMasterSKU?.SKU || `TEMUAN-${unm.barcode}`).toUpperCase().trim();
         const unmOwner = matchedMasterSKU?.Owner || 'DDI';
         const unmPrice = parseInt(matchedMasterSKU?.unitPrice) || 0;
+        const unmBrand = matchedMasterSKU?.SKUBrand || unm.skuBrand || 'General';
         const unmDesc = unm.name;
         const goodQty = unm.qty || 0;
         const badQty = unm.badQty || 0;
@@ -368,6 +369,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
           Description: unmDesc,
           UPC1: unm.barcode,
           UPC2: '',
+          SKUBrand: unmBrand,
           Location: rack.rackNumber,
           counter: cleanCounter,
           currentRound: 1,
@@ -649,7 +651,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
 
                 {unmappedBarcode.trim() !== '' && (
                   <div className={`p-2.5 rounded-lg text-xs font-bold flex items-center justify-between ${isBarcodeInSystem ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-rose-50 text-rose-800 border border-rose-200'}`}>
-                    <span>{isBarcodeInSystem ? `✓ Cocok dgn Master (${matchedMasterSKU?.Owner || 'DDI'} - ${matchedMasterSKU?.SKU})` : '⚠ TIDAK ADA di Master (Wajib Foto!)'}</span>
+                    <span>{isBarcodeInSystem ? `✓ Cocok dgn Master (${matchedMasterSKU?.Owner || 'DDI'} - ${matchedMasterSKU?.SKU} - Brand: ${matchedMasterSKU?.SKUBrand || 'ENFAGROW'})` : '⚠ TIDAK ADA di Master (Wajib Foto!)'}</span>
                   </div>
                 )}
 
