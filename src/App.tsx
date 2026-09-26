@@ -112,10 +112,10 @@ export default function App() {
               role: (role === 'owner' || role === 'spv' || username === 'owner') ? 'admin' : 'counter'
             }));
 
+            // BILA USER OWNER / SPV -> ARTIKAN LANGSUNG KE DASHBOARD ADMIN
             if (role === 'owner' || role === 'spv' || username === 'owner') {
               setCurrentStep('admin');
             } else {
-              // Navigasi ke Step 2 untuk pengisian Keterangan Tim Pendamping
               setCurrentStep(2);
             }
           }}
