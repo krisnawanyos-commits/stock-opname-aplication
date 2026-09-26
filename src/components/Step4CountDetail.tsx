@@ -40,14 +40,13 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
   const [skuList, setSkuList] = useState<GroupedSKUItem[]>([]);
   const [allMasterSKUs, setAllMasterSKUs] = useState<any[]>([]);
   const [isSessionLocked, setIsSessionLocked] = useState<boolean>(false);
-  const [unmappedDrawerOpen, setUnmappedDrawerOpen] = useState<boolean>(false);
+  const [unmappedDrawerOpen, setUnmappedDrawerOpen] = useState<boolean>(true);
   const [isLoadingSave, setIsLoadingSave] = useState<boolean>(false);
 
   const [modal, setModal] = useState<CustomModalState>({
     isOpen: false, title: '', message: '',
   });
 
-  // REAL-TIME LISTENER PENGUNCIAN SESI GLOBAL & COUNTER
   useEffect(() => {
     const lockDocId = sessionData.sessionCode || sessionData.sessionId || "SO-WRG-2026-09";
     const lockRef = doc(db, "round_locks", lockDocId);
@@ -67,7 +66,6 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     return () => unsub();
   }, [sessionData.sessionCode, sessionData.sessionId, sessionData.primaryCounter]);
 
-  // 3. LISTEN MASTER SKU LIST DARI FIRESTORE UNTUK AUTO-MATCHING UNMAPPED
   useEffect(() => {
     const unsubMaster = onSnapshot(collection(db, "master_tasks"), (snapshot) => {
       const items = snapshot.docs.map(d => d.data());
@@ -76,7 +74,6 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     return () => unsubMaster();
   }, []);
 
-  // FETCH TASK BERDASARKAN RAK & COUNTER
   useEffect(() => {
     const primaryCounter = (sessionData.primaryCounter || "Unassigned").toLowerCase().trim();
     const targetLocation = rack.rackNumber || rack.id;
@@ -94,7 +91,10 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
         const data = docSnap.data();
         if (data.isLocked) return;
 
-        const skuKey = (data.SKU || 'SKU_UNKNOWN').toUpperCase().trim();
+        // SKIP JIKA HANYA DOKUMEN RAK KOSONG DUMMY
+        if (!data.SKU || data.SKU === 'SKU_UNKNOWN') return;
+
+        const skuKey = data.SKU.toUpperCase().trim();
         const sysQty = parseInt(data.Qty || data.QTY_SYSTEM) || 0;
 
         const rawActQty = data.QTY_ACTUAL ?? data.countedQty;
@@ -169,7 +169,6 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
   const [unmappedPhotoUrl, setUnmappedPhotoUrl] = useState<string>('');
   const [unmappedList, setUnmappedList] = useState<UnmappedItem[]>([]);
 
-  // 3. LOOKUP KE SELURUH DATABASE MASTER
   const matchedMasterSKU = unmappedBarcode.trim() !== '' ? allMasterSKUs.find(m =>
     (m.UPC1 && m.UPC1.trim() === unmappedBarcode.trim()) ||
     (m.UPC2 && m.UPC2.trim() === unmappedBarcode.trim()) ||
@@ -290,7 +289,6 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     setUnmappedList((prev) => prev.filter((item) => item.id !== id));
   };
 
-  // SAVE, SNAPSHOT AUDIT LOG, & AUTO-NEXT RAK
   const handleSaveAndNext = async () => {
     if (isSessionLocked) return;
     setIsLoadingSave(true);
@@ -341,7 +339,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
         }, { merge: true });
       });
 
-      // 3. TAMBAHKAN TEMUAN BARANG UNMAPPED KE FIRESTORE TASK & AUDIT
+      // SIMPAN TEMUAN RAK BARU UNMAPPED KE MASTER TASK & AUDIT TRAIL
       unmappedList.forEach((unm) => {
         const unmSku = (matchedMasterSKU?.SKU || `TEMUAN-${unm.barcode}`).toUpperCase().trim();
         const unmOwner = matchedMasterSKU?.Owner || 'DDI';
@@ -621,12 +619,6 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             </div>
           ))}
 
-          {skuList.length === 0 && (
-            <div className="bg-white p-8 rounded-xl text-center text-slate-400 font-medium border border-slate-200">
-              Tidak ada SKU ditemukan untuk rak ini.
-            </div>
-          )}
-
           {/* ITEM TAK TERDAFTAR / TEMUAN LAIN */}
           <div className="bg-white rounded-xl p-space-md shadow-xs border border-slate-200 space-y-space-md">
             <div className="flex items-center justify-between cursor-pointer" onClick={() => setUnmappedDrawerOpen(!unmappedDrawerOpen)}>
@@ -700,23 +692,18 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             </div>
           )}
 
-          {/* TOMBOL EDIT ULANG / RE-AUDIT */}
-          {skuList.length > 0 && (
-            <button
-              type="button"
-              disabled={isLoadingSave || isSessionLocked}
-              onClick={handleSaveAndNext}
-              className={`w-full min-h-14 text-white rounded-xl font-bold text-lg shadow-md cursor-pointer transition-all ${isSessionLocked || isLoadingSave ? 'bg-slate-400 opacity-50 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}
-            >
-              {isLoadingSave
-                ? "Menyimpan ke Cloud..."
-                : isSessionLocked
-                  ? "🔒 Sesi Terkunci oleh Admin"
-                  : skuList.some(s => s.isCounted)
-                    ? `Update Hitungan R${currentDisplayRound} (Re-Audit) & Simpan`
-                    : "Simpan Semua & Lanjut Rak Berikutnya"}
-            </button>
-          )}
+          <button
+            type="button"
+            disabled={isLoadingSave || isSessionLocked}
+            onClick={handleSaveAndNext}
+            className={`w-full min-h-14 text-white rounded-xl font-bold text-lg shadow-md cursor-pointer transition-all ${isSessionLocked || isLoadingSave ? 'bg-slate-400 opacity-50 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}
+          >
+            {isLoadingSave
+              ? "Menyimpan ke Cloud..."
+              : isSessionLocked
+                ? "🔒 Sesi Terkunci oleh Admin"
+                : "Simpan Semua & Lanjut Rak Berikutnya"}
+          </button>
 
         </div>
       </main>

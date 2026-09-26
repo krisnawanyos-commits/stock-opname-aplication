@@ -663,8 +663,12 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         setTransferTargetCounter('');
     };
 
+    // SAFE EMAIL HANDLER DENGAN FALLBACK MODAL INSTAN
     const handleSendDirectEmailJS = async (recipientEmail: string, username: string, pin: string, name: string) => {
-        triggerNotification(`Mengirim email langsung ke ${recipientEmail}...`);
+        if (!recipientEmail || !recipientEmail.trim()) {
+            triggerNotification("Alamat email tidak valid.");
+            return;
+        }
 
         try {
             const templateParams = {
@@ -678,8 +682,12 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             await emailjs.send('YOUR_SERVICE_ID', 'YOUR_TEMPLATE_ID', templateParams, 'YOUR_PUBLIC_KEY');
             triggerNotification(`✅ Email Kredensial Berhasil Terkirim ke ${recipientEmail}!`);
         } catch (err: any) {
-            console.error("EmailJS Error:", err);
-            triggerNotification(`❌ Gagal Mengirim Email: ${err?.text || 'Periksa konfigurasi EmailJS'}`);
+            console.warn("EmailJS Key Not Configured, Fallback to Credentials Modal:", err);
+
+            let copyText = `📋 *KREDENSIAL LOGIN STOCK OPNAME 360*\nNama: ${name}\nUsername: ${username}\nPIN: ${pin}`;
+            navigator.clipboard.writeText(copyText);
+            setCredentialsModalText(copyText);
+            triggerNotification(`📋 Kredensial ${username} disalin ke Clipboard!`);
         }
     };
 
@@ -688,20 +696,15 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             triggerNotification('Belum ada akun KTP Cloud terdaftar.');
             return;
         }
-        const validAccounts = globalAccounts.filter(a => a.email && a.email.trim());
-        if (validAccounts.length === 0) {
-            triggerNotification('Tidak ada email terdaftar pada akun KTP Cloud.');
-            return;
-        }
-
-        validAccounts.forEach(acc => {
-            handleSendDirectEmailJS(acc.email, acc.username, acc.pin, acc.name);
-        });
+        handleGenerateCredentialsText();
     };
 
     const handleSendIndividualEmail = (acc: GlobalAccount) => {
         if (!acc.email || !acc.email.trim()) {
-            triggerNotification(`Akun ${acc.username} tidak memiliki alamat email!`);
+            let copyText = `📋 *KREDENSIAL LOGIN STOCK OPNAME 360*\nNama: ${acc.name}\nUsername: ${acc.username}\nPIN: ${acc.pin}`;
+            navigator.clipboard.writeText(copyText);
+            setCredentialsModalText(copyText);
+            triggerNotification(`📋 Kredensial ${acc.username} disalin ke Clipboard!`);
             return;
         }
         handleSendDirectEmailJS(acc.email.trim(), acc.username, acc.pin, acc.name);
@@ -1005,21 +1008,37 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         triggerNotification('Template Tim Project (.csv) diunduh!');
     };
 
+    // ASSIGN SPV DENGAN UPDATE DUA DOKUMEN REAL-TIME
     const handleAssignTeamManual = async () => {
         if (!activeProject || !assignUsername) return;
-        await setDoc(doc(db, "project_teams", `${activeProject.id}_${assignUsername}`), {
+        const cleanUser = assignUsername.toLowerCase().trim();
+
+        // 1. Simpan ke project_teams
+        await setDoc(doc(db, "project_teams", `${activeProject.id}_${cleanUser}`), {
             projectId: activeProject.id,
-            username: assignUsername,
+            username: cleanUser,
             role: assignRole
         });
+
+        // 2. Sync ke global_accounts agar langsung terdeteksi SPV saat login/real-time
+        await setDoc(doc(db, "global_accounts", cleanUser), {
+            role: assignRole
+        }, { merge: true });
+
         setAssignUsername('');
-        triggerNotification(`${assignUsername} ditugaskan sebagai ${assignRole}!`);
+        triggerNotification(`Sukses! ${cleanUser} resmi ditugaskan sebagai ${assignRole}!`);
     };
 
     const handleRemoveTeamMember = async (username: string) => {
         if (!activeProject) return;
-        await deleteDoc(doc(db, "project_teams", `${activeProject.id}_${username}`));
-        triggerNotification(`Akses ${username} dicabut.`);
+        const cleanUser = username.toLowerCase().trim();
+
+        await deleteDoc(doc(db, "project_teams", `${activeProject.id}_${cleanUser}`));
+        await setDoc(doc(db, "global_accounts", cleanUser), {
+            role: 'counter'
+        }, { merge: true });
+
+        triggerNotification(`Akses SPV/Counter ${cleanUser} dicabut.`);
     };
 
     const activeTeamMembers = activeProject ? allProjectTeams.filter(t => t.projectId === activeProject.id) : [];
