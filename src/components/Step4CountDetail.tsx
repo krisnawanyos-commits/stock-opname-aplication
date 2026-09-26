@@ -27,6 +27,7 @@ interface GroupedSKUItem {
   isBadStock: boolean;
   badRemarks: string;
   isCounted: boolean;
+  currentRound: number;
   docIds: string[];
   batchCount: number;
   allSystemEds: string[];
@@ -45,7 +46,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     isOpen: false, title: '', message: '',
   });
 
-  // 1. SYNC REAL-TIME BUKA/TUTUP KUNCI SESI GLOBAL & INDIVIDU COUNTER
+  // REAL-TIME LISTENER PENGUNCIAN SESI GLOBAL & COUNTER
   useEffect(() => {
     const lockDocId = sessionData.sessionCode || sessionData.sessionId || "SO-WRG-2026-09";
     const lockRef = doc(db, "round_locks", lockDocId);
@@ -54,8 +55,6 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       if (docSnap.exists()) {
         const data = docSnap.data();
         const isGlobalLocked = data.status === 'LOCKED';
-
-        // Pengecekan key gembok individu selalu menggunakan lowercase & trim
         const primaryCounter = (sessionData.primaryCounter || '').toLowerCase().trim();
         const isCounterLocked = !!(data.lockedCounters && data.lockedCounters[primaryCounter]);
 
@@ -67,7 +66,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     return () => unsub();
   }, [sessionData.sessionCode, sessionData.sessionId, sessionData.primaryCounter]);
 
-  // FETCH & AGGREGATE TASK BERDASARKAN SKU ATAS LOKASI RAK
+  // FETCH TASK BERDASARKAN RAK & COUNTER
   useEffect(() => {
     const primaryCounter = (sessionData.primaryCounter || "Unassigned").toLowerCase().trim();
     const targetLocation = rack.rackNumber || rack.id;
@@ -83,6 +82,9 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
 
       snapshot.docs.forEach(docSnap => {
         const data = docSnap.data();
+        // Abaikan jika task dikunci oleh sistem
+        if (data.isLocked) return;
+
         const skuKey = (data.SKU || 'SKU_UNKNOWN').toUpperCase().trim();
         const sysQty = parseInt(data.Qty || data.QTY_SYSTEM) || 0;
 
@@ -97,6 +99,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
         const numBadQty = parseInt(rawBadQty, 10);
 
         const edSys = data.expiredDateSystem || '';
+        const taskRound = parseInt(data.currentRound, 10) || 1;
 
         if (!groupedMap[skuKey]) {
           groupedMap[skuKey] = {
@@ -114,6 +117,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             isBadStock: (!isNaN(numBadQty) && numBadQty > 0) || !!data.badRemarks,
             badRemarks: data.badRemarks || '',
             isCounted: !!data.isCounted || hasActQty,
+            currentRound: taskRound,
             docIds: [docSnap.id],
             batchCount: 1,
             allSystemEds: edSys ? [edSys] : []
@@ -156,7 +160,6 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
   const [unmappedPhotoUrl, setUnmappedPhotoUrl] = useState<string>('');
   const [unmappedList, setUnmappedList] = useState<UnmappedItem[]>([]);
 
-  // DUAL-UPC MATCHING
   const isBarcodeInSystem = unmappedBarcode.trim() !== '' && skuList.some(s =>
     s.upc === unmappedBarcode.trim() ||
     (s.upc2 && s.upc2 === unmappedBarcode.trim()) ||
@@ -275,7 +278,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     setUnmappedList((prev) => prev.filter((item) => item.id !== id));
   };
 
-  // SAVE, SNAPSHOT LOGS & AUTO-NEXT RAK
+  // SAVE, SNAPSHOT AUDIT LOG, & AUTO-NEXT RAK
   const handleSaveAndNext = async () => {
     if (isSessionLocked) return;
     setIsLoadingSave(true);
@@ -288,8 +291,9 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
         const finalGoodQty = parseInt(skuItem.qtyGood || "0", 10);
         const finalBadQty = parseInt(skuItem.qtyBad || "0", 10);
         const totalSubmitted = finalGoodQty + finalBadQty;
+        const currentRoundNum = skuItem.currentRound || 1;
 
-        // 1. Update Master Tasks dengan memisahkan QTY_GOOD & QTY_BAD
+        // 1. Update Master Tasks
         skuItem.docIds.forEach((docId, i) => {
           const taskRef = doc(db, "master_tasks", docId);
           batch.set(taskRef, {
@@ -304,9 +308,9 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
           }, { merge: true });
         });
 
-        // 2. AUDIT TRAIL LOG SNAPSHOT
-        const sessCode = sessionData.sessionCode || sessionData.sessionId || 'SO';
-        const logId = `${sessCode}_${rack.rackNumber}_${skuItem.sku}`;
+        // 2. AUDIT TRAIL LOG SNAPSHOT (MENCATAT RONDE SEKARANG DENGAN PRESISI)
+        const sessCode = sessionData.sessionCode || sessionData.sessionId || 'SO-WRG-2026-09';
+        const logId = `${sessCode}_R${currentRoundNum}_${rack.rackNumber}_${skuItem.sku}`;
         const auditRef = doc(db, "audit_logs", logId);
 
         batch.set(auditRef, {
@@ -318,7 +322,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
           upc1: skuItem.upc,
           upc2: skuItem.upc2 || '-',
           counterPic: cleanCounter,
-          round: 1,
+          round: currentRoundNum,
           qtyGood: finalGoodQty,
           qtyBad: finalBadQty,
           totalFinalSubmitted: totalSubmitted,
@@ -359,7 +363,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
         isOpen: true,
         type: 'success',
         title: 'Hitungan Rak Berhasil Tersimpan!',
-        message: `Semua SKU pada Rak ${rack.rackNumber} telah di-sync ke Cloud Firestore dan tercatat di Audit Trail.`,
+        message: `Semua SKU pada Rak ${rack.rackNumber} telah di-sync ke Cloud Firestore dan dicatat ke Audit Trail.`,
         confirmText: nextRackItem ? `Lanjut Otomatis ke Rak ${nextRackItem.rackNumber}` : 'Kembali ke Countsheet List',
         onConfirm: () => {
           if (nextRackItem && onSelectNextRack) {
@@ -377,6 +381,8 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     }
   };
 
+  const currentDisplayRound = skuList[0]?.currentRound || 1;
+
   return (
     <div className="bg-slate-50 text-slate-900 font-body-md text-body-md flex flex-col min-h-screen">
       <CustomModal modal={modal} onClose={() => setModal((prev) => ({ ...prev, isOpen: false }))} />
@@ -392,7 +398,9 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
               <span className="font-label-md uppercase tracking-wider font-semibold">Countsheet List</span>
             </button>
             <div className="flex items-center gap-2">
-              <span className="px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 font-label-sm text-[11px] uppercase font-bold border border-amber-300">Round 1</span>
+              <span className="px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 font-label-sm text-[11px] uppercase font-bold border border-amber-300">
+                Round {currentDisplayRound}
+              </span>
               <button
                 type="button"
                 onClick={onLogout}
@@ -647,7 +655,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                 : isSessionLocked
                   ? "🔒 Sesi Terkunci oleh Admin"
                   : skuList.some(s => s.isCounted)
-                    ? "Update Hitungan (Re-Audit) & Simpan"
+                    ? `Update Hitungan R${currentDisplayRound} (Re-Audit) & Simpan`
                     : "Simpan Semua & Lanjut Rak Berikutnya"}
             </button>
           )}

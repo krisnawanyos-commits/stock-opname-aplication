@@ -81,6 +81,7 @@ interface ProjectSession {
     method: 'LIST_TO_FLOOR' | 'FLOOR_TO_LIST';
     status: 'LIVE_ACTIVE' | 'ARCHIVED';
     createdAt: string;
+    currentRound?: number;
 }
 
 interface TabDefinition {
@@ -162,7 +163,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
     const [isProjectLocked, setIsProjectLocked] = useState(false);
     const [lockedCounters, setLockedCounters] = useState<Record<string, boolean>>({});
 
-    // STATE MODAL POPUP KREDENSIAL TEXT (FALLBACK EMAIL)
+    // STATE MODAL POPUP KREDENSIAL TEXT
     const [credentialsModalText, setCredentialsModalText] = useState<string | null>(null);
 
     // AUDIT LOGS STATE
@@ -306,52 +307,96 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         return () => { unsubscribe(); lockUnsubscribe(); };
     }, [activeProject]);
 
-    // HANDLER DEPLOY RONDE 2 PER-COUNTER PIC
-    const handleDeployRound2ForCounter = async (targetCounter: string) => {
+    // DEPLOY MULTI-ROUND HINGGA RONDE 3 + AUDIT TRAIL LOGGING
+    const handleDeployNextRound = async (targetCounter?: string) => {
         if (!activeProject) return;
-        const cleanCounter = targetCounter.toLowerCase().trim();
-        if (!window.confirm(`AKSI OWNER: Deploy Ronde 2 KHUSUS untuk Counter "${cleanCounter}"? SKU selisih milik counter ini akan di-reset untuk dihitung ulang.`)) return;
+
+        const currentProjRound = activeProject.currentRound || 1;
+        if (currentProjRound >= 3) {
+            triggerNotification("Sesi Opname sudah mencapai Ronde 3 Maksimal (Final Reconciliation).");
+            return;
+        }
+
+        const nextRound = currentProjRound + 1;
+        const targetDesc = targetCounter ? `Khusus Counter "${targetCounter}"` : "Secara GLOBAL";
+
+        if (!window.confirm(`AKSI OWNER: Deploy RONDE ${nextRound} ${targetDesc}? Hanya SKU yang SELISIH akan dihitung ulang. SKU yang MATCH akan dikunci.`)) return;
 
         try {
             const disputeTasks = masterDataList.filter(item => {
+                const isMatchCounter = targetCounter ? item.counter === targetCounter.toLowerCase().trim() : true;
                 const act = item.countedQty ?? item.Qty;
-                return item.counter === cleanCounter && item.isCounted && act !== item.Qty;
+                return isMatchCounter && item.isCounted && act !== item.Qty;
             });
 
             if (disputeTasks.length === 0) {
-                triggerNotification(`Tidak ada SKU selisih ditemukan untuk counter ${cleanCounter}.`);
+                triggerNotification(`Tidak ada SKU selisih untuk di-deploy ke Ronde ${nextRound}.`);
                 return;
             }
 
             const batch = writeBatch(db);
-            masterDataList.filter(item => item.counter === cleanCounter).forEach((item) => {
+            const timestampNow = new Date().toISOString();
+
+            masterDataList.forEach((item) => {
                 if (!item.id) return;
+                const isMatchCounter = targetCounter ? item.counter === targetCounter.toLowerCase().trim() : true;
+                if (!isMatchCounter) return;
+
                 const ref = doc(db, "master_tasks", item.id);
                 const act = item.countedQty ?? item.Qty;
 
                 if (item.isCounted && act !== item.Qty) {
+                    // Reset hitungan untuk SKU selisih ke Ronde baru
                     batch.update(ref, {
-                        currentRound: 2,
+                        currentRound: nextRound,
                         QTY_ACTUAL: null,
                         QTY_GOOD: null,
                         QTY_BAD: null,
                         isCounted: false,
-                        round1Actual: act,
-                        updatedAt: new Date().toISOString()
+                        [`round${currentProjRound}Actual`]: act,
+                        updatedAt: timestampNow
                     });
+
+                    // TULIS LOG KE AUDIT TRAIL
+                    const logId = `${activeProject.sessionCode}_DEPLOY_R${nextRound}_${item.SKU}_${item.Location}`;
+                    const auditRef = doc(db, "audit_logs", logId);
+                    batch.set(auditRef, {
+                        timestamp: timestampNow,
+                        rackLocation: item.Location,
+                        ownerSku: item.Owner || 'DDI',
+                        sku: item.SKU,
+                        description: item.Description,
+                        upc1: item.UPC1 || '-',
+                        upc2: item.UPC2 || '-',
+                        counterPic: item.counter,
+                        round: nextRound,
+                        qtyGood: 0,
+                        qtyBad: 0,
+                        totalFinalSubmitted: 0,
+                        edActual: '-',
+                        remarks: `[DEPLOY RONDE ${nextRound}] Di-deploy ulang karena selisih R${currentProjRound} (Act: ${act} vs WMS: ${item.Qty})`
+                    }, { merge: true });
+
                 } else if (item.isCounted && act === item.Qty) {
+                    // Kunci SKU yang match
                     batch.update(ref, {
                         isLocked: true,
-                        updatedAt: new Date().toISOString()
+                        updatedAt: timestampNow
                     });
                 }
             });
 
+            // Update currentRound di dokumen project jika deploy global
+            if (!targetCounter) {
+                batch.update(doc(db, "projects", activeProject.id), { currentRound: nextRound });
+                setActiveProject(prev => prev ? { ...prev, currentRound: nextRound } : null);
+            }
+
             await batch.commit();
-            triggerNotification(`🚀 Ronde 2 Berhasil Dideploy Khusus untuk Counter "${cleanCounter}"! (${disputeTasks.length} SKU Selisih)`);
+            triggerNotification(`🚀 Ronde ${nextRound} Berhasil Dideploy! (${disputeTasks.length} SKU Selisih dicatat ke Audit Trail)`);
         } catch (err: any) {
-            console.error("Deploy Round 2 Per Counter Error:", err);
-            triggerNotification(`Gagal Deploy Ronde 2: ${err.message || String(err)}`);
+            console.error(`Deploy Round ${nextRound} Error:`, err);
+            triggerNotification(`Gagal Deploy Ronde ${nextRound}: ${err.message || String(err)}`);
         }
     };
 
@@ -447,7 +492,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         triggerNotification("Audit Trail Log (.xlsx) berhasil diunduh!");
     };
 
-    // HANDLERS PENGUNCIAN GLOBAL & PER-COUNTER (DENGAN KEY CLEANUP LOWERCASE)
+    // HANDLERS PENGUNCIAN GLOBAL & PER-COUNTER
     const handleToggleGlobalLock = async () => {
         if (!activeProject) return;
         const lockDocId = activeProject.sessionCode || activeProject.id;
@@ -499,7 +544,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         setTransferTargetCounter('');
     };
 
-    // 2. PARSING & UPLOAD MASSAL AKUN KTP CLOUD DARI EXCEL/CSV
+    // PARSING & UPLOAD MASSAL AKUN KTP CLOUD DARI EXCEL/CSV
     const handleUploadBulkKTPAccounts = (file: File) => {
         const reader = new FileReader();
         reader.onload = async (e) => {
@@ -558,7 +603,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         triggerNotification("Template Import KTP (.xlsx) diunduh!");
     };
 
-    // 3. BLAST EMAIL & COPY TEXT KREDENSIAL
+    // BLAST EMAIL & COPY TEXT KREDENSIAL
     const handleGenerateCredentialsText = () => {
         if (globalAccounts.length === 0) {
             triggerNotification("Belum ada KTP terdaftar.");
@@ -635,7 +680,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             validAccounts.map(a => `• Username: ${a.username} | PIN: ${a.pin} | Nama: ${a.name} (${a.email})`).join('\n') +
             `\n\nSilakan gunakan Username & PIN masing-masing untuk login.\nTerima kasih.`;
 
-        // Mailto format using BCC for blast
         const mailtoUrl = `mailto:?bcc=${encodeURIComponent(emailList)}&subject=${subject}&body=${encodeURIComponent(bodyContent)}`;
 
         try {
@@ -910,7 +954,8 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             id: projId,
             sessionCode: wizSessionCode.trim() || `SO-${wizLocationId}-${wizOpnameDate}`,
             locationId: wizLocationId || 'WH-01', locationName: locName, opnameDate: wizOpnameDate,
-            method: wizMethod, status: 'LIVE_ACTIVE', createdAt: new Date().toLocaleString()
+            method: wizMethod, status: 'LIVE_ACTIVE', createdAt: new Date().toLocaleString(),
+            currentRound: 1
         };
         await setDoc(doc(db, "projects", projId), newSession);
         setActiveProject(newSession);
@@ -1020,6 +1065,8 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
     const matchRecoveryCount = masterDataList.filter(m => m.isCounted && (m.countedQty ?? m.Qty) === m.Qty).length;
     const varianceRecoveryCount = masterDataList.filter(m => m.isCounted && (m.countedQty ?? m.Qty) !== m.Qty).length;
     const totalFinancialVarianceValue = masterDataList.reduce((acc, m) => acc + (m.isCounted ? (((m.countedQty ?? m.Qty) - m.Qty) * (m.unitPrice || 0)) : 0), 0);
+
+    const activeRoundNum = activeProject?.currentRound || 1;
 
     return (
         <div className="min-h-screen bg-slate-50 text-slate-800 p-4 lg:p-8 max-w-7xl mx-auto font-sans relative">
@@ -1463,6 +1510,9 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                             <div>
                                 <div className="flex items-center space-x-3">
                                     <h1 className="text-xl font-black text-slate-900">{activeProject.sessionCode}</h1>
+                                    <span className="bg-amber-100 text-amber-900 text-[10px] font-black px-2.5 py-1 rounded-lg border border-amber-300">
+                                        ROUND {activeRoundNum}
+                                    </span>
                                     {effectiveRole === 'owner' ? (
                                         <span className="bg-indigo-100 text-indigo-800 text-[10px] font-black px-2.5 py-1 rounded-lg flex items-center space-x-1 border border-indigo-200">
                                             <ShieldCheck className="w-3.5 h-3.5" />
@@ -1478,6 +1528,18 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                             className={`ml-2 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 shadow-sm border transition-colors cursor-pointer ${isProjectLocked ? 'bg-red-50 text-red-700 border-red-200 hover:bg-red-100' : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'}`}
                                         >
                                             {isProjectLocked ? <><Unlock className="w-3.5 h-3.5" />Buka Sesi Global</> : <><Lock className="w-3.5 h-3.5" />Kunci Sesi Global</>}
+                                        </button>
+                                    )}
+                                    {/* TOMBOL DEPLOY RONDE DINAMIS (SAMPAI RONDE 3) */}
+                                    {effectiveRole === 'owner' && (
+                                        <button
+                                            onClick={() => handleDeployNextRound()}
+                                            disabled={activeRoundNum >= 3}
+                                            className={`ml-2 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 shadow-md text-white transition-colors cursor-pointer ${activeRoundNum >= 3 ? 'bg-slate-400 cursor-not-allowed' : 'bg-red-600 hover:bg-red-700 animate-pulse'}`}
+                                            title={activeRoundNum >= 3 ? 'Sesi sudah mencapai Ronde 3 Maksimal' : `Deploy Ronde ${activeRoundNum + 1} khusus SKU Selisih`}
+                                        >
+                                            <Repeat className="w-3.5 h-3.5" />
+                                            <span>{activeRoundNum >= 3 ? 'Ronde 3 (Max Final)' : `Deploy Ronde ${activeRoundNum + 1}`}</span>
                                         </button>
                                     )}
                                 </div>
@@ -1513,6 +1575,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                         <option value="overall">📊 Overall Keseluruhan</option>
                                         <option value={1}>1️⃣ Ronde 1</option>
                                         <option value={2}>2️⃣ Ronde 2</option>
+                                        <option value={3}>3️⃣ Ronde 3</option>
                                     </select>
                                 </div>
                                 <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-xl space-y-3">
@@ -1541,7 +1604,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                         const cData = counterGroups[cName];
                                         const pct = cData.total > 0 ? Math.round((cData.counted / cData.total) * 100) : 0;
 
-                                        // Key gembok dibaca selalu lowercase
                                         const cleanCounterKey = cName.toLowerCase().trim();
                                         const isLocked = !!lockedCounters[cleanCounterKey];
 
@@ -1556,9 +1618,10 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                         {effectiveRole === 'owner' && (
                                                             <>
                                                                 <button
-                                                                    onClick={(e) => { e.stopPropagation(); handleDeployRound2ForCounter(cName); }}
-                                                                    title="Deploy Ronde 2 Khusus Counter Ini"
-                                                                    className="p-1.5 rounded-md cursor-pointer bg-red-50 text-red-600 hover:bg-red-100 transition-colors"
+                                                                    onClick={(e) => { e.stopPropagation(); handleDeployNextRound(cName); }}
+                                                                    title="Deploy Ronde Berikutnya Khusus Counter Ini"
+                                                                    disabled={activeRoundNum >= 3}
+                                                                    className={`p-1.5 rounded-md cursor-pointer transition-colors ${activeRoundNum >= 3 ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-red-50 text-red-600 hover:bg-red-100'}`}
                                                                 >
                                                                     <Repeat className="w-3.5 h-3.5" />
                                                                 </button>
