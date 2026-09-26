@@ -555,7 +555,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 'TOTAL QTY ACTUAL': isCounted ? actQty : '-',
                 'SELISIH QTY': isCounted ? diff : '-',
                 'STATUS SELISIH': statusSelisih,
-                'HARGA SATUAN (RP)': unitPrice,
+                'HARGA SATUAN (RP)': item.unitPrice || 0,
                 'VALUASI SELISIH (RP)': isCounted ? valDiscrepancy : 0,
                 'QTY FINAL RECOVERY': overrideQty,
                 'VALUASI FINAL (RP)': finalValuation,
@@ -663,7 +663,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         setTransferTargetCounter('');
     };
 
-    // SAFE EMAIL HANDLER DENGAN FALLBACK MODAL INSTAN
     const handleSendDirectEmailJS = async (recipientEmail: string, username: string, pin: string, name: string) => {
         if (!recipientEmail || !recipientEmail.trim()) {
             triggerNotification("Alamat email tidak valid.");
@@ -1008,19 +1007,16 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         triggerNotification('Template Tim Project (.csv) diunduh!');
     };
 
-    // ASSIGN SPV DENGAN UPDATE DUA DOKUMEN REAL-TIME
     const handleAssignTeamManual = async () => {
         if (!activeProject || !assignUsername) return;
         const cleanUser = assignUsername.toLowerCase().trim();
 
-        // 1. Simpan ke project_teams
         await setDoc(doc(db, "project_teams", `${activeProject.id}_${cleanUser}`), {
             projectId: activeProject.id,
             username: cleanUser,
             role: assignRole
         });
 
-        // 2. Sync ke global_accounts agar langsung terdeteksi SPV saat login/real-time
         await setDoc(doc(db, "global_accounts", cleanUser), {
             role: assignRole
         }, { merge: true });
@@ -1080,6 +1076,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         c.UPC1.toLowerCase().includes(catalogSearch.toLowerCase())
     );
 
+    // KALKULASI TOTAL SKU TERMASUK TASK TEMUAN BARU
     const totalSKUs = masterDataList.length;
     const totalCounted = masterDataList.filter(i => i.isCounted).length;
     const overallPercentage = totalSKUs > 0 ? Math.round((totalCounted / totalSKUs) * 100) : 0;

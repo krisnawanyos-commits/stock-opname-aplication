@@ -62,8 +62,8 @@ export default function Step1Login({ onSuccessLogin }: Step1LoginProps) {
         const storedPin = (accData.pin || '1234').toString().trim();
 
         if (cleanPin === storedPin) {
-          // 3. Cek apakah user di-assign sebagai SPV di project_teams atau global_accounts
-          let assignedRole: UserRole = accData.role || 'counter';
+          // Priority Check: Cek apakah user di-assign sebagai SPV di project_teams
+          let assignedRole: UserRole = 'counter';
 
           const teamQuery = query(
             collection(db, "project_teams"),
@@ -76,6 +76,8 @@ export default function Step1Login({ onSuccessLogin }: Step1LoginProps) {
             if (teamData.role === 'spv') {
               assignedRole = 'spv';
             }
+          } else if (accData.role === 'spv') {
+            assignedRole = 'spv';
           }
 
           onSuccessLogin(cleanUsername, assignedRole, accData.name || cleanUsername);
@@ -121,7 +123,7 @@ export default function Step1Login({ onSuccessLogin }: Step1LoginProps) {
               type="text"
               value={usernameInput}
               onChange={(e) => setUsernameInput(e.target.value)}
-              placeholder="Contoh: bambang / owner"
+              placeholder="Contoh: bambang / pamungkas / owner"
               className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500/30 transition-all"
               required
             />
