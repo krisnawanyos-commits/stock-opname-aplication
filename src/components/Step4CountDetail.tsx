@@ -45,7 +45,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     isOpen: false, title: '', message: '',
   });
 
-  // 1. SYNC ID DOKUMEN KUNCI DENGAN ADMIN (sessionCode || sessionId)
+  // 1. SYNC REAL-TIME BUKA/TUTUP KUNCI SESI GLOBAL & INDIVIDU COUNTER
   useEffect(() => {
     const lockDocId = sessionData.sessionCode || sessionData.sessionId || "SO-SESSION-DEFAULT";
     const lockRef = doc(db, "round_locks", lockDocId);
@@ -54,6 +54,8 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       if (docSnap.exists()) {
         const data = docSnap.data();
         const isGlobalLocked = data.status === 'LOCKED';
+
+        // Pengecekan key gembok individu selalu menggunakan lowercase & trim
         const primaryCounter = (sessionData.primaryCounter || '').toLowerCase().trim();
         const isCounterLocked = !!(data.lockedCounters && data.lockedCounters[primaryCounter]);
 
@@ -65,7 +67,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     return () => unsub();
   }, [sessionData.sessionCode, sessionData.sessionId, sessionData.primaryCounter]);
 
-  // FETCH & AGGREGATE TASK BERDASARKAN SKU
+  // FETCH & AGGREGATE TASK BERDASARKAN SKU ATAS LOKASI RAK
   useEffect(() => {
     const primaryCounter = (sessionData.primaryCounter || "Unassigned").toLowerCase().trim();
     const targetLocation = rack.rackNumber || rack.id;
@@ -88,6 +90,9 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
         const numActQty = parseInt(rawActQty, 10);
         const hasActQty = rawActQty !== undefined && rawActQty !== null && !isNaN(numActQty);
 
+        const rawGoodQty = data.QTY_GOOD ?? data.qtyGood;
+        const numGoodQty = parseInt(rawGoodQty, 10);
+
         const rawBadQty = data.QTY_BAD ?? data.qtyBad;
         const numBadQty = parseInt(rawBadQty, 10);
 
@@ -102,7 +107,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             category: `${data.Zone || 'RACKING'} • ${data.SKUBrand || 'General'}`,
             uom: (data.satuanHitung as 'PCS' | 'CARTON') || 'PCS',
             totalSystemQty: sysQty,
-            qtyGood: hasActQty ? numActQty.toString() : "",
+            qtyGood: !isNaN(numGoodQty) ? numGoodQty.toString() : (hasActQty ? numActQty.toString() : ""),
             qtyBad: !isNaN(numBadQty) && numBadQty > 0 ? numBadQty.toString() : "",
             expDateSystem: edSys,
             expDateActual: data.expDateActual || data.expiredDateActual || '',
@@ -284,7 +289,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
         const finalBadQty = parseInt(skuItem.qtyBad || "0", 10);
         const totalSubmitted = finalGoodQty + finalBadQty;
 
-        // 1. Update Master Tasks
+        // 1. Update Master Tasks dengan memisahkan QTY_GOOD & QTY_BAD
         skuItem.docIds.forEach((docId, i) => {
           const taskRef = doc(db, "master_tasks", docId);
           batch.set(taskRef, {

@@ -11,7 +11,7 @@ import {
     CheckCircle2, XCircle, Search, Building2, DollarSign,
     Download, Scale, PlayCircle, Archive, ArrowLeft, AlertTriangle,
     LogOut, GripHorizontal, Contact, Eye, EyeOff, UserCheck, Clock, Store, Link2, KeyRound,
-    Mail, Edit2, Smartphone, Lock, Unlock, Repeat
+    Mail, Edit2, Smartphone, Lock, Unlock, Repeat, Copy
 } from 'lucide-react';
 import type { UserRole } from '../types';
 
@@ -162,6 +162,9 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
     const [isProjectLocked, setIsProjectLocked] = useState(false);
     const [lockedCounters, setLockedCounters] = useState<Record<string, boolean>>({});
 
+    // STATE MODAL POPUP KREDENSIAL TEXT (FALLBACK EMAIL)
+    const [credentialsModalText, setCredentialsModalText] = useState<string | null>(null);
+
     // AUDIT LOGS STATE
     const [auditLogs, setAuditLogs] = useState<any[]>([]);
 
@@ -232,7 +235,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); unsubAudit(); };
     }, []);
 
-    // 4. FIX MAPPING DATA FIRESTORE & SYNC BAMBANG
+    // FIX MAPPING DATA FIRESTORE & SYNC BAMBANG
     useEffect(() => {
         if (!activeProject) return;
 
@@ -241,14 +244,12 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             const taskList: MasterSKUItem[] = snapshot.docs.map(docSnap => {
                 const data = docSnap.data();
 
-                // Ambil Qty Good, Bad, & Actual dengan prioritas pembacaan
                 const gQty = data.QTY_GOOD ?? data.qtyGood;
                 const bQty = data.QTY_BAD ?? data.qtyBad;
 
                 const rawActQty = data.QTY_ACTUAL ?? data.countedQty;
                 const numActQty = parseInt(rawActQty, 10);
 
-                // Cek apakah barang benar-benar sudah pernah dihitung
                 const isCounted = !!data.isCounted || (rawActQty !== undefined && rawActQty !== null && !isNaN(numActQty));
 
                 const calcGood = gQty !== undefined ? parseInt(gQty, 10) : (isCounted ? (isNaN(numActQty) ? 0 : numActQty) : 0);
@@ -289,7 +290,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             }
         });
 
-        // 1. FIX SYNC KEY LOCK DENGAN KONSISTEN BACA PROJ CODE / PROJ ID
+        // FIX SYNC KEY LOCK DENGAN DOKUMEN SESI AKTIF
         const lockDocId = activeProject.sessionCode || activeProject.id;
         const lockUnsubscribe = onSnapshot(doc(db, "round_locks", lockDocId), (docSnap) => {
             if (docSnap.exists()) {
@@ -305,7 +306,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         return () => { unsubscribe(); lockUnsubscribe(); };
     }, [activeProject]);
 
-    // 2. HANDLER DEPLOY RONDE 2 PER-COUNTER PIC
+    // HANDLER DEPLOY RONDE 2 PER-COUNTER PIC
     const handleDeployRound2ForCounter = async (targetCounter: string) => {
         if (!activeProject) return;
         const cleanCounter = targetCounter.toLowerCase().trim();
@@ -354,7 +355,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         }
     };
 
-    // 3. FIX RECON EXCEL (UNCOUNTED != MATCH & SEPARATION GOOD/BAD)
+    // EXPORT RECON EXCEL
     const handleExportReconXLSX = () => {
         if (masterDataList.length === 0) {
             triggerNotification("Tidak ada data untuk diexport!");
@@ -365,7 +366,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             const sysQty = item.Qty || 0;
             const isCounted = !!item.isCounted;
 
-            // Jika belum dihitung, Qty Actual, Good, dan Bad diset kosong
             const actQty = isCounted ? (item.countedQty !== undefined ? item.countedQty : sysQty) : 0;
             const goodQty = isCounted ? (item.qtyGood !== undefined ? item.qtyGood : actQty) : 0;
             const badQty = isCounted ? (item.qtyBad !== undefined ? item.qtyBad : 0) : 0;
@@ -374,7 +374,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             const unitPrice = item.unitPrice || 0;
             const valDiscrepancy = diff * unitPrice;
 
-            // Logika Status Selisih yang Benar
             let statusSelisih = 'Uncounted / Pending';
             if (isCounted) {
                 if (diff === 0) statusSelisih = 'Match';
@@ -416,7 +415,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         triggerNotification("Laporan Recon & Recovery (.xlsx) berhasil diunduh!");
     };
 
-    // 5. DOWNLOAD AUDIT TRAIL EXCEL (.XLSX)
+    // DOWNLOAD AUDIT TRAIL EXCEL
     const handleExportAuditTrailXLSX = () => {
         if (auditLogs.length === 0) {
             triggerNotification("Belum ada data Audit Trail untuk di-download!");
@@ -448,7 +447,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         triggerNotification("Audit Trail Log (.xlsx) berhasil diunduh!");
     };
 
-    // HANDLERS PENGUNCIAN GLOBAL & PER-COUNTER
+    // HANDLERS PENGUNCIAN GLOBAL & PER-COUNTER (DENGAN KEY CLEANUP LOWERCASE)
     const handleToggleGlobalLock = async () => {
         if (!activeProject) return;
         const lockDocId = activeProject.sessionCode || activeProject.id;
@@ -464,12 +463,13 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
     const handleToggleCounterLock = async (counterName: string, currentStatus: boolean) => {
         if (!activeProject) return;
         const lockDocId = activeProject.sessionCode || activeProject.id;
-        const newLocks = { ...lockedCounters, [counterName]: !currentStatus };
+        const cleanKey = counterName.toLowerCase().trim();
+        const newLocks = { ...lockedCounters, [cleanKey]: !currentStatus };
         await setDoc(doc(db, "round_locks", lockDocId), {
             lockedCounters: newLocks,
             updatedAt: new Date().toISOString()
         }, { merge: true });
-        triggerNotification(`Akses Counter "${counterName}" ${!currentStatus ? 'Dikunci' : 'Dibuka'}!`);
+        triggerNotification(`Akses Counter "${cleanKey}" ${!currentStatus ? 'Dikunci' : 'Dibuka'}!`);
     };
 
     // BULK TRANSFER TASK COUNTER ABSEN
@@ -496,6 +496,80 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         triggerNotification(`Sukses! ${tasksToMove.length} task milik ${cleanSource} dipindahkan ke ${cleanTarget}.`);
         setTransferSourceCounter(null);
         setTransferTargetCounter('');
+    };
+
+    // 2. PARSING & UPLOAD MASSAL AKUN KTP CLOUD DARI EXCEL/CSV
+    const handleUploadBulkKTPAccounts = (file: File) => {
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+            try {
+                const data = new Uint8Array(e.target?.result as ArrayBuffer);
+                const workbook = XLSX.read(data, { type: 'array' });
+                const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+                const json = XLSX.utils.sheet_to_json(worksheet) as any[];
+
+                if (json.length === 0) {
+                    triggerNotification("File KTP kosong atau format salah.");
+                    return;
+                }
+
+                const batch = writeBatch(db);
+                let count = 0;
+
+                json.forEach((row: any) => {
+                    const uName = (row['Username'] || row['username'] || row['USERNAME'] || '').toString().toLowerCase().trim();
+                    const name = (row['Nama'] || row['Name'] || row['NAMA'] || uName).toString().trim();
+                    const pin = (row['PIN'] || row['Pin'] || row['pin'] || '1234').toString().trim();
+                    const email = (row['Email'] || row['email'] || `${uName}@anymindgroup.com`).toString().trim();
+
+                    if (uName) {
+                        const accRef = doc(db, "global_accounts", uName);
+                        batch.set(accRef, {
+                            username: uName,
+                            name: name,
+                            pin: pin,
+                            email: email,
+                            role: 'counter'
+                        }, { merge: true });
+                        count++;
+                    }
+                });
+
+                await batch.commit();
+                triggerNotification(`Berhasil upload ${count} Akun KTP Cloud Massal!`);
+            } catch (err: any) {
+                console.error("Bulk KTP Upload Error:", err);
+                triggerNotification("Gagal upload KTP Massal. Periksa format file.");
+            }
+        };
+        reader.readAsArrayBuffer(file);
+    };
+
+    const handleDownloadKTPTemplate = () => {
+        const template = [
+            { Username: 'bambang.so', Nama: 'Bambang Sudrajat', PIN: '1234', Email: 'bambang@anymindgroup.com' },
+            { Username: 'budi.so', Nama: 'Budi Prasetyo', PIN: '1234', Email: 'budi@anymindgroup.com' }
+        ];
+        const ws = XLSX.utils.json_to_sheet(template);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Template_KTP_Cloud");
+        XLSX.writeFile(wb, "Template_Import_KTP_Massal.xlsx");
+        triggerNotification("Template Import KTP (.xlsx) diunduh!");
+    };
+
+    // 3. BLAST EMAIL & COPY TEXT KREDENSIAL
+    const handleGenerateCredentialsText = () => {
+        if (globalAccounts.length === 0) {
+            triggerNotification("Belum ada KTP terdaftar.");
+            return;
+        }
+
+        let text = "📋 *DAFTAR KREDENSIAL LOGIN STOCK OPNAME 360*\n\n";
+        globalAccounts.forEach((acc, i) => {
+            text += `${i + 1}. *${acc.name}*\n   Username: \`${acc.username}\`\n   PIN: \`${acc.pin}\`\n\n`;
+        });
+
+        setCredentialsModalText(text);
     };
 
     const combinedLocationOptions = [
@@ -914,6 +988,41 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 </div>
             )}
 
+            {/* MODAL POPUP TEKS KREDENSIAL / COPY PASTE TEXT */}
+            {credentialsModalText && (
+                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl border border-slate-200">
+                        <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+                            <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
+                                <KeyRound className="w-5 h-5 text-indigo-600" />
+                                <span>Kredensial Akun KTP Cloud</span>
+                            </h3>
+                            <button onClick={() => setCredentialsModalText(null)} className="p-2 text-slate-400 hover:text-slate-700 bg-slate-100 rounded-xl">✕</button>
+                        </div>
+                        <p className="text-xs text-slate-500 font-medium">Salin teks di bawah untuk dikirim langsung via WhatsApp/Group Chat:</p>
+                        <textarea
+                            readOnly
+                            rows={8}
+                            value={credentialsModalText}
+                            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-mono text-slate-800 outline-none select-all"
+                        />
+                        <div className="flex justify-between items-center pt-2">
+                            <button
+                                onClick={() => {
+                                    navigator.clipboard.writeText(credentialsModalText);
+                                    triggerNotification("Teks Kredensial Berhasil Disalin!");
+                                }}
+                                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-extrabold flex items-center gap-1.5 shadow-md cursor-pointer"
+                            >
+                                <Copy className="w-4 h-4" />
+                                <span>Salin Teks Kredensial</span>
+                            </button>
+                            <button onClick={() => setCredentialsModalText(null)} className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-xl text-xs font-bold">Tutup</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* MODAL POPUP BULK REASSIGN COUNTER ABSEN */}
             {transferSourceCounter && (
                 <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
@@ -1156,6 +1265,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                         </div>
                     )}
 
+                    {/* ACCOUNTS (KTP) TAB DENGAN IMPORT MASSAL & MODAL TEKS KREDENSIAL */}
                     {landingTab === 'accounts' && effectiveRole === 'owner' && (
                         <div className="space-y-6">
                             <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl space-y-4">
@@ -1182,7 +1292,25 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                             <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl space-y-6">
                                 <div className="flex flex-col md:flex-row justify-between md:items-center gap-4">
                                     <div><h3 className="text-base font-black text-slate-900">Master KTP & Otorisasi</h3></div>
-                                    <button onClick={handleBlastEmailCredentials} className="px-4 py-2.5 bg-purple-600 text-white rounded-xl text-sm font-bold flex items-center space-x-2"><Mail className="w-4 h-4" /><span>Blast Email Semua</span></button>
+                                    <div className="flex items-center space-x-2">
+                                        <button onClick={handleDownloadKTPTemplate} className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold flex items-center space-x-1">
+                                            <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                                            <span>Template KTP</span>
+                                        </button>
+                                        <label className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center space-x-1.5 shadow-md cursor-pointer">
+                                            <Upload className="w-4 h-4" />
+                                            <span>Upload KTP Massal</span>
+                                            <input type="file" accept=".xlsx, .xls, .csv" className="hidden" onChange={(e) => { if (e.target.files?.[0]) handleUploadBulkKTPAccounts(e.target.files[0]); }} />
+                                        </label>
+                                        <button onClick={handleGenerateCredentialsText} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center space-x-1.5 shadow-md">
+                                            <Copy className="w-4 h-4" />
+                                            <span>Salin Teks Kredensial</span>
+                                        </button>
+                                        <button onClick={handleBlastEmailCredentials} className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold flex items-center space-x-1.5 shadow-md">
+                                            <Mail className="w-4 h-4" />
+                                            <span>Blast Email</span>
+                                        </button>
+                                    </div>
                                 </div>
 
                                 <div className="p-5 bg-slate-50 border border-slate-200 rounded-2xl space-y-4">
@@ -1302,7 +1430,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                     ) : (
                                         <span className="bg-slate-100 text-slate-600 text-[10px] font-black px-2.5 py-1 rounded-lg border border-slate-200">SUPERVISOR</span>
                                     )}
-                                    {/* 1. TOMBOL PENGUNCIAN GLOBAL UNTUK OWNER */}
+                                    {/* TOMBOL PENGUNCIAN GLOBAL UNTUK OWNER */}
                                     {effectiveRole === 'owner' && (
                                         <button
                                             onClick={handleToggleGlobalLock}
@@ -1316,7 +1444,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                             </div>
                         </div>
 
-                        {/* 6. TAB NAVIGASI UTAMA DENGAN SCROLLBAR SMOOTH */}
+                        {/* TAB NAVIGASI UTAMA SCROLLABLE */}
                         <div className="flex bg-slate-50 p-1.5 rounded-2xl border border-slate-200 overflow-x-auto max-w-full scrollbar-thin">
                             <div className="flex space-x-2 flex-nowrap whitespace-nowrap">
                                 {orderedTabs.map(t => (
@@ -1371,7 +1499,11 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                     {filteredCounterNames.map((cName, idx) => {
                                         const cData = counterGroups[cName];
                                         const pct = cData.total > 0 ? Math.round((cData.counted / cData.total) * 100) : 0;
-                                        const isLocked = lockedCounters[cName];
+
+                                        // Key gembok dibaca selalu lowercase
+                                        const cleanCounterKey = cName.toLowerCase().trim();
+                                        const isLocked = !!lockedCounters[cleanCounterKey];
+
                                         return (
                                             <div key={idx} className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3 hover:border-indigo-400">
                                                 <div className="flex justify-between items-start">
@@ -1382,7 +1514,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                         <span className="text-[10px] font-black px-2.5 py-1 rounded-lg bg-indigo-100 text-indigo-800">{pct}% Done</span>
                                                         {effectiveRole === 'owner' && (
                                                             <>
-                                                                {/* 2. TOMBOL DEPLOY RONDE 2 KHUSUS COUNTER PIC */}
                                                                 <button
                                                                     onClick={(e) => { e.stopPropagation(); handleDeployRound2ForCounter(cName); }}
                                                                     title="Deploy Ronde 2 Khusus Counter Ini"
@@ -1390,7 +1521,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                                 >
                                                                     <Repeat className="w-3.5 h-3.5" />
                                                                 </button>
-                                                                {/* BULK REASSIGN UNTUK COUNTER ABSEN */}
                                                                 <button
                                                                     onClick={(e) => { e.stopPropagation(); setTransferSourceCounter(cName); }}
                                                                     title="Transfer Seluruh Tugas Counter Ini (Jika Absen)"
@@ -1398,7 +1528,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                                 >
                                                                     <UserPlus className="w-3.5 h-3.5" />
                                                                 </button>
-                                                                {/* 1. TOMBOL GEMBOK INDIVIDU */}
                                                                 <button
                                                                     onClick={(e) => { e.stopPropagation(); handleToggleCounterLock(cName, isLocked); }}
                                                                     title={isLocked ? "Buka Akses Input Counter" : "Kunci Akses Input Counter"}
@@ -1561,7 +1690,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                 <div className="flex justify-between items-center border-b pb-3">
                                     <h3 className="text-base font-black text-slate-900 flex items-center"><Scale className="w-5 h-5 mr-2 text-indigo-600" />Laporan Selisih & Override Recovery</h3>
 
-                                    {/* 3. EKSPOR EXCEL RECON REVISI */}
                                     <button onClick={handleExportReconXLSX} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center space-x-2 shadow-md cursor-pointer">
                                         <FileSpreadsheet className="w-4 h-4" />
                                         <span>Download Recon (.xlsx)</span>
@@ -1610,7 +1738,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                     <span className="text-xs font-bold text-slate-500 bg-slate-100 px-3 py-1 rounded-lg">
                                         Total {auditLogs.length} Entri Log
                                     </span>
-                                    {/* 5. TOMBOL DOWNLOAD AUDIT TRAIL EXCEL */}
                                     <button
                                         onClick={handleExportAuditTrailXLSX}
                                         className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center space-x-2 shadow-md cursor-pointer"
