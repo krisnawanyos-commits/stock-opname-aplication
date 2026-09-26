@@ -236,7 +236,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); unsubAudit(); };
     }, []);
 
-    // FIX MAPPING DATA FIRESTORE & SYNC BAMBANG
+    // FIX MAPPING DATA FIRESTORE
     useEffect(() => {
         if (!activeProject) return;
 
@@ -273,7 +273,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     LocationType: data.LocationType || 'RACK',
                     counter: (data.counter || 'Unassigned').toLowerCase().trim(),
                     Status: data.Status || 'Active',
-                    currentRound: data.currentRound || 1,
+                    currentRound: parseInt(data.currentRound, 10) || 1,
                     expiredDateSystem: data.expiredDateSystem || '',
                     expiredDateActual: data.expDateActual || data.expiredDateActual || '',
                     Qty: parseInt(data.Qty || data.QTY_SYSTEM) || 0,
@@ -307,58 +307,64 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         return () => { unsubscribe(); lockUnsubscribe(); };
     }, [activeProject]);
 
-    // DEPLOY MULTI-ROUND HINGGA RONDE 3 + AUDIT TRAIL LOGGING
-    const handleDeployNextRound = async (targetCounter?: string) => {
+    // DEPLOY MULTI-ROUND DINAMIS PER-COUNTER PIC
+    const handleDeployNextRoundForCounter = async (targetCounter: string) => {
         if (!activeProject) return;
+        const cleanCounter = targetCounter.toLowerCase().trim();
 
-        const currentProjRound = activeProject.currentRound || 1;
-        if (currentProjRound >= 3) {
-            triggerNotification("Sesi Opname sudah mencapai Ronde 3 Maksimal (Final Reconciliation).");
+        // 1. Dapatkan task milik counter spesifik ini
+        const counterTasks = masterDataList.filter(item => item.counter === cleanCounter);
+        if (counterTasks.length === 0) {
+            triggerNotification(`Tidak ada task ditemukan untuk counter ${cleanCounter}.`);
             return;
         }
 
-        const nextRound = currentProjRound + 1;
-        const targetDesc = targetCounter ? `Khusus Counter "${targetCounter}"` : "Secara GLOBAL";
+        // 2. Deteksi otomatis ronde aktif maksimum dari counter ini
+        const currentCounterRound = Math.max(...counterTasks.map(t => t.currentRound || 1));
 
-        if (!window.confirm(`AKSI OWNER: Deploy RONDE ${nextRound} ${targetDesc}? Hanya SKU yang SELISIH akan dihitung ulang. SKU yang MATCH akan dikunci.`)) return;
+        if (currentCounterRound >= 3) {
+            triggerNotification(`Counter "${cleanCounter}" sudah mencapai Ronde 3 Maksimal.`);
+            return;
+        }
+
+        const nextRound = currentCounterRound + 1;
+
+        // 3. Filter SKU yang selisih milik counter ini
+        const disputeTasks = counterTasks.filter(item => {
+            const act = item.countedQty ?? item.Qty;
+            return item.isCounted && act !== item.Qty;
+        });
+
+        if (disputeTasks.length === 0) {
+            triggerNotification(`Tidak ada SKU selisih ditemukan pada counter ${cleanCounter}. Semua match!`);
+            return;
+        }
+
+        if (!window.confirm(`AKSI OWNER: Deploy RONDE ${nextRound} KHUSUS untuk Counter "${cleanCounter}"? (${disputeTasks.length} SKU Selisih akan di-reset untuk dihitung ulang)`)) return;
 
         try {
-            const disputeTasks = masterDataList.filter(item => {
-                const isMatchCounter = targetCounter ? item.counter === targetCounter.toLowerCase().trim() : true;
-                const act = item.countedQty ?? item.Qty;
-                return isMatchCounter && item.isCounted && act !== item.Qty;
-            });
-
-            if (disputeTasks.length === 0) {
-                triggerNotification(`Tidak ada SKU selisih untuk di-deploy ke Ronde ${nextRound}.`);
-                return;
-            }
-
             const batch = writeBatch(db);
             const timestampNow = new Date().toISOString();
 
-            masterDataList.forEach((item) => {
+            counterTasks.forEach((item) => {
                 if (!item.id) return;
-                const isMatchCounter = targetCounter ? item.counter === targetCounter.toLowerCase().trim() : true;
-                if (!isMatchCounter) return;
-
                 const ref = doc(db, "master_tasks", item.id);
                 const act = item.countedQty ?? item.Qty;
 
                 if (item.isCounted && act !== item.Qty) {
-                    // Reset hitungan untuk SKU selisih ke Ronde baru
+                    // Reset hitungan untuk SKU selisih ke Ronde baru milik counter ini
                     batch.update(ref, {
                         currentRound: nextRound,
                         QTY_ACTUAL: null,
                         QTY_GOOD: null,
                         QTY_BAD: null,
                         isCounted: false,
-                        [`round${currentProjRound}Actual`]: act,
+                        [`round${currentCounterRound}Actual`]: act,
                         updatedAt: timestampNow
                     });
 
                     // TULIS LOG KE AUDIT TRAIL
-                    const logId = `${activeProject.sessionCode}_DEPLOY_R${nextRound}_${item.SKU}_${item.Location}`;
+                    const logId = `${activeProject.sessionCode}_DEPLOY_R${nextRound}_${cleanCounter}_${item.SKU}_${item.Location}`;
                     const auditRef = doc(db, "audit_logs", logId);
                     batch.set(auditRef, {
                         timestamp: timestampNow,
@@ -368,17 +374,17 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                         description: item.Description,
                         upc1: item.UPC1 || '-',
                         upc2: item.UPC2 || '-',
-                        counterPic: item.counter,
+                        counterPic: cleanCounter,
                         round: nextRound,
                         qtyGood: 0,
                         qtyBad: 0,
                         totalFinalSubmitted: 0,
                         edActual: '-',
-                        remarks: `[DEPLOY RONDE ${nextRound}] Di-deploy ulang karena selisih R${currentProjRound} (Act: ${act} vs WMS: ${item.Qty})`
+                        remarks: `[DEPLOY R${nextRound} PIC: ${cleanCounter}] Di-reset untuk hitung ulang karena selisih R${currentCounterRound} (Act: ${act} vs WMS: ${item.Qty})`
                     }, { merge: true });
 
                 } else if (item.isCounted && act === item.Qty) {
-                    // Kunci SKU yang match
+                    // Kunci SKU yang sudah match
                     batch.update(ref, {
                         isLocked: true,
                         updatedAt: timestampNow
@@ -386,14 +392,8 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 }
             });
 
-            // Update currentRound di dokumen project jika deploy global
-            if (!targetCounter) {
-                batch.update(doc(db, "projects", activeProject.id), { currentRound: nextRound });
-                setActiveProject(prev => prev ? { ...prev, currentRound: nextRound } : null);
-            }
-
             await batch.commit();
-            triggerNotification(`🚀 Ronde ${nextRound} Berhasil Dideploy! (${disputeTasks.length} SKU Selisih dicatat ke Audit Trail)`);
+            triggerNotification(`🚀 Ronde ${nextRound} Berhasil Dideploy Khusus untuk Counter "${cleanCounter}"! (${disputeTasks.length} SKU)`);
         } catch (err: any) {
             console.error(`Deploy Round ${nextRound} Error:`, err);
             triggerNotification(`Gagal Deploy Ronde ${nextRound}: ${err.message || String(err)}`);
@@ -492,7 +492,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         triggerNotification("Audit Trail Log (.xlsx) berhasil diunduh!");
     };
 
-    // HANDLERS PENGUNCIAN GLOBAL & PER-COUNTER
+    // HANDLERS PENGUNCIAN GLOBAL & PER-COUNTER (DENGAN KEY CLEANUP LOWERCASE)
     const handleToggleGlobalLock = async () => {
         if (!activeProject) return;
         const lockDocId = activeProject.sessionCode || activeProject.id;
@@ -1066,8 +1066,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
     const varianceRecoveryCount = masterDataList.filter(m => m.isCounted && (m.countedQty ?? m.Qty) !== m.Qty).length;
     const totalFinancialVarianceValue = masterDataList.reduce((acc, m) => acc + (m.isCounted ? (((m.countedQty ?? m.Qty) - m.Qty) * (m.unitPrice || 0)) : 0), 0);
 
-    const activeRoundNum = activeProject?.currentRound || 1;
-
     return (
         <div className="min-h-screen bg-slate-50 text-slate-800 p-4 lg:p-8 max-w-7xl mx-auto font-sans relative">
             {showToast && (
@@ -1076,7 +1074,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 </div>
             )}
 
-            {/* MODAL POPUP TEKS KREDENSIAL / COPY PASTE TEXT */}
+            {/* MODAL POPUP TEKS KREDENSIAL */}
             {credentialsModalText && (
                 <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
                     <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl border border-slate-200">
@@ -1510,9 +1508,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                             <div>
                                 <div className="flex items-center space-x-3">
                                     <h1 className="text-xl font-black text-slate-900">{activeProject.sessionCode}</h1>
-                                    <span className="bg-amber-100 text-amber-900 text-[10px] font-black px-2.5 py-1 rounded-lg border border-amber-300">
-                                        ROUND {activeRoundNum}
-                                    </span>
                                     {effectiveRole === 'owner' ? (
                                         <span className="bg-indigo-100 text-indigo-800 text-[10px] font-black px-2.5 py-1 rounded-lg flex items-center space-x-1 border border-indigo-200">
                                             <ShieldCheck className="w-3.5 h-3.5" />
@@ -1528,18 +1523,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                             className={`ml-2 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 shadow-sm border transition-colors cursor-pointer ${isProjectLocked ? 'bg-red-50 text-red-700 border-red-200 hover:bg-red-100' : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'}`}
                                         >
                                             {isProjectLocked ? <><Unlock className="w-3.5 h-3.5" />Buka Sesi Global</> : <><Lock className="w-3.5 h-3.5" />Kunci Sesi Global</>}
-                                        </button>
-                                    )}
-                                    {/* TOMBOL DEPLOY RONDE DINAMIS (SAMPAI RONDE 3) */}
-                                    {effectiveRole === 'owner' && (
-                                        <button
-                                            onClick={() => handleDeployNextRound()}
-                                            disabled={activeRoundNum >= 3}
-                                            className={`ml-2 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 shadow-md text-white transition-colors cursor-pointer ${activeRoundNum >= 3 ? 'bg-slate-400 cursor-not-allowed' : 'bg-red-600 hover:bg-red-700 animate-pulse'}`}
-                                            title={activeRoundNum >= 3 ? 'Sesi sudah mencapai Ronde 3 Maksimal' : `Deploy Ronde ${activeRoundNum + 1} khusus SKU Selisih`}
-                                        >
-                                            <Repeat className="w-3.5 h-3.5" />
-                                            <span>{activeRoundNum >= 3 ? 'Ronde 3 (Max Final)' : `Deploy Ronde ${activeRoundNum + 1}`}</span>
                                         </button>
                                     )}
                                 </div>
@@ -1607,21 +1590,29 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                         const cleanCounterKey = cName.toLowerCase().trim();
                                         const isLocked = !!lockedCounters[cleanCounterKey];
 
+                                        // Deteksi otomatis ronde aktif milik counter ini
+                                        const cTasks = masterDataList.filter(m => m.counter === cleanCounterKey);
+                                        const cMaxRound = cTasks.length > 0 ? Math.max(...cTasks.map(t => t.currentRound || 1)) : 1;
+
                                         return (
                                             <div key={idx} className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3 hover:border-indigo-400">
                                                 <div className="flex justify-between items-start">
-                                                    <div className="text-sm font-black text-slate-900 capitalize">
-                                                        <span>{cName}</span>
+                                                    <div className="flex flex-col">
+                                                        <span className="text-sm font-black text-slate-900 capitalize">{cName}</span>
+                                                        <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200 w-fit mt-0.5">
+                                                            Ronde {cMaxRound}
+                                                        </span>
                                                     </div>
                                                     <div className="flex items-center space-x-1.5">
                                                         <span className="text-[10px] font-black px-2.5 py-1 rounded-lg bg-indigo-100 text-indigo-800">{pct}% Done</span>
                                                         {effectiveRole === 'owner' && (
                                                             <>
+                                                                {/* DEPLOY RONDE BERIKUTNYA DENGAN DETEKSI OTOMATIS PER COUNTER */}
                                                                 <button
-                                                                    onClick={(e) => { e.stopPropagation(); handleDeployNextRound(cName); }}
-                                                                    title="Deploy Ronde Berikutnya Khusus Counter Ini"
-                                                                    disabled={activeRoundNum >= 3}
-                                                                    className={`p-1.5 rounded-md cursor-pointer transition-colors ${activeRoundNum >= 3 ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-red-50 text-red-600 hover:bg-red-100'}`}
+                                                                    onClick={(e) => { e.stopPropagation(); handleDeployNextRoundForCounter(cName); }}
+                                                                    title={cMaxRound >= 3 ? 'Sudah mencapai Ronde 3 Maksimal' : `Deploy Ronde ${cMaxRound + 1} Khusus ${cName}`}
+                                                                    disabled={cMaxRound >= 3}
+                                                                    className={`p-1.5 rounded-md cursor-pointer transition-colors ${cMaxRound >= 3 ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-red-50 text-red-600 hover:bg-red-100'}`}
                                                                 >
                                                                     <Repeat className="w-3.5 h-3.5" />
                                                                 </button>

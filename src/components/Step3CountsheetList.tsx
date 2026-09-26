@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { db } from '../firebase';
-import { collection, onSnapshot, query, where, doc, setDoc } from 'firebase/firestore';
+import { collection, onSnapshot, query, where, doc } from 'firebase/firestore';
 import type { SessionData, RackItem, CustomModalState } from '../types';
 import CustomModal from './CustomModal';
 
@@ -15,14 +15,14 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
   const [racks, setRacks] = useState<RackItem[]>([]);
   const [activeFilter, setActiveFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [isLocking, setIsLocking] = useState<boolean>(false);
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [isSessionLocked, setIsSessionLocked] = useState<boolean>(false);
 
   const [modal, setModal] = useState<CustomModalState>({
     isOpen: false, title: '', message: '',
   });
 
-  // Listener real-time status gembok/kunci sesi pusat & counter
+  // Listener real-time status gembok/kunci sesi dari Admin
   useEffect(() => {
     const lockDocId = sessionData.sessionCode || sessionData.sessionId || "SO-WRG-2026-09";
     const lockRef = doc(db, "round_locks", lockDocId);
@@ -42,6 +42,7 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
     return () => unsub();
   }, [sessionData.sessionCode, sessionData.sessionId, sessionData.primaryCounter]);
 
+  // Fetch tugas rak milik counter aktif
   useEffect(() => {
     const primaryCounter = (sessionData.primaryCounter || "Unassigned").toLowerCase().trim();
     const qTasks = query(
@@ -54,7 +55,7 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
       const groupedRacks: Record<string, RackItem> = {};
 
       taskList.forEach((task: any) => {
-        // Abaikan rak yang dikunci (misal SKU match pada ronde 2)
+        // Abaikan rak yang dikunci (misal SKU match pada ronde berikutnya)
         if (task.isLocked) return;
 
         const rackLoc = task.Location || 'Z02-10-A';
@@ -127,32 +128,27 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
     return matchesFilter && matchesSearch;
   });
 
-  const handleLockSubmit = async () => {
-    setIsLocking(true);
-    const lockDocId = sessionData.sessionCode || sessionData.sessionId || "SO-WRG-2026-09";
-
-    await setDoc(doc(db, "round_locks", lockDocId), {
-      status: 'LOCKED',
-      lockedBy: sessionData.primaryCounter || 'Counter',
-      timestamp: new Date().toLocaleString()
-    }, { merge: true });
+  // KONFIRMASI SELESAI TANPA MENGUNCI SESI FIRESTORE
+  const handleConfirmCompletion = () => {
+    setIsSubmitting(true);
 
     setTimeout(() => {
-      setIsLocking(false);
+      setIsSubmitting(false);
       setModal({
         isOpen: true,
         type: pendingCount + inProgressCount > 0 ? 'warning' : 'success',
-        title: 'Submit & Kunci Putaran 1',
-        message: 'Seluruh hasil rekonsiliasi hitungan fisik untuk Putaran 1 berhasil dikirim ke server WMS pusat.',
+        title: 'Konfirmasi Selesai Perhitungan Rak',
+        message: 'Seluruh hasil perhitungan fisik kamu telah tersimpan dan ter-sync ke server WMS pusat.',
         details: [
           { label: 'Sesi Aktif', value: sessionData.sessionName || 'SO Sesi Utama 2026' },
+          { label: 'Counter Active', value: sessionData.primaryCounter || 'bambang' },
           { label: 'Total Rak Selesai', value: `${completedCount} / ${totalRacks} Rak` },
           { label: 'Rak Berjalan/Pending', value: `${inProgressCount + pendingCount} Rak` },
           { label: 'Status Sinkronisasi', value: 'Terdaftar di Cloud WMS' },
         ],
-        confirmText: 'Selesai & Kunci Sesi',
+        confirmText: 'Selesai & Beri Tahu SPV',
       });
-    }, 600);
+    }, 400);
   };
 
   const partnerName = sessionData.partners?.[0];
@@ -174,9 +170,6 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
             <div className="flex flex-col min-w-0">
               <div className="flex items-center gap-space-xs">
                 <h1 className="font-headline-sm text-headline-sm text-on-surface truncate leading-tight">Countsheet List</h1>
-                <span className="px-space-sm py-space-xs rounded-full bg-secondary-fixed text-on-secondary-fixed-variant font-label-sm text-label-sm uppercase tracking-wider shrink-0">
-                  Round 1
-                </span>
               </div>
               <span className="font-label-md text-label-md text-on-surface-variant truncate">Stock Opname Ops</span>
             </div>
@@ -196,7 +189,7 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
 
       <main className="flex-1 flex flex-col relative w-full pt-20 pb-28 px-gutter-sm bg-surface max-w-md mx-auto">
         <div className="flex flex-col w-full pb-8 gap-space-md">
-          {/* BADGE WARNING TENTANG STATUS GEMBOK SESI */}
+          {/* BADGE NOTIFIKASI GEMBOK PUSAT */}
           {isSessionLocked && (
             <div className="bg-red-50 border border-red-200 text-red-700 p-3 rounded-xl flex items-center gap-2 text-xs font-bold shadow-xs">
               <span className="material-symbols-outlined text-red-600 text-[18px]">lock</span>
@@ -212,10 +205,6 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
                   {sessionData.sessionName || "SO Sesi Utama 2026"}
                 </h2>
               </div>
-              <span className="px-2.5 py-1 rounded-full bg-amber-100 text-amber-900 font-label-sm text-label-sm uppercase tracking-wider shrink-0 flex items-center gap-1 font-bold">
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-600"></span>
-                Round 1
-              </span>
             </div>
             <div className="flex items-center justify-between flex-wrap gap-2 pt-space-xs border-t border-surface-container-low">
               <div className="inline-flex items-center gap-1.5 bg-surface-container-low px-2.5 py-1 rounded-full">
@@ -300,8 +289,23 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
           </div>
 
           <div className="flex flex-col gap-2 pt-2">
-            <button type="button" disabled={isLocking} onClick={handleLockSubmit} className="w-full h-12 bg-primary text-on-primary rounded-xl font-label-lg text-label-lg flex items-center justify-center gap-2 shadow-lg cursor-pointer disabled:opacity-70">
-              {isLocking ? <><span className="material-symbols-outlined text-[18px] animate-spin">progress_activity</span><span>Memverifikasi Rak...</span></> : <><span className="material-symbols-outlined text-[18px]">lock</span><span>Submit &amp; Kunci Putaran 1</span></>}
+            <button
+              type="button"
+              disabled={isSubmitting}
+              onClick={handleConfirmCompletion}
+              className="w-full h-12 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-lg cursor-pointer transition-colors"
+            >
+              {isSubmitting ? (
+                <>
+                  <span className="material-symbols-outlined text-[18px] animate-spin">progress_activity</span>
+                  <span>Memverifikasi Rak...</span>
+                </>
+              ) : (
+                <>
+                  <span className="material-symbols-outlined text-[18px] text-emerald-400">check_circle</span>
+                  <span>Konfirmasi Selesai Perhitungan Rak</span>
+                </>
+              )}
             </button>
           </div>
         </div>
