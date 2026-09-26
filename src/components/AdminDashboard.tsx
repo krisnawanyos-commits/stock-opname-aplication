@@ -752,10 +752,17 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
                     triggerNotification("Reset data lama & mengunggah data baru ke Cloud...");
 
+                    // CLEAR MASTER TASKS LAMA
                     const oldDocsSnap = await getDocs(collection(db, "master_tasks"));
                     const cleanBatch = writeBatch(db);
                     oldDocsSnap.docs.forEach(oldDoc => cleanBatch.delete(oldDoc.ref));
                     await cleanBatch.commit();
+
+                    // WIPE CLEAN AUDIT LOGS DENGAN PROJEK BARU
+                    const oldAuditSnap = await getDocs(collection(db, "audit_logs"));
+                    const cleanAuditBatch = writeBatch(db);
+                    oldAuditSnap.docs.forEach(oldDoc => cleanAuditBatch.delete(oldDoc.ref));
+                    await cleanAuditBatch.commit();
 
                     const batch = writeBatch(db);
                     const newMasterList: MasterSKUItem[] = [];
@@ -831,7 +838,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
                     await batch.commit();
                     setMasterDataList(newMasterList);
-                    triggerNotification(`Upload Berhasil! ${newMasterList.length} SKU tersimpan di Firestore Cloud.`);
+                    triggerNotification(`Upload Berhasil! Master Task & Audit Trail dibersihkan untuk project baru.`);
                     resolve(newMasterList);
                 } catch (err: any) {
                     console.error("Batch commit error:", err);
@@ -1076,7 +1083,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         c.UPC1.toLowerCase().includes(catalogSearch.toLowerCase())
     );
 
-    // FIX KALKULASI PROGRESS: Sertakan semua task terhitung (termasuk temuan baru)
     const totalSKUs = masterDataList.length;
     const totalCounted = masterDataList.filter(i => i.isCounted).length;
     const overallPercentage = totalSKUs > 0 ? Math.round((totalCounted / totalSKUs) * 100) : 0;

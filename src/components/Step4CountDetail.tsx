@@ -47,6 +47,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     isOpen: false, title: '', message: '',
   });
 
+  // 1. LISTEN LOCK STATUS SESI GLOBAL & COUNTER
   useEffect(() => {
     const lockDocId = sessionData.sessionCode || sessionData.sessionId || "SO-WRG-2026-09";
     const lockRef = doc(db, "round_locks", lockDocId);
@@ -66,6 +67,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     return () => unsub();
   }, [sessionData.sessionCode, sessionData.sessionId, sessionData.primaryCounter]);
 
+  // 2. FETCH KATALOG MASTER SKU
   useEffect(() => {
     const unsubMaster = onSnapshot(collection(db, "master_tasks"), (snapshot) => {
       const items = snapshot.docs.map(d => d.data());
@@ -74,6 +76,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     return () => unsubMaster();
   }, []);
 
+  // 3. LISTEN MASTER TASKS RAK AKTIF
   useEffect(() => {
     const primaryCounter = (sessionData.primaryCounter || "Unassigned").toLowerCase().trim();
     const targetLocation = rack.rackNumber || rack.id;
@@ -158,6 +161,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     return () => unsubscribe();
   }, [rack, sessionData]);
 
+  // STATE UNMAPPED ITEM
   const [unmappedBarcode, setUnmappedBarcode] = useState<string>('');
   const [unmappedQty, setUnmappedQty] = useState<string>("1");
   const [unmappedUnit, setUnmappedUnit] = useState<'PCS' | 'CARTON'>('PCS');
@@ -166,8 +170,9 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
   const [unmappedDesc, setUnmappedDesc] = useState<string>('');
   const [unmappedPhotoUrl, setUnmappedPhotoUrl] = useState<string>('');
 
+  // STATE BAD STOCK PADA UNMAPPED (STRING KOSONG UNTUK MENCEGAH "01")
   const [unmappedIsBadStock, setUnmappedIsBadStock] = useState<boolean>(false);
-  const [unmappedBadQty, setUnmappedBadQty] = useState<string>("0");
+  const [unmappedBadQty, setUnmappedBadQty] = useState<string>("");
   const [unmappedBadRemarks, setUnmappedBadRemarks] = useState<string>('');
 
   const [unmappedList, setUnmappedList] = useState<UnmappedItem[]>([]);
@@ -227,6 +232,13 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     );
   };
 
+  const handleInputBadQtyText = (rawVal: string) => {
+    let cleanVal = rawVal.replace(/^0+/, '');
+    if (cleanVal === "" && rawVal !== "") cleanVal = "0";
+    if (rawVal === "") cleanVal = "";
+    setUnmappedBadQty(cleanVal);
+  };
+
   const updateItemField = (index: number, field: keyof GroupedSKUItem, value: any) => {
     if (isSessionLocked) return;
     setSkuList((prev) =>
@@ -254,7 +266,8 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     }
   };
 
-  const handleAddUnmapped = () => {
+  // TAMBAH UNMAPPED & SYNC LANGSUNG KE FIRESTORE
+  const handleAddUnmapped = async () => {
     if (isSessionLocked) return;
     if (!unmappedBarcode.trim()) {
       setModal({ isOpen: true, type: 'warning', title: 'Barcode Wajib Diisi', message: 'Mohon scan atau ketik barcode temuan terlebih dahulu.' });
@@ -268,32 +281,87 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
 
     const qtyNumber = parseInt(unmappedQty || "0", 10);
     const badQtyNum = unmappedIsBadStock ? parseInt(unmappedBadQty || "0", 10) : 0;
+    const cleanCounter = (sessionData.primaryCounter || 'Unassigned').toLowerCase().trim();
 
-    const newItem: UnmappedItem & { badQty?: number; badRemarks?: string; skuBrand?: string } = {
+    // HAPUS PREFIX "TEMUAN-" DARI KOLOM SKU
+    const unmSku = matchedMasterSKU?.SKU ? matchedMasterSKU.SKU.toUpperCase().trim() : unmappedBarcode.trim();
+    const unmOwner = matchedMasterSKU?.Owner || 'DDI';
+    const unmPrice = parseInt(matchedMasterSKU?.unitPrice) || 0;
+    const unmBrand = matchedMasterSKU?.SKUBrand || 'General';
+    const unmDesc = unmappedDesc.trim() || (matchedMasterSKU ? (matchedMasterSKU.Description || matchedMasterSKU.SKU) : 'Barang Fisik Baru Unmapped');
+    const totalSubmitted = qtyNumber + badQtyNum;
+
+    const newItem: UnmappedItem = {
       id: Date.now().toString(),
       barcode: unmappedBarcode.trim(),
-      name: unmappedDesc.trim() || (matchedMasterSKU ? (matchedMasterSKU.Description || matchedMasterSKU.SKU) : 'Barang Fisik Baru Unmapped'),
-      qty: qtyNumber > 0 ? qtyNumber : 1,
-      badQty: badQtyNum,
-      badRemarks: unmappedBadRemarks,
+      name: unmDesc,
+      qty: totalSubmitted,
       uom: unmappedUnit,
       expDate: unmappedExpDate,
       batchNumber: unmappedBatchNumber,
       photoUrl: unmappedPhotoUrl,
-      skuBrand: matchedMasterSKU?.SKUBrand || 'General'
     };
 
+    // 1. Simpan ke local state unmappedList agar dibaca oleh UI
     setUnmappedList((prev) => [...prev, newItem]);
+
+    // 2. Direct Sync ke Firestore
+    const taskId = `${rack.rackNumber}_${unmSku}_TEMUAN_${Date.now()}`;
+    const taskRef = doc(db, "master_tasks", taskId);
+
+    const batch = writeBatch(db);
+    batch.set(taskRef, {
+      Owner: unmOwner,
+      SKU: unmSku,
+      Description: unmDesc,
+      UPC1: unmappedBarcode.trim(),
+      UPC2: '',
+      SKUBrand: unmBrand,
+      Location: rack.rackNumber,
+      counter: cleanCounter,
+      currentRound: 1,
+      Qty: 0,
+      QTY_ACTUAL: totalSubmitted,
+      QTY_GOOD: qtyNumber,
+      QTY_BAD: badQtyNum,
+      isCounted: true,
+      unitPrice: unmPrice,
+      badRemarks: unmappedBadRemarks ? `[BAD STOCK] ${unmappedBadRemarks}` : `[BARANG TEMUAN FISIK] Batch: ${unmappedBatchNumber}`,
+      updatedAt: new Date().toISOString()
+    }, { merge: true });
+
+    const logId = `${sessionData.sessionCode || 'SO'}_TEMUAN_${rack.rackNumber}_${unmSku}`;
+    const auditRef = doc(db, "audit_logs", logId);
+    batch.set(auditRef, {
+      timestamp: new Date().toISOString(),
+      rackLocation: rack.rackNumber,
+      ownerSku: unmOwner,
+      sku: unmSku,
+      description: unmDesc,
+      upc1: unmappedBarcode.trim(),
+      upc2: '-',
+      counterPic: cleanCounter,
+      round: 1,
+      qtyGood: qtyNumber,
+      qtyBad: badQtyNum,
+      totalFinalSubmitted: totalSubmitted,
+      edActual: unmappedExpDate || '-',
+      remarks: unmappedBadRemarks ? `[BAD STOCK] ${unmappedBadRemarks}` : `[ITEM TEMUAN] Batch: ${unmappedBatchNumber}`
+    }, { merge: true });
+
+    await batch.commit();
+
     setUnmappedBarcode('');
     setUnmappedDesc('');
     setUnmappedPhotoUrl('');
     setUnmappedQty("1");
     setUnmappedIsBadStock(false);
-    setUnmappedBadQty("0");
+    setUnmappedBadQty("");
     setUnmappedBadRemarks('');
-    setModal({ isOpen: true, type: 'success', title: 'Item Temuan Ditambahkan', message: 'Item berhasil disimpan ke daftar temuan rak ini.' });
+    setModal({ isOpen: true, type: 'success', title: 'Item Temuan Tersimpan!', message: `Item ${unmSku} pada Rak ${rack.rackNumber} langsung tersimpan ke Cloud. Status rak resmi Selesai!` });
   };
 
+  // FUNGSI HAPUS UNMAPPED DARI STATE
   const handleDeleteUnmapped = (id: string) => {
     if (isSessionLocked) return;
     setUnmappedList((prev) => prev.filter((item) => item.id !== id));
@@ -346,60 +414,6 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
           totalFinalSubmitted: totalSubmitted,
           edActual: skuItem.expDateActual || '-',
           remarks: skuItem.badRemarks || '-'
-        }, { merge: true });
-      });
-
-      // FIX PEMBUATAN SKU DARI BARCODE MATCHED / BARCODE ASLI TANPA "TEMUAN-"
-      unmappedList.forEach((unm: any) => {
-        const unmSku = matchedMasterSKU?.SKU ? matchedMasterSKU.SKU.toUpperCase().trim() : unm.barcode.trim();
-        const unmOwner = matchedMasterSKU?.Owner || 'DDI';
-        const unmPrice = parseInt(matchedMasterSKU?.unitPrice) || 0;
-        const unmBrand = matchedMasterSKU?.SKUBrand || unm.skuBrand || 'General';
-        const unmDesc = unm.name;
-        const goodQty = unm.qty || 0;
-        const badQty = unm.badQty || 0;
-        const totalSubmitted = goodQty + badQty;
-
-        const taskId = `${rack.rackNumber}_${unmSku}_TEMUAN_${Date.now()}`;
-        const taskRef = doc(db, "master_tasks", taskId);
-
-        batch.set(taskRef, {
-          Owner: unmOwner,
-          SKU: unmSku,
-          Description: unmDesc,
-          UPC1: unm.barcode,
-          UPC2: '',
-          SKUBrand: unmBrand,
-          Location: rack.rackNumber,
-          counter: cleanCounter,
-          currentRound: 1,
-          Qty: 0,
-          QTY_ACTUAL: totalSubmitted,
-          QTY_GOOD: goodQty,
-          QTY_BAD: badQty,
-          isCounted: true,
-          unitPrice: unmPrice,
-          badRemarks: unm.badRemarks ? `[BAD STOCK] ${unm.badRemarks}` : `[BARANG TEMUAN FISIK] Batch: ${unm.batchNumber}`,
-          updatedAt: new Date().toISOString()
-        }, { merge: true });
-
-        const logId = `${sessionData.sessionCode || 'SO'}_TEMUAN_${rack.rackNumber}_${unmSku}`;
-        const auditRef = doc(db, "audit_logs", logId);
-        batch.set(auditRef, {
-          timestamp: new Date().toISOString(),
-          rackLocation: rack.rackNumber,
-          ownerSku: unmOwner,
-          sku: unmSku, // SKU murni (e.g. 3316381 atau 0300875180228)
-          description: unmDesc,
-          upc1: unm.barcode,
-          upc2: '-',
-          counterPic: cleanCounter,
-          round: 1,
-          qtyGood: goodQty,
-          qtyBad: badQty,
-          totalFinalSubmitted: totalSubmitted,
-          edActual: unm.expDate || '-',
-          remarks: unm.badRemarks ? `[BAD STOCK] ${unm.badRemarks}` : `[ITEM TEMUAN] Batch: ${unm.batchNumber}`
         }, { merge: true });
       });
 
@@ -461,6 +475,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handlePhotoCaptured} />
       <input ref={barcodeScanInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleBarcodeCaptured} />
 
+      {/* HEADER HP COUNTER */}
       <header className="fixed top-0 w-full z-50 bg-white/95 border-b border-slate-200 backdrop-blur-md pt-safe shadow-xs">
         <div className="h-32 px-margin flex flex-col justify-center gap-space-xs max-w-md mx-auto">
           <div className="flex items-center justify-between">
@@ -496,6 +511,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
         </div>
       </header>
 
+      {/* KONTEN UTAMA DENGAN SELURUH KARTU SKU & DRAWER UNMAPPED */}
       <main className="flex-1 flex flex-col relative w-full px-margin pt-36 pb-32 bg-slate-50 min-h-screen max-w-md mx-auto">
         <div className="flex flex-col w-full pb-12 space-y-4">
 
@@ -511,6 +527,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             </div>
           </div>
 
+          {/* RENDER KARTU SKU BAWAAN MASTER WMS */}
           {skuList.map((currentSku, idx) => (
             <div key={currentSku.sku} className="bg-white rounded-xl p-space-md shadow-xs border border-slate-200 space-y-space-md relative overflow-hidden">
               <div className="absolute top-0 left-0 right-0 h-1.5 bg-blue-600"></div>
@@ -576,7 +593,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                 )}
               </div>
 
-              {/* INPUT KONDISI BAIK */}
+              {/* INPUT KONDISI BAIK (QTY GOOD) */}
               <div className="bg-slate-50 border border-slate-200 p-space-md rounded-xl space-y-space-sm">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-blue-600"></span><span className="font-headline-sm text-slate-900 font-bold">Kondisi Baik (Qty Good)</span></div>
@@ -680,6 +697,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                   </div>
                 </div>
 
+                {/* FORM BAD STOCK UNMAPPED */}
                 <div className="p-3 bg-amber-50/80 border border-amber-200 rounded-xl space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold text-amber-900">Temuan Ini Memiliki Bad Stock?</span>
@@ -702,7 +720,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                           inputMode="numeric"
                           disabled={isSessionLocked}
                           value={unmappedBadQty}
-                          onChange={(e) => setUnmappedBadQty(e.target.value)}
+                          onChange={(e) => handleInputBadQtyText(e.target.value)}
                           placeholder="0"
                           className="w-full h-9 border border-amber-300 rounded-lg text-xs font-bold text-center bg-white"
                         />
@@ -727,22 +745,28 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                   <span>{unmappedPhotoUrl ? 'Foto Terlampir ✓' : (!isBarcodeInSystem ? 'Ambil Foto Kamera (Wajib)' : 'Ambil Foto Kamera (Opsional)')}</span>
                 </button>
 
-                <button type="button" disabled={isSessionLocked} onClick={handleAddUnmapped} className={`w-full min-h-11 text-white font-bold rounded-lg cursor-pointer ${isSessionLocked ? 'bg-slate-400 opacity-50 cursor-not-allowed' : 'bg-blue-600'}`}>+ Tambahkan Ke Temuan</button>
+                <button type="button" disabled={isSessionLocked} onClick={handleAddUnmapped} className={`w-full min-h-11 text-white font-bold rounded-lg cursor-pointer ${isSessionLocked ? 'bg-slate-400 opacity-50 cursor-not-allowed' : 'bg-blue-600'}`}>+ Tambahkan Ke Temuan &amp; Simpan</button>
               </div>
             )}
           </div>
 
+          {/* RENDER DAFTAR UNMAPPED UNTUK MEMBACA STATE UNMAPPEDLIST & HANDLEDELETEUNMAPPED */}
           {unmappedList.length > 0 && (
             <div className="bg-white rounded-xl p-space-md shadow-xs border border-slate-200 space-y-2">
               <h4 className="font-bold text-sm text-slate-800 border-b pb-2">Daftar Temuan di Rak Ini ({unmappedList.length})</h4>
-              {unmappedList.map((item: any) => (
-                <div key={item.id} className="p-2.5 bg-slate-50 border rounded-lg flex items-center justify-between text-xs">
+              {unmappedList.map((item) => (
+                <div key={item.id} className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg flex items-center justify-between text-xs">
                   <div>
-                    <div className="font-bold text-blue-700">{item.barcode} (Good: {item.qty} | Bad: {item.badQty || 0} {item.uom})</div>
+                    <div className="font-bold text-blue-700">{item.barcode} ({item.qty} {item.uom})</div>
                     <div className="text-slate-600 font-medium">{item.name}</div>
-                    {item.badRemarks && <div className="text-red-600 font-bold text-[10px]">⚠️ {item.badRemarks}</div>}
                   </div>
-                  <button type="button" disabled={isSessionLocked} onClick={() => handleDeleteUnmapped(item.id)} className={`p-1 text-rose-600 hover:bg-rose-50 rounded cursor-pointer ${isSessionLocked ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                  <button
+                    type="button"
+                    disabled={isSessionLocked}
+                    onClick={() => handleDeleteUnmapped(item.id)}
+                    className={`p-1 text-rose-600 hover:bg-rose-50 rounded cursor-pointer ${isSessionLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    title="Hapus Temuan"
+                  >
                     <span className="material-symbols-outlined text-[18px]">delete</span>
                   </button>
                 </div>
