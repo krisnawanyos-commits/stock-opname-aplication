@@ -112,7 +112,7 @@ export default function App() {
               role: (role === 'owner' || role === 'spv' || username === 'owner') ? 'admin' : 'counter'
             }));
 
-            // BILA USER OWNER / SPV -> ARTIKAN LANGSUNG KE DASHBOARD ADMIN
+            // BILA USER OWNER / SPV -> LANGSUNG KE DASHBOARD ADMIN
             if (role === 'owner' || role === 'spv' || username === 'owner') {
               setCurrentStep('admin');
             } else {
@@ -128,7 +128,7 @@ export default function App() {
           onSwitchToCounterView={() => {
             setSessionData(prev => ({
               ...prev,
-              primaryCounter: 'bambang'
+              primaryCounter: currentUser?.username || 'bambang'
             }));
             setCurrentStep('admin_demo');
           }}

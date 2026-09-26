@@ -4,6 +4,7 @@ import {
     collection, onSnapshot, doc, setDoc, deleteDoc, writeBatch, getDocs
 } from 'firebase/firestore';
 import * as XLSX from 'xlsx';
+import emailjs from '@emailjs/browser';
 import {
     Users, Database, Upload, ShieldCheck, Check, FileSpreadsheet,
     PieChart, ChevronUp, Plus, Trash2, MapPin, Save,
@@ -221,7 +222,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         const unsub4 = onSnapshot(collection(db, "warehouses"), (snap) => setWarehouseList(snap.docs.map(d => ({ id: d.id, ...d.data() } as LocationOption))));
         const unsub5 = onSnapshot(collection(db, "consignment_stores"), (snap) => setConsignmentStoreList(snap.docs.map(d => ({ id: d.id, ...d.data() } as LocationOption))));
 
-        // Listen Profile Owner Real-Time
         const unsubOwner = onSnapshot(doc(db, "owner_profile", "owner_default"), (snap) => {
             if (snap.exists()) {
                 const oData = snap.data();
@@ -239,7 +239,11 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); unsubOwner(); unsubAudit(); };
     }, []);
 
-    // UPDATE PROFIL & PIN OWNER KE FIRESTORE
+    const combinedLocationOptions = [
+        ...warehouseList.map(w => ({ value: w.id, label: `[Gudang WMS] ${w.name}` })),
+        ...consignmentStoreList.map(s => ({ value: s.id, label: `[Store Offline] ${s.name}` }))
+    ];
+
     const handleUpdateOwnerAccount = async () => {
         if (!ownerNewEmail.trim() || !ownerNewPin.trim()) {
             triggerNotification('Email dan PIN Baru (4-Digit) wajib diisi.');
@@ -262,7 +266,91 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         }
     };
 
-    // MAPPING DATA MASTER TASKS
+    const handleSaveEditedGlobalAccount = async () => {
+        if (!editingAccount) return;
+        const uName = editingAccount.username.toLowerCase().trim();
+        await setDoc(doc(db, "global_accounts", uName), {
+            username: uName,
+            name: editingAccount.name,
+            email: editingAccount.email,
+            pin: editingAccount.pin || '1234'
+        }, { merge: true });
+        setEditingAccount(null);
+        triggerNotification(`Akun KTP ${uName} berhasil diperbarui!`);
+    };
+
+    const handleUploadBulkKTPAccounts = (file: File) => {
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+            try {
+                const data = new Uint8Array(e.target?.result as ArrayBuffer);
+                const workbook = XLSX.read(data, { type: 'array' });
+                const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+                const json = XLSX.utils.sheet_to_json(worksheet) as any[];
+
+                if (json.length === 0) {
+                    triggerNotification("File KTP kosong atau format salah.");
+                    return;
+                }
+
+                const batch = writeBatch(db);
+                let count = 0;
+
+                json.forEach((row: any) => {
+                    const uName = (row['Username'] || row['username'] || row['USERNAME'] || '').toString().toLowerCase().trim();
+                    const name = (row['Nama'] || row['Name'] || row['NAMA'] || uName).toString().trim();
+                    const pin = (row['PIN'] || row['Pin'] || row['pin'] || '1234').toString().trim();
+                    const email = (row['Email'] || row['email'] || `${uName}@anymindgroup.com`).toString().trim();
+
+                    if (uName) {
+                        const accRef = doc(db, "global_accounts", uName);
+                        batch.set(accRef, {
+                            username: uName,
+                            name: name,
+                            pin: pin,
+                            email: email,
+                            role: 'counter'
+                        }, { merge: true });
+                        count++;
+                    }
+                });
+
+                await batch.commit();
+                triggerNotification(`Berhasil upload ${count} Akun KTP Cloud Massal!`);
+            } catch (err: any) {
+                console.error("Bulk KTP Upload Error:", err);
+                triggerNotification("Gagal upload KTP Massal. Periksa format file.");
+            }
+        };
+        reader.readAsArrayBuffer(file);
+    };
+
+    const handleDownloadKTPTemplate = () => {
+        const template = [
+            { Username: 'bambang.so', Nama: 'Bambang Sudrajat', PIN: '1234', Email: 'bambang@anymindgroup.com' },
+            { Username: 'budi.so', Nama: 'Budi Prasetyo', PIN: '1234', Email: 'budi@anymindgroup.com' }
+        ];
+        const ws = XLSX.utils.json_to_sheet(template);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Template_KTP_Cloud");
+        XLSX.writeFile(wb, "Template_Import_KTP_Massal.xlsx");
+        triggerNotification("Template Import KTP (.xlsx) diunduh!");
+    };
+
+    const handleGenerateCredentialsText = () => {
+        if (globalAccounts.length === 0) {
+            triggerNotification("Belum ada KTP terdaftar.");
+            return;
+        }
+
+        let text = "📋 *DAFTAR KREDENSIAL LOGIN STOCK OPNAME 360*\n\n";
+        globalAccounts.forEach((acc, i) => {
+            text += `${i + 1}. *${acc.name}*\n   Username: \`${acc.username}\`\n   PIN: \`${acc.pin}\`\n\n`;
+        });
+
+        setCredentialsModalText(text);
+    };
+
     useEffect(() => {
         if (!activeProject) return;
 
@@ -332,7 +420,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         return () => { unsubscribe(); lockUnsubscribe(); };
     }, [activeProject]);
 
-    // DEPLOY RONDE PER-COUNTER PIC
     const handleDeployNextRoundForCounter = async (targetCounter: string) => {
         if (effectiveRole === 'spv') {
             triggerNotification('Hanya Super Admin/Owner yang memiliki hak deploy ronde.');
@@ -576,101 +663,23 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         setTransferTargetCounter('');
     };
 
-    const handleUploadBulkKTPAccounts = (file: File) => {
-        const reader = new FileReader();
-        reader.onload = async (e) => {
-            try {
-                const data = new Uint8Array(e.target?.result as ArrayBuffer);
-                const workbook = XLSX.read(data, { type: 'array' });
-                const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-                const json = XLSX.utils.sheet_to_json(worksheet) as any[];
+    const handleSendDirectEmailJS = async (recipientEmail: string, username: string, pin: string, name: string) => {
+        triggerNotification(`Mengirim email langsung ke ${recipientEmail}...`);
 
-                if (json.length === 0) {
-                    triggerNotification("File KTP kosong atau format salah.");
-                    return;
-                }
-
-                const batch = writeBatch(db);
-                let count = 0;
-
-                json.forEach((row: any) => {
-                    const uName = (row['Username'] || row['username'] || row['USERNAME'] || '').toString().toLowerCase().trim();
-                    const name = (row['Nama'] || row['Name'] || row['NAMA'] || uName).toString().trim();
-                    const pin = (row['PIN'] || row['Pin'] || row['pin'] || '1234').toString().trim();
-                    const email = (row['Email'] || row['email'] || `${uName}@anymindgroup.com`).toString().trim();
-
-                    if (uName) {
-                        const accRef = doc(db, "global_accounts", uName);
-                        batch.set(accRef, {
-                            username: uName,
-                            name: name,
-                            pin: pin,
-                            email: email,
-                            role: 'counter'
-                        }, { merge: true });
-                        count++;
-                    }
-                });
-
-                await batch.commit();
-                triggerNotification(`Berhasil upload ${count} Akun KTP Cloud Massal!`);
-            } catch (err: any) {
-                console.error("Bulk KTP Upload Error:", err);
-                triggerNotification("Gagal upload KTP Massal. Periksa format file.");
-            }
-        };
-        reader.readAsArrayBuffer(file);
-    };
-
-    const handleDownloadKTPTemplate = () => {
-        const template = [
-            { Username: 'bambang.so', Nama: 'Bambang Sudrajat', PIN: '1234', Email: 'bambang@anymindgroup.com' },
-            { Username: 'budi.so', Nama: 'Budi Prasetyo', PIN: '1234', Email: 'budi@anymindgroup.com' }
-        ];
-        const ws = XLSX.utils.json_to_sheet(template);
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, "Template_KTP_Cloud");
-        XLSX.writeFile(wb, "Template_Import_KTP_Massal.xlsx");
-        triggerNotification("Template Import KTP (.xlsx) diunduh!");
-    };
-
-    const handleGenerateCredentialsText = () => {
-        if (globalAccounts.length === 0) {
-            triggerNotification("Belum ada KTP terdaftar.");
-            return;
-        }
-
-        let text = "📋 *DAFTAR KREDENSIAL LOGIN STOCK OPNAME 360*\n\n";
-        globalAccounts.forEach((acc, i) => {
-            text += `${i + 1}. *${acc.name}*\n   Username: \`${acc.username}\`\n   PIN: \`${acc.pin}\`\n\n`;
-        });
-
-        setCredentialsModalText(text);
-    };
-
-    const combinedLocationOptions = [
-        ...warehouseList.map(w => ({ value: w.id, label: `[Gudang WMS] ${w.name}` })),
-        ...consignmentStoreList.map(s => ({ value: s.id, label: `[Store Offline] ${s.name}` }))
-    ];
-
-    const handleSaveEditedGlobalAccount = async () => {
-        if (!editingAccount) return;
-        const uName = editingAccount.username.toLowerCase().trim();
-        await setDoc(doc(db, "global_accounts", uName), {
-            username: uName,
-            name: editingAccount.name,
-            email: editingAccount.email,
-            pin: editingAccount.pin || '1234'
-        }, { merge: true });
-        setEditingAccount(null);
-        triggerNotification(`Akun KTP ${uName} berhasil diperbarui!`);
-    };
-
-    const triggerMailto = (url: string) => {
         try {
-            window.location.href = url;
-        } catch (e) {
-            console.error("Error triggering mailto:", e);
+            const templateParams = {
+                to_email: recipientEmail,
+                to_name: name,
+                username: username,
+                pin: pin,
+                app_name: 'Stock Opname 360'
+            };
+
+            await emailjs.send('YOUR_SERVICE_ID', 'YOUR_TEMPLATE_ID', templateParams, 'YOUR_PUBLIC_KEY');
+            triggerNotification(`✅ Email Kredensial Berhasil Terkirim ke ${recipientEmail}!`);
+        } catch (err: any) {
+            console.error("EmailJS Error:", err);
+            triggerNotification(`❌ Gagal Mengirim Email: ${err?.text || 'Periksa konfigurasi EmailJS'}`);
         }
     };
 
@@ -685,13 +694,9 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             return;
         }
 
-        const emailList = validAccounts.map(a => a.email.trim()).join(',');
-        const subject = encodeURIComponent("Akses Login Stock Opname 360");
-        const bodyContent = encodeURIComponent("Halo Tim,\n\nBerikut kredensial akun kamu untuk masuk ke Stock Opname 360. Gunakan Username dan PIN yang terdaftar.\n\nTerima kasih.");
-
-        const mailtoUrl = `mailto:?bcc=${emailList}&subject=${subject}&body=${bodyContent}`;
-        triggerMailto(mailtoUrl);
-        triggerNotification(`Membuka aplikasi email blast ke ${validAccounts.length} akun...`);
+        validAccounts.forEach(acc => {
+            handleSendDirectEmailJS(acc.email, acc.username, acc.pin, acc.name);
+        });
     };
 
     const handleSendIndividualEmail = (acc: GlobalAccount) => {
@@ -699,12 +704,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             triggerNotification(`Akun ${acc.username} tidak memiliki alamat email!`);
             return;
         }
-        const subject = encodeURIComponent(`Akses Login Stock Opname 360 - ${acc.name}`);
-        const bodyText = encodeURIComponent(`Halo ${acc.name},\n\nBerikut kredensial akun kamu:\nUsername: ${acc.username}\nPIN: ${acc.pin}\n\nTerima kasih.`);
-        const mailtoUrl = `mailto:${acc.email.trim()}?subject=${subject}&body=${bodyText}`;
-
-        triggerMailto(mailtoUrl);
-        triggerNotification(`Membuka email ke ${acc.email}...`);
+        handleSendDirectEmailJS(acc.email.trim(), acc.username, acc.pin, acc.name);
     };
 
     const [newAccUser, setNewAccUser] = useState('');
@@ -1554,7 +1554,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                     {effectiveRole === 'owner' ? (
                                         <span className="bg-indigo-100 text-indigo-800 text-[10px] font-black px-2.5 py-1 rounded-lg flex items-center space-x-1 border border-indigo-200">
                                             <ShieldCheck className="w-3.5 h-3.5" />
-                                            <span>SUPER ADMIN</span>
+                                            <span>SUPER ADMIN ({ownerNewName})</span>
                                         </span>
                                     ) : (
                                         <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2.5 py-1 rounded-lg flex items-center space-x-1 border border-emerald-200">

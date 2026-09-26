@@ -28,7 +28,7 @@ export default function Step1Login({ onSuccessLogin }: Step1LoginProps) {
     }
 
     try {
-      // 1. Cek Login Khusus Owner Profile
+      // 1. Cek Login Owner Profile
       if (cleanUsername === 'owner' || cleanUsername === 'admin') {
         const ownerDocRef = doc(db, "owner_profile", "owner_default");
         const ownerSnap = await getDoc(ownerDocRef);
@@ -62,7 +62,7 @@ export default function Step1Login({ onSuccessLogin }: Step1LoginProps) {
         const storedPin = (accData.pin || '1234').toString().trim();
 
         if (cleanPin === storedPin) {
-          // 3. Cek apakah user di-assign sebagai SPV di project_teams
+          // 3. Cek apakah user di-assign sebagai SPV di project_teams atau global_accounts
           let assignedRole: UserRole = accData.role || 'counter';
 
           const teamQuery = query(

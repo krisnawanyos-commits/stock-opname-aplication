@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { db } from '../firebase';
-import { collection, onSnapshot, query, where, doc } from 'firebase/firestore';
+import { collection, onSnapshot, query, where, doc, setDoc } from 'firebase/firestore';
 import type { SessionData, RackItem, CustomModalState } from '../types';
 import CustomModal from './CustomModal';
 
@@ -18,11 +18,15 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [isSessionLocked, setIsSessionLocked] = useState<boolean>(false);
 
+  // STATE TAMBAH RAK/BIN BARU
+  const [showAddRackModal, setShowAddRackModal] = useState<boolean>(false);
+  const [newRackNumber, setNewRackNumber] = useState<string>('');
+  const [newRackZone, setNewRackZone] = useState<string>('RACKING');
+
   const [modal, setModal] = useState<CustomModalState>({
     isOpen: false, title: '', message: '',
   });
 
-  // Listener real-time status gembok/kunci sesi dari Admin
   useEffect(() => {
     const lockDocId = sessionData.sessionCode || sessionData.sessionId || "SO-WRG-2026-09";
     const lockRef = doc(db, "round_locks", lockDocId);
@@ -42,7 +46,6 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
     return () => unsub();
   }, [sessionData.sessionCode, sessionData.sessionId, sessionData.primaryCounter]);
 
-  // Fetch tugas rak milik counter aktif
   useEffect(() => {
     const primaryCounter = (sessionData.primaryCounter || "Unassigned").toLowerCase().trim();
     const qTasks = query(
@@ -55,7 +58,6 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
       const groupedRacks: Record<string, RackItem> = {};
 
       taskList.forEach((task: any) => {
-        // Abaikan rak yang dikunci (misal SKU match pada ronde berikutnya)
         if (task.isLocked) return;
 
         const rackLoc = task.Location || 'Z02-10-A';
@@ -69,11 +71,11 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
             level: parseInt(task.level || '1', 10),
             zone: task.Zone || 'RACKING',
             status: 'pending',
-            totalSKU: 1,
+            totalSKU: task.SKU ? 1 : 0,
             countedSKU: isCounted ? 1 : 0
           };
         } else {
-          existingRack.totalSKU = (existingRack.totalSKU || 0) + 1;
+          if (task.SKU) existingRack.totalSKU = (existingRack.totalSKU || 0) + 1;
           if (isCounted) {
             existingRack.countedSKU = (existingRack.countedSKU || 0) + 1;
           }
@@ -105,6 +107,37 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
     return () => unsubscribe();
   }, [sessionData]);
 
+  // PROSES TAMBAH RAK/BIN BARU KE FIRESTORE
+  const handleCreateNewRack = async () => {
+    if (!newRackNumber.trim()) return;
+
+    const cleanRack = newRackNumber.trim().toUpperCase();
+    const cleanCounter = (sessionData.primaryCounter || 'Unassigned').toLowerCase().trim();
+
+    const taskId = `${cleanRack}_BARU_${Date.now()}`;
+    const taskRef = doc(db, "master_tasks", taskId);
+
+    await setDoc(taskRef, {
+      Location: cleanRack,
+      Zone: newRackZone,
+      counter: cleanCounter,
+      currentRound: 1,
+      Qty: 0,
+      isCounted: false,
+      Remarks: '[LOKASI RAK BARU DITAMBAHKAN MANUAL]',
+      createdAt: new Date().toISOString()
+    });
+
+    setNewRackNumber('');
+    setShowAddRackModal(false);
+    setModal({
+      isOpen: true,
+      type: 'success',
+      title: 'Lokasi Rak Baru Berhasil Dibuat!',
+      message: `Rak ${cleanRack} telah ditambahkan ke tugas ${cleanCounter}. Silakan klik rak untuk memasukkan temuan barang.`,
+    });
+  };
+
   const completedCount = racks.filter((r) => r.status === 'completed').length;
   const inProgressCount = racks.filter((r) => r.status === 'in-progress').length;
   const pendingCount = racks.filter((r) => r.status === 'pending').length;
@@ -128,7 +161,6 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
     return matchesFilter && matchesSearch;
   });
 
-  // KONFIRMASI SELESAI TANPA MENGUNCI SESI FIRESTORE
   const handleConfirmCompletion = () => {
     setIsSubmitting(true);
 
@@ -156,6 +188,44 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
   return (
     <div className="bg-surface font-body-md text-on-surface flex flex-col min-h-screen">
       <CustomModal modal={modal} onClose={() => setModal((prev) => ({ ...prev, isOpen: false }))} />
+
+      {/* MODAL POPUP TAMBAH LOKASI RAK BARU */}
+      {showAddRackModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl border border-slate-200">
+            <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+              <h3 className="text-base font-black text-slate-900">Tambah Lokasi Rak Baru</h3>
+              <button onClick={() => setShowAddRackModal(false)} className="p-2 text-slate-400 hover:text-slate-700 bg-slate-100 rounded-xl">✕</button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1">Nomor / Kode Rak Baru:</label>
+                <input
+                  type="text"
+                  placeholder="Misal: Z99-99-C"
+                  value={newRackNumber}
+                  onChange={(e) => setNewRackNumber(e.target.value)}
+                  className="w-full h-11 px-3 bg-slate-50 border rounded-xl text-xs font-bold font-mono outline-none"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1">Zona Rak:</label>
+                <input
+                  type="text"
+                  placeholder="Misal: FOOD / RACKING"
+                  value={newRackZone}
+                  onChange={(e) => setNewRackZone(e.target.value)}
+                  className="w-full h-11 px-3 bg-slate-50 border rounded-xl text-xs font-bold outline-none"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end space-x-2 pt-2">
+              <button onClick={() => setShowAddRackModal(false)} className="px-4 py-2 bg-slate-100 text-slate-700 rounded-xl text-xs font-bold">Batal</button>
+              <button onClick={handleCreateNewRack} className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-extrabold shadow-md">Simpan Rak Baru</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <header className="fixed top-0 w-full z-50 pt-safe bg-surface/80 backdrop-blur-xl shadow-[0_1px_8px_rgba(0,0,0,0.04)]">
         <div className="h-16 px-gutter-sm flex items-center justify-between gap-space-sm max-w-md mx-auto">
@@ -189,7 +259,6 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
 
       <main className="flex-1 flex flex-col relative w-full pt-20 pb-28 px-gutter-sm bg-surface max-w-md mx-auto">
         <div className="flex flex-col w-full pb-8 gap-space-md">
-          {/* BADGE NOTIFIKASI GEMBOK PUSAT */}
           {isSessionLocked && (
             <div className="bg-red-50 border border-red-200 text-red-700 p-3 rounded-xl flex items-center gap-2 text-xs font-bold shadow-xs">
               <span className="material-symbols-outlined text-red-600 text-[18px]">lock</span>
@@ -246,15 +315,24 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
           </div>
 
           <div className="flex flex-col gap-space-sm">
-            <div className="relative w-full">
-              <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline text-[20px] pointer-events-none">search</span>
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Cari nomor rak atau zona (misal: A01-50-A)..."
-                className="w-full h-11 pl-10 pr-4 bg-surface-container-lowest rounded-xl font-body-md text-body-md shadow-sm border border-outline-variant/30 outline-none"
-              />
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline text-[20px] pointer-events-none">search</span>
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Cari nomor rak atau zona..."
+                  className="w-full h-11 pl-10 pr-4 bg-surface-container-lowest rounded-xl font-body-md text-body-md shadow-sm border border-outline-variant/30 outline-none"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddRackModal(true)}
+                className="px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-1 shadow-md cursor-pointer shrink-0"
+              >
+                <span>+ Rak Baru</span>
+              </button>
             </div>
 
             <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none">
