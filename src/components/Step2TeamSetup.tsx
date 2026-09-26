@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import type { SessionData } from '../types';
+import { Users, User, ArrowRight, LogOut } from 'lucide-react';
 
 interface Step2Props {
   sessionData: SessionData;
@@ -15,18 +16,23 @@ export default function Step2TeamSetup({ sessionData, onLogout, onSaveTeam }: St
     e.preventDefault();
     onSaveTeam({
       ...sessionData,
-      primaryCounter,
-      partners: partnerName ? [partnerName] : sessionData.partners,
+      primaryCounter: primaryCounter.trim() || sessionData.primaryCounter,
+      partners: partnerName.trim() ? [partnerName.trim()] : (sessionData.partners || []),
     });
   };
 
   return (
     <div className="bg-slate-50 font-sans text-slate-900 min-h-screen flex flex-col justify-center items-center p-4">
       <div className="w-full max-w-md bg-white rounded-3xl p-6 shadow-xl border border-slate-100 space-y-6">
-        <div className="flex justify-between items-center border-b border-slate-100 pb-3">
-          <div>
-            <h1 className="text-xl font-black text-slate-900">Setup Tim Counter</h1>
-            <p className="text-xs text-slate-500 font-medium mt-0.5">{sessionData.sessionName}</p>
+        <div className="flex justify-between items-center border-b border-slate-100 pb-4">
+          <div className="flex items-center space-x-3">
+            <div className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center font-bold">
+              <Users className="w-5 h-5" />
+            </div>
+            <div>
+              <h1 className="text-lg font-black text-slate-900">Setup Tim Opname</h1>
+              <p className="text-xs text-slate-500 font-medium">{sessionData.sessionName || "SO Sesi Utama 2026"}</p>
+            </div>
           </div>
           <button
             type="button"
@@ -34,38 +40,55 @@ export default function Step2TeamSetup({ sessionData, onLogout, onSaveTeam }: St
             className="p-2 text-slate-400 hover:text-red-500 rounded-xl transition-colors cursor-pointer"
             title="Keluar"
           >
-            <span className="material-symbols-outlined text-[20px]">logout</span>
+            <LogOut className="w-5 h-5" />
           </button>
+        </div>
+
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3.5 text-xs text-amber-900 space-y-1">
+          <p className="font-bold flex items-center gap-1.5">
+            <span>ℹ️</span> Keterangan Tim Pendamping
+          </p>
+          <p className="text-amber-800 font-medium leading-relaxed">
+            Sebelum memulai perhitungan rak, mohon lengkapi nama petugas pendamping dari tim warehouse (WH).
+          </p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-1.5">
-            <label className="text-xs font-bold text-slate-700 uppercase">Counter Utama (SO)</label>
+            <label className="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+              <User className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Counter Utama (SO)</span>
+            </label>
             <input
               type="text"
               value={primaryCounter}
               onChange={(e) => setPrimaryCounter(e.target.value)}
-              className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-500/30"
+              className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500/30 transition-all"
               required
+              placeholder="Username / Nama Counter"
             />
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-xs font-bold text-slate-700 uppercase">Counter Pendamping (WH)</label>
+            <label className="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+              <Users className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Tim Pendamping (Warehouse / WH)</span>
+            </label>
             <input
               type="text"
               value={partnerName}
               onChange={(e) => setPartnerName(e.target.value)}
-              placeholder="Misal: Budi Prasetyo"
-              className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-500/30"
+              placeholder="Ketik Nama Tim Pendamping (Misal: Budi Prasetyo)"
+              className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500/30 transition-all"
             />
           </div>
 
           <button
             type="submit"
-            className="w-full h-12 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-black shadow-lg shadow-blue-600/20 active:scale-[0.98] transition-all cursor-pointer"
+            className="w-full h-12 bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] text-white rounded-xl text-sm font-black shadow-lg shadow-indigo-600/30 transition-all flex items-center justify-center space-x-2 cursor-pointer mt-2"
           >
-            Lanjut ke Daftar Rak (Step 3)
+            <span>Lanjut ke Countsheet (Step 3)</span>
+            <ArrowRight className="w-4 h-4" />
           </button>
         </form>
       </div>

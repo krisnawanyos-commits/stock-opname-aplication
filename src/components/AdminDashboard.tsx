@@ -454,6 +454,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         const newStatus = isProjectLocked ? 'OPEN' : 'LOCKED';
         await setDoc(doc(db, "round_locks", lockDocId), {
             status: newStatus,
+            lockedCounters: newStatus === 'OPEN' ? {} : (lockedCounters || {}),
             lockedBy: effectiveRole,
             timestamp: new Date().toISOString()
         }, { merge: true });
@@ -603,27 +604,67 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         triggerNotification(`Akun KTP ${uName} berhasil diperbarui!`);
     };
 
+    const triggerMailto = (url: string) => {
+        try {
+            const link = document.createElement('a');
+            link.href = url;
+            link.target = '_blank';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        } catch (e) {
+            console.error("Error triggering mailto:", e);
+            window.location.href = url;
+        }
+    };
+
     const handleBlastEmailCredentials = () => {
         if (globalAccounts.length === 0) {
             triggerNotification('Belum ada akun KTP Cloud terdaftar.');
             return;
         }
-        const emailList = globalAccounts.map(a => a.email).filter(Boolean).join(',');
+        const validAccounts = globalAccounts.filter(a => a.email && a.email.trim());
+        if (validAccounts.length === 0) {
+            triggerNotification('Tidak ada email terdaftar pada akun KTP Cloud.');
+            return;
+        }
+
+        const emailList = validAccounts.map(a => a.email.trim()).join(',');
         const subject = encodeURIComponent("Kredensial Login Stock Opname 360");
-        const body = encodeURIComponent("Halo Tim,\n\nBerikut kredensial login kamu ke aplikasi Stock Opname 360. Gunakan Username dan PIN yang terdaftar.\n\nTerima kasih.");
-        window.location.href = `mailto:${emailList}?subject=${subject}&body=${body}`;
-        triggerNotification(`Membuka email blast ke ${globalAccounts.length} akun...`);
+        const bodyContent = `Halo Tim,\n\nBerikut daftar kredensial login akun Stock Opname 360:\n\n` +
+            validAccounts.map(a => `• Username: ${a.username} | PIN: ${a.pin} | Nama: ${a.name} (${a.email})`).join('\n') +
+            `\n\nSilakan gunakan Username & PIN masing-masing untuk login.\nTerima kasih.`;
+
+        // Mailto format using BCC for blast
+        const mailtoUrl = `mailto:?bcc=${encodeURIComponent(emailList)}&subject=${subject}&body=${encodeURIComponent(bodyContent)}`;
+
+        try {
+            navigator.clipboard.writeText(bodyContent);
+            triggerNotification(`Kredensial disalin ke clipboard! Membuka aplikasi email blast ke ${validAccounts.length} akun...`);
+        } catch (e) {
+            triggerNotification(`Membuka aplikasi email blast ke ${validAccounts.length} akun...`);
+        }
+
+        triggerMailto(mailtoUrl);
     };
 
     const handleSendIndividualEmail = (acc: GlobalAccount) => {
-        if (!acc.email) {
+        if (!acc.email || !acc.email.trim()) {
             triggerNotification(`Akun ${acc.username} tidak memiliki alamat email!`);
             return;
         }
         const subject = encodeURIComponent(`Kredensial Akses Stock Opname 360 - ${acc.name}`);
-        const body = encodeURIComponent(`Halo ${acc.name},\n\nBerikut kredensial akun kamu untuk masuk ke Stock Opname 360:\n\nUsername: ${acc.username}\nPIN: ${acc.pin}\n\nSalam,\nTim Operations WMS`);
-        window.location.href = `mailto:${acc.email}?subject=${subject}&body=${body}`;
-        triggerNotification(`Mengirim email kredensial ke ${acc.email}...`);
+        const bodyText = `Halo ${acc.name},\n\nBerikut kredensial akun kamu untuk masuk ke aplikasi Stock Opname 360:\n\nUsername: ${acc.username}\nPIN: ${acc.pin}\n\nSalam,\nTim Operations WMS`;
+        const mailtoUrl = `mailto:${acc.email.trim()}?subject=${subject}&body=${encodeURIComponent(bodyText)}`;
+
+        try {
+            navigator.clipboard.writeText(`Username: ${acc.username}\nPIN: ${acc.pin}`);
+            triggerNotification(`Kredensial ${acc.username} disalin ke clipboard! Membuka email ke ${acc.email}...`);
+        } catch (e) {
+            triggerNotification(`Mengirim email kredensial ke ${acc.email}...`);
+        }
+
+        triggerMailto(mailtoUrl);
     };
 
     const [newAccUser, setNewAccUser] = useState('');

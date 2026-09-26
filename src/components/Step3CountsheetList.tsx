@@ -8,17 +8,39 @@ interface Step3CountsheetListProps {
   sessionData: SessionData;
   onSelectRack: (rack: RackItem) => void;
   onLogout: () => void;
+  onEditTeam?: () => void;
 }
 
-export default function Step3CountsheetList({ sessionData, onSelectRack, onLogout }: Step3CountsheetListProps) {
+export default function Step3CountsheetList({ sessionData, onSelectRack, onLogout, onEditTeam }: Step3CountsheetListProps) {
   const [racks, setRacks] = useState<RackItem[]>([]);
   const [activeFilter, setActiveFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isLocking, setIsLocking] = useState<boolean>(false);
+  const [isSessionLocked, setIsSessionLocked] = useState<boolean>(false);
 
   const [modal, setModal] = useState<CustomModalState>({
     isOpen: false, title: '', message: '',
   });
+
+  // Listener real-time status gembok/kunci sesi pusat & counter
+  useEffect(() => {
+    const lockDocId = sessionData.sessionCode || sessionData.sessionId || "SO-WRG-2026-09";
+    const lockRef = doc(db, "round_locks", lockDocId);
+
+    const unsub = onSnapshot(lockRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        const isGlobalLocked = data.status === 'LOCKED';
+        const primaryCounter = (sessionData.primaryCounter || '').toLowerCase().trim();
+        const isCounterLocked = !!(data.lockedCounters && data.lockedCounters[primaryCounter]);
+
+        setIsSessionLocked(isGlobalLocked || isCounterLocked);
+      } else {
+        setIsSessionLocked(false);
+      }
+    });
+    return () => unsub();
+  }, [sessionData.sessionCode, sessionData.sessionId, sessionData.primaryCounter]);
 
   useEffect(() => {
     const primaryCounter = (sessionData.primaryCounter || "Unassigned").toLowerCase().trim();
@@ -107,7 +129,7 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
 
   const handleLockSubmit = async () => {
     setIsLocking(true);
-    const lockDocId = sessionData.sessionCode || sessionData.sessionId || "SO-SESSION-DEFAULT";
+    const lockDocId = sessionData.sessionCode || sessionData.sessionId || "SO-WRG-2026-09";
 
     await setDoc(doc(db, "round_locks", lockDocId), {
       status: 'LOCKED',
@@ -132,6 +154,8 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
       });
     }, 600);
   };
+
+  const partnerName = sessionData.partners?.[0];
 
   return (
     <div className="bg-surface font-body-md text-on-surface flex flex-col min-h-screen">
@@ -172,6 +196,14 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
 
       <main className="flex-1 flex flex-col relative w-full pt-20 pb-28 px-gutter-sm bg-surface max-w-md mx-auto">
         <div className="flex flex-col w-full pb-8 gap-space-md">
+          {/* BADGE WARNING TENTANG STATUS GEMBOK SESI */}
+          {isSessionLocked && (
+            <div className="bg-red-50 border border-red-200 text-red-700 p-3 rounded-xl flex items-center gap-2 text-xs font-bold shadow-xs">
+              <span className="material-symbols-outlined text-red-600 text-[18px]">lock</span>
+              <span>Sesi Terkunci oleh Admin Pusat. Input/edit hitungan fisik dinonaktifkan.</span>
+            </div>
+          )}
+
           <div className="bg-surface-container-lowest rounded-xl p-space-md shadow-sm border border-outline-variant/30 flex flex-col gap-space-sm">
             <div className="flex items-center justify-between gap-space-xs">
               <div className="flex items-center gap-space-xs min-w-0">
@@ -185,14 +217,26 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
                 Round 1
               </span>
             </div>
-            <div className="flex items-center justify-between flex-wrap gap-space-xs pt-space-xs border-t border-surface-container-low">
+            <div className="flex items-center justify-between flex-wrap gap-2 pt-space-xs border-t border-surface-container-low">
               <div className="inline-flex items-center gap-1.5 bg-surface-container-low px-2.5 py-1 rounded-full">
                 <span className="text-xs">👥</span>
                 <span className="font-label-sm text-label-sm text-on-surface-variant font-medium truncate">
-                  Counter Active: <b className="text-slate-900">{sessionData.primaryCounter}</b>
+                  Counter: <b className="text-slate-900">{sessionData.primaryCounter}</b>
+                  {partnerName ? <span className="text-slate-500"> • Pendamping: <b className="text-slate-800">{partnerName}</b></span> : null}
                 </span>
                 <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>
               </div>
+
+              {onEditTeam && (
+                <button
+                  type="button"
+                  onClick={onEditTeam}
+                  className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-bold flex items-center gap-1 border border-slate-300 transition-colors cursor-pointer"
+                >
+                  <span className="material-symbols-outlined text-[12px]">edit</span>
+                  <span>Edit Tim</span>
+                </button>
+              )}
             </div>
           </div>
 

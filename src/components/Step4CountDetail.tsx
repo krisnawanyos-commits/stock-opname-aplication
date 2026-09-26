@@ -47,7 +47,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
 
   // 1. SYNC REAL-TIME BUKA/TUTUP KUNCI SESI GLOBAL & INDIVIDU COUNTER
   useEffect(() => {
-    const lockDocId = sessionData.sessionCode || sessionData.sessionId || "SO-SESSION-DEFAULT";
+    const lockDocId = sessionData.sessionCode || sessionData.sessionId || "SO-WRG-2026-09";
     const lockRef = doc(db, "round_locks", lockDocId);
 
     const unsub = onSnapshot(lockRef, (docSnap) => {

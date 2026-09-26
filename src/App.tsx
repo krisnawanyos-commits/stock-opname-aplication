@@ -43,6 +43,7 @@ export default function App() {
     }
     return {
       sessionId: 'SO-2026-KOSAMBI',
+      sessionCode: 'SO-WRG-2026-09',
       sessionName: 'Kosambi WH — SO Sesi Utama 2026',
       primaryCounter: 'bambang',
       partners: ['Budi Prasetyo'],
@@ -84,6 +85,7 @@ export default function App() {
     setCurrentUser(null);
     setSessionData({
       sessionId: 'SO-2026-KOSAMBI',
+      sessionCode: 'SO-WRG-2026-09',
       sessionName: 'Kosambi WH — SO Sesi Utama 2026',
       primaryCounter: 'bambang',
       partners: ['Budi Prasetyo'],
@@ -113,8 +115,8 @@ export default function App() {
             if (role === 'owner' || role === 'spv' || username === 'owner') {
               setCurrentStep('admin');
             } else {
-              // 1. BYPASS STEP 2: DIRECT COUNTER NAVIGATION TO STEP 3
-              setCurrentStep(3);
+              // Navigasi ke Step 2 untuk pengisian Keterangan Tim Pendamping
+              setCurrentStep(2);
             }
           }}
         />
@@ -163,6 +165,7 @@ export default function App() {
             <Step3CountsheetList
               sessionData={sessionData}
               onLogout={handleLogout}
+              onEditTeam={() => setCurrentStep(2)}
               onSelectRack={(rack) => {
                 setSelectedRack(rack);
                 setCurrentStep(4);
