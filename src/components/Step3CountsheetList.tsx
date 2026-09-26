@@ -32,6 +32,9 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
       const groupedRacks: Record<string, RackItem> = {};
 
       taskList.forEach((task: any) => {
+        // Abaikan rak yang dikunci (misal SKU match pada ronde 2)
+        if (task.isLocked) return;
+
         const rackLoc = task.Location || 'Z02-10-A';
         const isCounted = !!task.isCounted || (task.QTY_ACTUAL !== null && task.QTY_ACTUAL !== undefined);
 
@@ -104,7 +107,7 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
 
   const handleLockSubmit = async () => {
     setIsLocking(true);
-    const lockDocId = sessionData.sessionId || sessionData.sessionCode || "SO-SESSION-DEFAULT";
+    const lockDocId = sessionData.sessionCode || sessionData.sessionId || "SO-SESSION-DEFAULT";
 
     await setDoc(doc(db, "round_locks", lockDocId), {
       status: 'LOCKED',

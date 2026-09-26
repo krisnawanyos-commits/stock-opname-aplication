@@ -154,7 +154,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
     const [assignUsername, setAssignUsername] = useState<string>('');
     const [assignRole, setAssignRole] = useState<UserRole>('counter');
 
-    // 3. BULK REASSIGN TASK COUNTER ABSEN STATE
+    // BULK REASSIGN TASK COUNTER ABSEN STATE
     const [transferSourceCounter, setTransferSourceCounter] = useState<string | null>(null);
     const [transferTargetCounter, setTransferTargetCounter] = useState<string>('');
 
@@ -222,7 +222,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         const unsub4 = onSnapshot(collection(db, "warehouses"), (snap) => setWarehouseList(snap.docs.map(d => ({ id: d.id, ...d.data() } as LocationOption))));
         const unsub5 = onSnapshot(collection(db, "consignment_stores"), (snap) => setConsignmentStoreList(snap.docs.map(d => ({ id: d.id, ...d.data() } as LocationOption))));
 
-        // Listener Audit Logs
+        // Listener Audit Logs Real-Time
         const unsubAudit = onSnapshot(collection(db, "audit_logs"), (snap) => {
             const logs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
             logs.sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
@@ -232,6 +232,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); unsubAudit(); };
     }, []);
 
+    // 4. FIX MAPPING DATA FIRESTORE & SYNC BAMBANG
     useEffect(() => {
         if (!activeProject) return;
 
@@ -239,9 +240,20 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         const unsubscribe = onSnapshot(qTasks, (snapshot) => {
             const taskList: MasterSKUItem[] = snapshot.docs.map(docSnap => {
                 const data = docSnap.data();
+
+                // Ambil Qty Good, Bad, & Actual dengan prioritas pembacaan
+                const gQty = data.QTY_GOOD ?? data.qtyGood;
+                const bQty = data.QTY_BAD ?? data.qtyBad;
+
                 const rawActQty = data.QTY_ACTUAL ?? data.countedQty;
                 const numActQty = parseInt(rawActQty, 10);
-                const isCounted = data.isCounted || (rawActQty !== undefined && rawActQty !== null && !isNaN(numActQty));
+
+                // Cek apakah barang benar-benar sudah pernah dihitung
+                const isCounted = !!data.isCounted || (rawActQty !== undefined && rawActQty !== null && !isNaN(numActQty));
+
+                const calcGood = gQty !== undefined ? parseInt(gQty, 10) : (isCounted ? (isNaN(numActQty) ? 0 : numActQty) : 0);
+                const calcBad = bQty !== undefined ? parseInt(bQty, 10) : 0;
+                const totalActualCalculated = calcGood + calcBad;
 
                 return {
                     id: docSnap.id,
@@ -263,9 +275,9 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     expiredDateSystem: data.expiredDateSystem || '',
                     expiredDateActual: data.expDateActual || data.expiredDateActual || '',
                     Qty: parseInt(data.Qty || data.QTY_SYSTEM) || 0,
-                    countedQty: isCounted ? (isNaN(numActQty) ? 0 : numActQty) : undefined,
-                    qtyGood: data.QTY_GOOD ?? data.qtyGood,
-                    qtyBad: data.QTY_BAD ?? data.qtyBad,
+                    countedQty: isCounted ? totalActualCalculated : undefined,
+                    qtyGood: isCounted ? calcGood : undefined,
+                    qtyBad: isCounted ? calcBad : undefined,
                     Remarks: data.badRemarks || data.Remarks || '',
                     isCounted: !!isCounted,
                     unitPrice: parseInt(data.unitPrice) || 0
@@ -277,45 +289,51 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             }
         });
 
-        const lockDocId = activeProject.id || activeProject.sessionCode;
+        // 1. FIX SYNC KEY LOCK DENGAN KONSISTEN BACA PROJ CODE / PROJ ID
+        const lockDocId = activeProject.sessionCode || activeProject.id;
         const lockUnsubscribe = onSnapshot(doc(db, "round_locks", lockDocId), (docSnap) => {
             if (docSnap.exists()) {
                 const data = docSnap.data();
                 setIsProjectLocked(data.status === 'LOCKED');
                 setLockedCounters(data.lockedCounters || {});
+            } else {
+                setIsProjectLocked(false);
+                setLockedCounters({});
             }
         });
 
         return () => { unsubscribe(); lockUnsubscribe(); };
     }, [activeProject]);
 
-    // 7. HANDLER DEPLOY RONDE 2 (KHUSUS SKU SELISIH)
-    const handleDeployRound2 = async () => {
+    // 2. HANDLER DEPLOY RONDE 2 PER-COUNTER PIC
+    const handleDeployRound2ForCounter = async (targetCounter: string) => {
         if (!activeProject) return;
-        if (!window.confirm("AKSI OWNER: Deploy Ronde 2 hanya akan membawa SKU yang SELISIH. SKU yang MATCH akan dikunci. Lanjutkan?")) return;
+        const cleanCounter = targetCounter.toLowerCase().trim();
+        if (!window.confirm(`AKSI OWNER: Deploy Ronde 2 KHUSUS untuk Counter "${cleanCounter}"? SKU selisih milik counter ini akan di-reset untuk dihitung ulang.`)) return;
 
         try {
             const disputeTasks = masterDataList.filter(item => {
                 const act = item.countedQty ?? item.Qty;
-                return item.isCounted && act !== item.Qty;
+                return item.counter === cleanCounter && item.isCounted && act !== item.Qty;
             });
 
             if (disputeTasks.length === 0) {
-                triggerNotification("Tidak ada SKU selisih untuk di-deploy ke Ronde 2.");
+                triggerNotification(`Tidak ada SKU selisih ditemukan untuk counter ${cleanCounter}.`);
                 return;
             }
 
             const batch = writeBatch(db);
-            masterDataList.forEach((item) => {
+            masterDataList.filter(item => item.counter === cleanCounter).forEach((item) => {
                 if (!item.id) return;
                 const ref = doc(db, "master_tasks", item.id);
                 const act = item.countedQty ?? item.Qty;
+
                 if (item.isCounted && act !== item.Qty) {
                     batch.update(ref, {
                         currentRound: 2,
                         QTY_ACTUAL: null,
-                        qtyGood: null,
-                        qtyBad: null,
+                        QTY_GOOD: null,
+                        QTY_BAD: null,
                         isCounted: false,
                         round1Actual: act,
                         updatedAt: new Date().toISOString()
@@ -328,16 +346,15 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 }
             });
 
-            batch.update(doc(db, "projects", activeProject.id), { currentRound: 2 });
             await batch.commit();
-            triggerNotification(`🚀 Ronde 2 Berhasil Dideploy! Total ${disputeTasks.length} Task SKU Selisih disiapkan.`);
+            triggerNotification(`🚀 Ronde 2 Berhasil Dideploy Khusus untuk Counter "${cleanCounter}"! (${disputeTasks.length} SKU Selisih)`);
         } catch (err: any) {
-            console.error("Deploy Round 2 Error:", err);
+            console.error("Deploy Round 2 Per Counter Error:", err);
             triggerNotification(`Gagal Deploy Ronde 2: ${err.message || String(err)}`);
         }
     };
 
-    // 9. HANDLER EXPORT RECON EXCEL LENGKAP (TERPISAH GOOD / BAD)
+    // 3. FIX RECON EXCEL (UNCOUNTED != MATCH & SEPARATION GOOD/BAD)
     const handleExportReconXLSX = () => {
         if (masterDataList.length === 0) {
             triggerNotification("Tidak ada data untuk diexport!");
@@ -346,14 +363,26 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
         const exportData = masterDataList.map((item, idx) => {
             const sysQty = item.Qty || 0;
-            const actQty = item.countedQty !== undefined ? item.countedQty : sysQty;
-            const goodQty = item.qtyGood !== undefined ? item.qtyGood : (item.isCounted ? actQty : 0);
-            const badQty = item.qtyBad !== undefined ? item.qtyBad : 0;
-            const diff = actQty - sysQty;
+            const isCounted = !!item.isCounted;
+
+            // Jika belum dihitung, Qty Actual, Good, dan Bad diset kosong
+            const actQty = isCounted ? (item.countedQty !== undefined ? item.countedQty : sysQty) : 0;
+            const goodQty = isCounted ? (item.qtyGood !== undefined ? item.qtyGood : actQty) : 0;
+            const badQty = isCounted ? (item.qtyBad !== undefined ? item.qtyBad : 0) : 0;
+
+            const diff = isCounted ? (actQty - sysQty) : 0;
             const unitPrice = item.unitPrice || 0;
             const valDiscrepancy = diff * unitPrice;
 
-            const overrideQty = recoveryAdjustments[item.SKU] !== undefined ? recoveryAdjustments[item.SKU] : actQty;
+            // Logika Status Selisih yang Benar
+            let statusSelisih = 'Uncounted / Pending';
+            if (isCounted) {
+                if (diff === 0) statusSelisih = 'Match';
+                else if (diff < 0) statusSelisih = 'Shortage';
+                else statusSelisih = 'Overage';
+            }
+
+            const overrideQty = recoveryAdjustments[item.SKU] !== undefined ? recoveryAdjustments[item.SKU] : (isCounted ? actQty : sysQty);
             const finalValuation = (overrideQty - sysQty) * unitPrice;
 
             return {
@@ -367,13 +396,13 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 'LOKASI RAK': item.Location,
                 'COUNTER PIC': item.counter,
                 'QTY SYSTEM (WMS)': sysQty,
-                'QTY GOOD': goodQty,
-                'QTY BAD': badQty,
-                'TOTAL QTY ACTUAL': actQty,
-                'SELISIH QTY': diff,
-                'STATUS SELISIH': diff === 0 ? 'Match' : (diff < 0 ? 'Shortage' : 'Overage'),
+                'QTY GOOD': isCounted ? goodQty : '-',
+                'QTY BAD': isCounted ? badQty : '-',
+                'TOTAL QTY ACTUAL': isCounted ? actQty : '-',
+                'SELISIH QTY': isCounted ? diff : '-',
+                'STATUS SELISIH': statusSelisih,
                 'HARGA SATUAN (RP)': unitPrice,
-                'VALUASI SELISIH (RP)': valDiscrepancy,
+                'VALUASI SELISIH (RP)': isCounted ? valDiscrepancy : 0,
                 'QTY FINAL RECOVERY': overrideQty,
                 'VALUASI FINAL (RP)': finalValuation,
                 'CATATAN (REMARKS)': item.Remarks || ''
@@ -387,10 +416,42 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         triggerNotification("Laporan Recon & Recovery (.xlsx) berhasil diunduh!");
     };
 
-    // HANDLERS PENGUNCIAN
+    // 5. DOWNLOAD AUDIT TRAIL EXCEL (.XLSX)
+    const handleExportAuditTrailXLSX = () => {
+        if (auditLogs.length === 0) {
+            triggerNotification("Belum ada data Audit Trail untuk di-download!");
+            return;
+        }
+
+        const exportLogs = auditLogs.map((log, idx) => ({
+            'NO': idx + 1,
+            'TIMESTAMP (JAM SUBMIT)': log.timestamp ? new Date(log.timestamp).toLocaleString('id-ID') : '-',
+            'LOKASI RAK': log.rackLocation || log.Location || '-',
+            'OWNER SKU': log.ownerSku || log.Owner || 'DDI',
+            'SKU': log.sku || log.SKU || '-',
+            'DESKRIPSI PRODUK': log.description || log.Description || '-',
+            'UPC 1': log.upc1 || log.UPC1 || '-',
+            'UPC 2': log.upc2 || log.UPC2 || '-',
+            'COUNTER PIC': log.counterPic || log.counter || '-',
+            'RONDE': `Round ${log.round || log.currentRound || 1}`,
+            'QTY GOOD': log.qtyGood ?? 0,
+            'QTY BAD': log.qtyBad ?? 0,
+            'TOTAL FINAL SUBMITTED': log.totalFinalSubmitted ?? log.qtyActual ?? 0,
+            'ED ACTUAL': log.edActual || log.expiredDateActual || '-',
+            'CATATAN (REMARKS)': log.remarks || log.Remarks || '-'
+        }));
+
+        const ws = XLSX.utils.json_to_sheet(exportLogs);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Audit_Trail_Log");
+        XLSX.writeFile(wb, `Audit_Trail_Snapshot_${activeProject?.sessionCode || '360'}_${new Date().toISOString().split('T')[0]}.xlsx`);
+        triggerNotification("Audit Trail Log (.xlsx) berhasil diunduh!");
+    };
+
+    // HANDLERS PENGUNCIAN GLOBAL & PER-COUNTER
     const handleToggleGlobalLock = async () => {
         if (!activeProject) return;
-        const lockDocId = activeProject.id || activeProject.sessionCode;
+        const lockDocId = activeProject.sessionCode || activeProject.id;
         const newStatus = isProjectLocked ? 'OPEN' : 'LOCKED';
         await setDoc(doc(db, "round_locks", lockDocId), {
             status: newStatus,
@@ -402,16 +463,16 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
     const handleToggleCounterLock = async (counterName: string, currentStatus: boolean) => {
         if (!activeProject) return;
-        const lockDocId = activeProject.id || activeProject.sessionCode;
+        const lockDocId = activeProject.sessionCode || activeProject.id;
         const newLocks = { ...lockedCounters, [counterName]: !currentStatus };
         await setDoc(doc(db, "round_locks", lockDocId), {
             lockedCounters: newLocks,
             updatedAt: new Date().toISOString()
         }, { merge: true });
-        triggerNotification(`Akses Counter ${counterName} ${!currentStatus ? 'Dikunci' : 'Dibuka'}!`);
+        triggerNotification(`Akses Counter "${counterName}" ${!currentStatus ? 'Dikunci' : 'Dibuka'}!`);
     };
 
-    // 3. HANDLER BULK TRANSFER TASK UNTUK COUNTER ABSEN
+    // BULK TRANSFER TASK COUNTER ABSEN
     const handleExecuteBulkTransfer = async () => {
         if (!transferSourceCounter || !transferTargetCounter) return;
         const cleanTarget = transferTargetCounter.toLowerCase().trim();
@@ -798,8 +859,11 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
     };
 
     const activeTeamMembers = activeProject ? allProjectTeams.filter(t => t.projectId === activeProject.id) : [];
+
+    // AGGREGASI MONITORING PIC COUNTER REALTIME
     const counterGroups = masterDataList.reduce((acc: any, item) => {
-        const cName = item.counter || 'Unassigned'; if (!acc[cName]) acc[cName] = { total: 0, counted: 0, errorCount: 0 };
+        const cName = item.counter || 'Unassigned';
+        if (!acc[cName]) acc[cName] = { total: 0, counted: 0, errorCount: 0 };
         acc[cName].total++;
         if (item.isCounted) {
             acc[cName].counted++;
@@ -838,9 +902,9 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         return { brand: brandName || 'No Brand', totalSKUs: brandSKUs.length, diffSKUs: diffCount, accuracyPct: Math.max(0, Math.round(((brandSKUs.length) - diffCount) / (brandSKUs.length) * 100)), skuList: brandSKUs };
     }).filter(b => b.brand.toLowerCase().includes(brandSearch.toLowerCase()) && (brandStatusFilter === 'all' || (brandStatusFilter === 'selisih' ? b.diffSKUs > 0 : b.diffSKUs === 0)));
 
-    const matchRecoveryCount = masterDataList.filter(m => (recoveryAdjustments[m.SKU] !== undefined ? recoveryAdjustments[m.SKU] : (m.countedQty ?? m.Qty)) === m.Qty).length;
-    const varianceRecoveryCount = masterDataList.length - matchRecoveryCount;
-    const totalFinancialVarianceValue = masterDataList.reduce((acc, m) => acc + (((recoveryAdjustments[m.SKU] !== undefined ? recoveryAdjustments[m.SKU] : (m.countedQty ?? m.Qty)) - m.Qty) * (m.unitPrice || 0)), 0);
+    const matchRecoveryCount = masterDataList.filter(m => m.isCounted && (m.countedQty ?? m.Qty) === m.Qty).length;
+    const varianceRecoveryCount = masterDataList.filter(m => m.isCounted && (m.countedQty ?? m.Qty) !== m.Qty).length;
+    const totalFinancialVarianceValue = masterDataList.reduce((acc, m) => acc + (m.isCounted ? (((m.countedQty ?? m.Qty) - m.Qty) * (m.unitPrice || 0)) : 0), 0);
 
     return (
         <div className="min-h-screen bg-slate-50 text-slate-800 p-4 lg:p-8 max-w-7xl mx-auto font-sans relative">
@@ -850,7 +914,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 </div>
             )}
 
-            {/* 3. MODAL POPUP BULK REASSIGN COUNTER ABSEN */}
+            {/* MODAL POPUP BULK REASSIGN COUNTER ABSEN */}
             {transferSourceCounter && (
                 <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
                     <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-5 shadow-2xl border border-slate-200">
@@ -929,7 +993,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 </div>
             )}
 
-            {/* 10. MODAL POPUP DETAIL SELISIH COUNTER */}
+            {/* MODAL POPUP DETAIL SELISIH COUNTER */}
             {selectedCounterForDetail && (
                 <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
                     <div className="bg-white rounded-3xl max-w-2xl w-full p-6 space-y-5 shadow-2xl border border-slate-200">
@@ -1225,7 +1289,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             {viewState === 'DASHBOARD' && activeProject && (
                 <div className="space-y-6 animate-in fade-in duration-500">
                     <div className="bg-white p-5 rounded-3xl shadow-xl border border-slate-100 flex flex-col xl:flex-row justify-between xl:items-center gap-4">
-                        <div className="flex items-center space-x-4">
+                        <div className="flex items-center space-x-4 shrink-0">
                             <button onClick={() => setViewState('LANDING')} className="p-3 bg-slate-50 rounded-2xl"><ArrowLeft className="w-5 h-5 text-slate-700" /></button>
                             <div>
                                 <div className="flex items-center space-x-3">
@@ -1238,7 +1302,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                     ) : (
                                         <span className="bg-slate-100 text-slate-600 text-[10px] font-black px-2.5 py-1 rounded-lg border border-slate-200">SUPERVISOR</span>
                                     )}
-                                    {/* TOMBOL PENGUNCIAN GLOBAL UNTUK OWNER */}
+                                    {/* 1. TOMBOL PENGUNCIAN GLOBAL UNTUK OWNER */}
                                     {effectiveRole === 'owner' && (
                                         <button
                                             onClick={handleToggleGlobalLock}
@@ -1247,28 +1311,18 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                             {isProjectLocked ? <><Unlock className="w-3.5 h-3.5" />Buka Sesi Global</> : <><Lock className="w-3.5 h-3.5" />Kunci Sesi Global</>}
                                         </button>
                                     )}
-                                    {/* 7. TOMBOL DEPLOY RONDE 2 KHUSUS OWNER */}
-                                    {effectiveRole === 'owner' && (
-                                        <button
-                                            onClick={handleDeployRound2}
-                                            className="ml-2 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 shadow-md bg-red-600 hover:bg-red-700 text-white transition-colors cursor-pointer animate-pulse"
-                                            title="Deploy Ronde 2 khusus SKU Selisih"
-                                        >
-                                            <Repeat className="w-3.5 h-3.5" />
-                                            <span>Deploy Ronde 2</span>
-                                        </button>
-                                    )}
                                 </div>
                                 <p className="text-sm text-slate-500 font-medium flex items-center space-x-2 mt-1"><MapPin className="w-3.5 h-3.5" /><span>{activeProject.locationName}</span></p>
                             </div>
                         </div>
 
-                        <div className="flex bg-slate-50 p-1.5 rounded-2xl border border-slate-200 overflow-x-auto">
-                            <div className="flex space-x-1.5">
+                        {/* 6. TAB NAVIGASI UTAMA DENGAN SCROLLBAR SMOOTH */}
+                        <div className="flex bg-slate-50 p-1.5 rounded-2xl border border-slate-200 overflow-x-auto max-w-full scrollbar-thin">
+                            <div className="flex space-x-2 flex-nowrap whitespace-nowrap">
                                 {orderedTabs.map(t => (
-                                    <button key={t.id} draggable onDragStart={(e) => handleDragStart(e, t.id)} onDragOver={(e) => e.preventDefault()} onDrop={(e) => handleDrop(e, t.id)} onClick={() => setActiveTab(t.id)} className={`px-5 py-2.5 text-sm font-bold rounded-xl flex items-center space-x-2 ${activeTab === t.id ? 'bg-white shadow-md text-indigo-700' : 'text-slate-500'}`}>
-                                        <GripHorizontal className="w-3.5 h-3.5 opacity-30 cursor-grab" />
-                                        <t.icon className="w-4 h-4" /><span>{t.label}</span>
+                                    <button key={t.id} draggable onDragStart={(e) => handleDragStart(e, t.id)} onDragOver={(e) => e.preventDefault()} onDrop={(e) => handleDrop(e, t.id)} onClick={() => setActiveTab(t.id)} className={`px-5 py-2.5 text-sm font-bold rounded-xl flex items-center space-x-2 cursor-pointer transition-all ${activeTab === t.id ? 'bg-white shadow-md text-indigo-700' : 'text-slate-500 hover:text-slate-800'}`}>
+                                        <GripHorizontal className="w-3.5 h-3.5 opacity-30 cursor-grab shrink-0" />
+                                        <t.icon className="w-4 h-4 shrink-0" /><span>{t.label}</span>
                                     </button>
                                 ))}
                             </div>
@@ -1302,7 +1356,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b pb-3 gap-3">
                                     <h3 className="text-base font-black text-slate-900 flex items-center"><UserCheck className="w-5 h-5 mr-2 text-indigo-600" />Real-Time Monitoring Progress Per Counter PIC</h3>
 
-                                    {/* SEARCH BAR PIC COUNTER */}
                                     <div className="relative w-full md:w-64">
                                         <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-2.5" />
                                         <input
@@ -1329,15 +1382,23 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                         <span className="text-[10px] font-black px-2.5 py-1 rounded-lg bg-indigo-100 text-indigo-800">{pct}% Done</span>
                                                         {effectiveRole === 'owner' && (
                                                             <>
-                                                                {/* 3. TOMBOL BULK REASSIGN UNTUK COUNTER ABSEN */}
+                                                                {/* 2. TOMBOL DEPLOY RONDE 2 KHUSUS COUNTER PIC */}
+                                                                <button
+                                                                    onClick={(e) => { e.stopPropagation(); handleDeployRound2ForCounter(cName); }}
+                                                                    title="Deploy Ronde 2 Khusus Counter Ini"
+                                                                    className="p-1.5 rounded-md cursor-pointer bg-red-50 text-red-600 hover:bg-red-100 transition-colors"
+                                                                >
+                                                                    <Repeat className="w-3.5 h-3.5" />
+                                                                </button>
+                                                                {/* BULK REASSIGN UNTUK COUNTER ABSEN */}
                                                                 <button
                                                                     onClick={(e) => { e.stopPropagation(); setTransferSourceCounter(cName); }}
                                                                     title="Transfer Seluruh Tugas Counter Ini (Jika Absen)"
                                                                     className="p-1.5 rounded-md cursor-pointer bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors"
                                                                 >
-                                                                    <Repeat className="w-3.5 h-3.5" />
+                                                                    <UserPlus className="w-3.5 h-3.5" />
                                                                 </button>
-                                                                {/* TOMBOL GEMBOK INDIVIDU */}
+                                                                {/* 1. TOMBOL GEMBOK INDIVIDU */}
                                                                 <button
                                                                     onClick={(e) => { e.stopPropagation(); handleToggleCounterLock(cName, isLocked); }}
                                                                     title={isLocked ? "Buka Akses Input Counter" : "Kunci Akses Input Counter"}
@@ -1351,7 +1412,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                 </div>
                                                 {cData.errorCount > 0 && <div className="text-[10px] font-bold text-red-600 bg-red-50 px-2.5 py-1 rounded-md">⚠️ {cData.errorCount} SKU Selisih Ditemukan</div>}
 
-                                                {/* 10. TOMBOL LIHAT DETAIL FISIK DENGAN POPUP MODAL */}
                                                 <button
                                                     onClick={() => setSelectedCounterForDetail(cName)}
                                                     className="w-full mt-2 px-3 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs flex items-center justify-center space-x-1.5 shadow-sm transition-all cursor-pointer"
@@ -1501,7 +1561,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                 <div className="flex justify-between items-center border-b pb-3">
                                     <h3 className="text-base font-black text-slate-900 flex items-center"><Scale className="w-5 h-5 mr-2 text-indigo-600" />Laporan Selisih & Override Recovery</h3>
 
-                                    {/* 9. EKSPOR EXCEL RECON */}
+                                    {/* 3. EKSPOR EXCEL RECON REVISI */}
                                     <button onClick={handleExportReconXLSX} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center space-x-2 shadow-md cursor-pointer">
                                         <FileSpreadsheet className="w-4 h-4" />
                                         <span>Download Recon (.xlsx)</span>
@@ -1538,7 +1598,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                         </div>
                     )}
 
-                    {/* TAB 4: AUDIT TRAIL COUNTSHEET (SNAPSHOT FINAL) */}
+                    {/* TAB 4: AUDIT TRAIL COUNTSHEET */}
                     {activeTab === 'audit' && (
                         <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl space-y-5">
                             <div className="flex justify-between items-center border-b pb-4">
@@ -1546,9 +1606,19 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                     <Clock className="w-5 h-5 mr-2 text-indigo-600" />
                                     Audit Trail Countsheet (Snapshot Final)
                                 </h3>
-                                <span className="text-xs font-bold text-slate-500 bg-slate-100 px-3 py-1 rounded-lg">
-                                    Total {auditLogs.length} Entri Log
-                                </span>
+                                <div className="flex items-center space-x-3">
+                                    <span className="text-xs font-bold text-slate-500 bg-slate-100 px-3 py-1 rounded-lg">
+                                        Total {auditLogs.length} Entri Log
+                                    </span>
+                                    {/* 5. TOMBOL DOWNLOAD AUDIT TRAIL EXCEL */}
+                                    <button
+                                        onClick={handleExportAuditTrailXLSX}
+                                        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center space-x-2 shadow-md cursor-pointer"
+                                    >
+                                        <FileSpreadsheet className="w-4 h-4" />
+                                        <span>Download Audit Log (.xlsx)</span>
+                                    </button>
+                                </div>
                             </div>
                             <div className="overflow-x-auto border rounded-2xl max-h-125">
                                 <table className="w-full text-left text-[11px] min-w-max border-collapse">

@@ -45,9 +45,9 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     isOpen: false, title: '', message: '',
   });
 
-  // 2. REAL-TIME LISTENER PENGUNCIAN GLOBAL & COUNTER INDIVIDU
+  // 1. SYNC ID DOKUMEN KUNCI DENGAN ADMIN (sessionCode || sessionId)
   useEffect(() => {
-    const lockDocId = sessionData.sessionId || sessionData.sessionCode || "SO-SESSION-DEFAULT";
+    const lockDocId = sessionData.sessionCode || sessionData.sessionId || "SO-SESSION-DEFAULT";
     const lockRef = doc(db, "round_locks", lockDocId);
 
     const unsub = onSnapshot(lockRef, (docSnap) => {
@@ -63,9 +63,9 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       }
     });
     return () => unsub();
-  }, [sessionData.sessionId, sessionData.sessionCode, sessionData.primaryCounter]);
+  }, [sessionData.sessionCode, sessionData.sessionId, sessionData.primaryCounter]);
 
-  // FETCH & AGGREGATE TASK BERDASARKAN SKU ATAS LOKASI RAK
+  // FETCH & AGGREGATE TASK BERDASARKAN SKU
   useEffect(() => {
     const primaryCounter = (sessionData.primaryCounter || "Unassigned").toLowerCase().trim();
     const targetLocation = rack.rackNumber || rack.id;
@@ -151,7 +151,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
   const [unmappedPhotoUrl, setUnmappedPhotoUrl] = useState<string>('');
   const [unmappedList, setUnmappedList] = useState<UnmappedItem[]>([]);
 
-  // 5. SMART DUAL-UPC MATCHING
+  // DUAL-UPC MATCHING
   const isBarcodeInSystem = unmappedBarcode.trim() !== '' && skuList.some(s =>
     s.upc === unmappedBarcode.trim() ||
     (s.upc2 && s.upc2 === unmappedBarcode.trim()) ||
@@ -270,7 +270,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     setUnmappedList((prev) => prev.filter((item) => item.id !== id));
   };
 
-  // 4 & 8. SAVE, AUDIT SNAPSHOT, & AUTO-NEXT RAK
+  // SAVE, SNAPSHOT LOGS & AUTO-NEXT RAK
   const handleSaveAndNext = async () => {
     if (isSessionLocked) return;
     setIsLoadingSave(true);
@@ -290,7 +290,8 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
           batch.set(taskRef, {
             counter: cleanCounter,
             isCounted: true,
-            QTY_ACTUAL: i === 0 ? finalGoodQty : 0,
+            QTY_ACTUAL: i === 0 ? totalSubmitted : 0,
+            QTY_GOOD: i === 0 ? finalGoodQty : 0,
             QTY_BAD: i === 0 ? finalBadQty : 0,
             badRemarks: i === 0 ? (skuItem.badRemarks || '') : '',
             expDateActual: skuItem.expDateActual || '',
@@ -298,8 +299,9 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
           }, { merge: true });
         });
 
-        // 8. WRITE AUDIT TRAIL LOG SNAPSHOT (13 COLUMNS FORMAT)
-        const logId = `${sessionData.sessionId || 'SO'}_${rack.rackNumber}_${skuItem.sku}`;
+        // 2. AUDIT TRAIL LOG SNAPSHOT
+        const sessCode = sessionData.sessionCode || sessionData.sessionId || 'SO';
+        const logId = `${sessCode}_${rack.rackNumber}_${skuItem.sku}`;
         const auditRef = doc(db, "audit_logs", logId);
 
         batch.set(auditRef, {
@@ -322,7 +324,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
 
       await batch.commit();
 
-      // 4. CHECK UNCOUNTED RAK NEXT AUTOMATICALLY
+      // AUTO-NEXT RAK UNCOUNTED
       const remainingTasksQuery = query(
         collection(db, "master_tasks"),
         where("counter", "==", cleanCounter),
@@ -627,7 +629,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             </div>
           )}
 
-          {/* 6. TOMBOL EDIT ULANG / RE-AUDIT */}
+          {/* TOMBOL EDIT ULANG / RE-AUDIT */}
           {skuList.length > 0 && (
             <button
               type="button"
