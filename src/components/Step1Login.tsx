@@ -28,7 +28,6 @@ export default function Step1Login({ onSuccessLogin }: Step1LoginProps) {
     }
 
     try {
-      // 1. Cek Login Owner Profile
       if (cleanUsername === 'owner' || cleanUsername === 'admin') {
         const ownerDocRef = doc(db, "owner_profile", "owner_default");
         const ownerSnap = await getDoc(ownerDocRef);
@@ -53,7 +52,6 @@ export default function Step1Login({ onSuccessLogin }: Step1LoginProps) {
         }
       }
 
-      // 2. Cek Login dari Firestore global_accounts
       const accDocRef = doc(db, "global_accounts", cleanUsername);
       const accSnap = await getDoc(accDocRef);
 
@@ -62,7 +60,6 @@ export default function Step1Login({ onSuccessLogin }: Step1LoginProps) {
         const storedPin = (accData.pin || '1234').toString().trim();
 
         if (cleanPin === storedPin) {
-          // Priority Check: Cek apakah user di-assign sebagai SPV di project_teams
           let assignedRole: UserRole = 'counter';
 
           const teamQuery = query(

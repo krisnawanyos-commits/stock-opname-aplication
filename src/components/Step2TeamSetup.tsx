@@ -1,94 +1,92 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import type { SessionData } from '../types';
-import { Users, User, ArrowRight, LogOut } from 'lucide-react';
 
-interface Step2Props {
+interface Step2TeamSetupProps {
   sessionData: SessionData;
-  onLogout: () => void;
   onSaveTeam: (updatedSession: SessionData) => void;
+  onLogout: () => void;
 }
 
-export default function Step2TeamSetup({ sessionData, onLogout, onSaveTeam }: Step2Props) {
-  const [primaryCounter, setPrimaryCounter] = useState(sessionData.primaryCounter || '');
-  const [partnerName, setPartnerName] = useState(sessionData.partners?.[0] || '');
+export default function Step2TeamSetup({ sessionData, onSaveTeam, onLogout }: Step2TeamSetupProps) {
+  const [partnerName, setPartnerName] = useState<string>(sessionData.partners?.[0] || 'Budi Prasetyo');
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // GUARD: JIKA USER DI-ASSIGN SPV / ADMIN, OTOMATIS REDIRECT DARI LAYAR COUNTER INI
+  useEffect(() => {
+    if (sessionData.role === 'admin' || sessionData.primaryCounter === 'owner') {
+      window.location.reload();
+    }
+  }, [sessionData.role, sessionData.primaryCounter]);
+
+  const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     onSaveTeam({
       ...sessionData,
-      primaryCounter: primaryCounter.trim() || sessionData.primaryCounter,
-      partners: partnerName.trim() ? [partnerName.trim()] : (sessionData.partners || []),
+      partners: partnerName.trim() ? [partnerName.trim()] : []
     });
   };
 
   return (
-    <div className="bg-slate-50 font-sans text-slate-900 min-h-screen flex flex-col justify-center items-center p-4">
-      <div className="w-full max-w-md bg-white rounded-3xl p-6 shadow-xl border border-slate-100 space-y-6">
-        <div className="flex justify-between items-center border-b border-slate-100 pb-4">
+    <div className="min-h-screen bg-slate-900 font-sans flex flex-col justify-center items-center p-4">
+      <div className="w-full max-w-sm bg-white rounded-3xl p-6 shadow-2xl space-y-6">
+        <div className="flex justify-between items-center border-b border-slate-100 pb-3">
           <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center font-bold">
-              <Users className="w-5 h-5" />
+            <div className="p-2.5 bg-indigo-50 text-indigo-600 rounded-2xl">
+              <span className="material-symbols-outlined text-[20px]">groups</span>
             </div>
             <div>
-              <h1 className="text-lg font-black text-slate-900">Setup Tim Opname</h1>
-              <p className="text-xs text-slate-500 font-medium">{sessionData.sessionName || "SO Sesi Utama 2026"}</p>
+              <h2 className="text-base font-black text-slate-900">Setup Tim Opname</h2>
+              <p className="text-xs text-slate-500 font-medium truncate max-w-50">{sessionData.sessionName}</p>
             </div>
           </div>
           <button
             type="button"
             onClick={onLogout}
-            className="p-2 text-slate-400 hover:text-red-500 rounded-xl transition-colors cursor-pointer"
+            className="p-2 text-slate-400 hover:text-slate-700 rounded-xl"
             title="Keluar"
           >
-            <LogOut className="w-5 h-5" />
+            <span className="material-symbols-outlined text-[20px]">logout</span>
           </button>
         </div>
 
-        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3.5 text-xs text-amber-900 space-y-1">
-          <p className="font-bold flex items-center gap-1.5">
-            <span>ℹ️</span> Keterangan Tim Pendamping
-          </p>
-          <p className="text-amber-800 font-medium leading-relaxed">
+        <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl space-y-1">
+          <div className="flex items-center space-x-1.5 text-amber-900 font-bold text-xs">
+            <span className="material-symbols-outlined text-[16px]">info</span>
+            <span>Keterangan Tim Pendamping</span>
+          </div>
+          <p className="text-[11px] text-amber-800/80 font-medium leading-relaxed">
             Sebelum memulai perhitungan rak, mohon lengkapi nama petugas pendamping dari tim warehouse (WH).
           </p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-1.5">
-            <label className="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-              <User className="w-3.5 h-3.5 text-indigo-600" />
-              <span>Counter Utama (SO)</span>
-            </label>
+        <form onSubmit={handleSave} className="space-y-4">
+          <div className="space-y-1">
+            <label className="text-xs font-extrabold text-slate-700 block uppercase">Counter Utama (SO)</label>
             <input
               type="text"
-              value={primaryCounter}
-              onChange={(e) => setPrimaryCounter(e.target.value)}
-              className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500/30 transition-all"
-              required
-              placeholder="Username / Nama Counter"
+              value={sessionData.primaryCounter}
+              disabled
+              className="w-full h-12 px-4 bg-slate-100 border border-slate-200 rounded-2xl text-sm font-black text-slate-800 outline-none capitalize cursor-not-allowed"
             />
           </div>
 
-          <div className="space-y-1.5">
-            <label className="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-              <Users className="w-3.5 h-3.5 text-indigo-600" />
-              <span>Tim Pendamping (Warehouse / WH)</span>
-            </label>
+          <div className="space-y-1">
+            <label className="text-xs font-extrabold text-slate-700 block uppercase">Tim Pendamping (Warehouse / WH)</label>
             <input
               type="text"
               value={partnerName}
               onChange={(e) => setPartnerName(e.target.value)}
-              placeholder="Ketik Nama Tim Pendamping (Misal: Budi Prasetyo)"
-              className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500/30 transition-all"
+              placeholder="Masukkan nama petugas WH..."
+              className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500/30 transition-all"
+              required
             />
           </div>
 
           <button
             type="submit"
-            className="w-full h-12 bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] text-white rounded-xl text-sm font-black shadow-lg shadow-indigo-600/30 transition-all flex items-center justify-center space-x-2 cursor-pointer mt-2"
+            className="w-full h-12 bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] text-white rounded-2xl text-sm font-black shadow-lg shadow-indigo-600/30 transition-all cursor-pointer flex items-center justify-center space-x-2 mt-2"
           >
             <span>Lanjut ke Countsheet (Step 3)</span>
-            <ArrowRight className="w-4 h-4" />
+            <span className="material-symbols-outlined text-[18px]">arrow_forward</span>
           </button>
         </form>
       </div>

@@ -349,9 +349,9 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
         }, { merge: true });
       });
 
-      // SIMPAN ITEM TEMUAN DENGAN WE WARISKAN SKUBRAND RESMI DARI MASTER
+      // FIX PEMBUATAN SKU DARI BARCODE MATCHED / BARCODE ASLI TANPA "TEMUAN-"
       unmappedList.forEach((unm: any) => {
-        const unmSku = (matchedMasterSKU?.SKU || `TEMUAN-${unm.barcode}`).toUpperCase().trim();
+        const unmSku = matchedMasterSKU?.SKU ? matchedMasterSKU.SKU.toUpperCase().trim() : unm.barcode.trim();
         const unmOwner = matchedMasterSKU?.Owner || 'DDI';
         const unmPrice = parseInt(matchedMasterSKU?.unitPrice) || 0;
         const unmBrand = matchedMasterSKU?.SKUBrand || unm.skuBrand || 'General';
@@ -389,7 +389,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
           timestamp: new Date().toISOString(),
           rackLocation: rack.rackNumber,
           ownerSku: unmOwner,
-          sku: unmSku,
+          sku: unmSku, // SKU murni (e.g. 3316381 atau 0300875180228)
           description: unmDesc,
           upc1: unm.barcode,
           upc2: '-',
@@ -680,7 +680,6 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                   </div>
                 </div>
 
-                {/* INTEGRASI LANGSUNG BAD STOCK UNTUK TEMUAN BARU */}
                 <div className="p-3 bg-amber-50/80 border border-amber-200 rounded-xl space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold text-amber-900">Temuan Ini Memiliki Bad Stock?</span>
