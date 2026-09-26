@@ -38,6 +38,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
   const barcodeScanInputRef = useRef<HTMLInputElement>(null);
 
   const [skuList, setSkuList] = useState<GroupedSKUItem[]>([]);
+  const [allMasterSKUs, setAllMasterSKUs] = useState<any[]>([]);
   const [isSessionLocked, setIsSessionLocked] = useState<boolean>(false);
   const [unmappedDrawerOpen, setUnmappedDrawerOpen] = useState<boolean>(false);
   const [isLoadingSave, setIsLoadingSave] = useState<boolean>(false);
@@ -66,6 +67,15 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     return () => unsub();
   }, [sessionData.sessionCode, sessionData.sessionId, sessionData.primaryCounter]);
 
+  // 3. LISTEN MASTER SKU LIST DARI FIRESTORE UNTUK AUTO-MATCHING UNMAPPED
+  useEffect(() => {
+    const unsubMaster = onSnapshot(collection(db, "master_tasks"), (snapshot) => {
+      const items = snapshot.docs.map(d => d.data());
+      setAllMasterSKUs(items);
+    });
+    return () => unsubMaster();
+  }, []);
+
   // FETCH TASK BERDASARKAN RAK & COUNTER
   useEffect(() => {
     const primaryCounter = (sessionData.primaryCounter || "Unassigned").toLowerCase().trim();
@@ -82,7 +92,6 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
 
       snapshot.docs.forEach(docSnap => {
         const data = docSnap.data();
-        // Abaikan jika task dikunci oleh sistem
         if (data.isLocked) return;
 
         const skuKey = (data.SKU || 'SKU_UNKNOWN').toUpperCase().trim();
@@ -160,11 +169,14 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
   const [unmappedPhotoUrl, setUnmappedPhotoUrl] = useState<string>('');
   const [unmappedList, setUnmappedList] = useState<UnmappedItem[]>([]);
 
-  const isBarcodeInSystem = unmappedBarcode.trim() !== '' && skuList.some(s =>
-    s.upc === unmappedBarcode.trim() ||
-    (s.upc2 && s.upc2 === unmappedBarcode.trim()) ||
-    s.sku.toLowerCase() === unmappedBarcode.trim().toLowerCase()
-  );
+  // 3. LOOKUP KE SELURUH DATABASE MASTER
+  const matchedMasterSKU = unmappedBarcode.trim() !== '' ? allMasterSKUs.find(m =>
+    (m.UPC1 && m.UPC1.trim() === unmappedBarcode.trim()) ||
+    (m.UPC2 && m.UPC2.trim() === unmappedBarcode.trim()) ||
+    (m.SKU && m.SKU.toLowerCase().trim() === unmappedBarcode.trim().toLowerCase())
+  ) : null;
+
+  const isBarcodeInSystem = !!matchedMasterSKU;
 
   const handleSetSameExpAsSystem = (index: number) => {
     if (isSessionLocked) return;
@@ -257,7 +269,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     const newItem: UnmappedItem = {
       id: Date.now().toString(),
       barcode: unmappedBarcode.trim(),
-      name: unmappedDesc.trim() || (isBarcodeInSystem ? 'Barang System Ditemukan' : 'Barang Fisik Baru Unmapped'),
+      name: unmappedDesc.trim() || (matchedMasterSKU ? (matchedMasterSKU.Description || matchedMasterSKU.SKU) : 'Barang Fisik Baru Unmapped'),
       qty: qtyNumber > 0 ? qtyNumber : 1,
       uom: unmappedUnit,
       expDate: unmappedExpDate,
@@ -293,7 +305,6 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
         const totalSubmitted = finalGoodQty + finalBadQty;
         const currentRoundNum = skuItem.currentRound || 1;
 
-        // 1. Update Master Tasks
         skuItem.docIds.forEach((docId, i) => {
           const taskRef = doc(db, "master_tasks", docId);
           batch.set(taskRef, {
@@ -308,7 +319,6 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
           }, { merge: true });
         });
 
-        // 2. AUDIT TRAIL LOG SNAPSHOT (MENCATAT RONDE SEKARANG DENGAN PRESISI)
         const sessCode = sessionData.sessionCode || sessionData.sessionId || 'SO-WRG-2026-09';
         const logId = `${sessCode}_R${currentRoundNum}_${rack.rackNumber}_${skuItem.sku}`;
         const auditRef = doc(db, "audit_logs", logId);
@@ -331,9 +341,57 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
         }, { merge: true });
       });
 
+      // 3. TAMBAHKAN TEMUAN BARANG UNMAPPED KE FIRESTORE TASK & AUDIT
+      unmappedList.forEach((unm) => {
+        const unmSku = (matchedMasterSKU?.SKU || `TEMUAN-${unm.barcode}`).toUpperCase().trim();
+        const unmOwner = matchedMasterSKU?.Owner || 'DDI';
+        const unmPrice = parseInt(matchedMasterSKU?.unitPrice) || 0;
+        const unmDesc = unm.name;
+
+        const taskId = `${rack.rackNumber}_${unmSku}_TEMUAN_${Date.now()}`;
+        const taskRef = doc(db, "master_tasks", taskId);
+
+        batch.set(taskRef, {
+          Owner: unmOwner,
+          SKU: unmSku,
+          Description: unmDesc,
+          UPC1: unm.barcode,
+          UPC2: '',
+          Location: rack.rackNumber,
+          counter: cleanCounter,
+          currentRound: 1,
+          Qty: 0,
+          QTY_ACTUAL: unm.qty,
+          QTY_GOOD: unm.qty,
+          QTY_BAD: 0,
+          isCounted: true,
+          unitPrice: unmPrice,
+          badRemarks: `[BARANG TEMUAN FISIK] Batch: ${unm.batchNumber}`,
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+
+        const logId = `${sessionData.sessionCode || 'SO'}_TEMUAN_${rack.rackNumber}_${unmSku}`;
+        const auditRef = doc(db, "audit_logs", logId);
+        batch.set(auditRef, {
+          timestamp: new Date().toISOString(),
+          rackLocation: rack.rackNumber,
+          ownerSku: unmOwner,
+          sku: unmSku,
+          description: unmDesc,
+          upc1: unm.barcode,
+          upc2: '-',
+          counterPic: cleanCounter,
+          round: 1,
+          qtyGood: unm.qty,
+          qtyBad: 0,
+          totalFinalSubmitted: unm.qty,
+          edActual: unm.expDate || '-',
+          remarks: `[ITEM TEMUAN] Batch: ${unm.batchNumber}`
+        }, { merge: true });
+      });
+
       await batch.commit();
 
-      // AUTO-NEXT RAK UNCOUNTED
       const remainingTasksQuery = query(
         collection(db, "master_tasks"),
         where("counter", "==", cleanCounter),
@@ -586,7 +644,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
 
                 {unmappedBarcode.trim() !== '' && (
                   <div className={`p-2.5 rounded-lg text-xs font-bold flex items-center justify-between ${isBarcodeInSystem ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-rose-50 text-rose-800 border border-rose-200'}`}>
-                    <span>{isBarcodeInSystem ? '✓ Ada di System (Foto Opsional)' : '⚠ TIDAK ADA di System (Wajib Foto!)'}</span>
+                    <span>{isBarcodeInSystem ? `✓ Cocok dgn Master (${matchedMasterSKU?.Owner || 'DDI'} - ${matchedMasterSKU?.SKU})` : '⚠ TIDAK ADA di Master (Wajib Foto!)'}</span>
                   </div>
                 )}
 

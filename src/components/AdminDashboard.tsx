@@ -206,7 +206,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
     const [showLevelProgress, setShowLevelProgress] = useState<boolean>(false);
     const [viewRoundFilter, setViewRoundFilter] = useState<'overall' | 1 | 2 | 3 | 4>('overall');
     const [brandSearch, setBrandSearch] = useState<string>('');
-    const [brandStatusFilter, setBrandStatusFilter] = useState<'all' | 'selisih' | 'match'>('all');
+    const [brandStatusFilter, setBrandStatusFilter] = useState<'all' | 'selisih' | 'match' | 'uncounted'>('all');
     const [expandedBrandDetail, setExpandedBrandDetail] = useState<{ [brand: string]: boolean }>({});
     const [recoveryAdjustments, setRecoveryAdjustments] = useState<{ [sku: string]: number }>({});
     const [initialFileToUpload, setInitialFileToUpload] = useState<File | null>(null);
@@ -291,7 +291,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             }
         });
 
-        // FIX SYNC KEY LOCK DENGAN DOKUMEN SESI AKTIF
         const lockDocId = activeProject.sessionCode || activeProject.id;
         const lockUnsubscribe = onSnapshot(doc(db, "round_locks", lockDocId), (docSnap) => {
             if (docSnap.exists()) {
@@ -312,14 +311,12 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         if (!activeProject) return;
         const cleanCounter = targetCounter.toLowerCase().trim();
 
-        // 1. Dapatkan task milik counter spesifik ini
         const counterTasks = masterDataList.filter(item => item.counter === cleanCounter);
         if (counterTasks.length === 0) {
             triggerNotification(`Tidak ada task ditemukan untuk counter ${cleanCounter}.`);
             return;
         }
 
-        // 2. Deteksi otomatis ronde aktif maksimum dari counter ini
         const currentCounterRound = Math.max(...counterTasks.map(t => t.currentRound || 1));
 
         if (currentCounterRound >= 3) {
@@ -329,7 +326,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
         const nextRound = currentCounterRound + 1;
 
-        // 3. Filter SKU yang selisih milik counter ini
         const disputeTasks = counterTasks.filter(item => {
             const act = item.countedQty ?? item.Qty;
             return item.isCounted && act !== item.Qty;
@@ -352,7 +348,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 const act = item.countedQty ?? item.Qty;
 
                 if (item.isCounted && act !== item.Qty) {
-                    // Reset hitungan untuk SKU selisih ke Ronde baru milik counter ini
                     batch.update(ref, {
                         currentRound: nextRound,
                         QTY_ACTUAL: null,
@@ -363,7 +358,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                         updatedAt: timestampNow
                     });
 
-                    // TULIS LOG KE AUDIT TRAIL
                     const logId = `${activeProject.sessionCode}_DEPLOY_R${nextRound}_${cleanCounter}_${item.SKU}_${item.Location}`;
                     const auditRef = doc(db, "audit_logs", logId);
                     batch.set(auditRef, {
@@ -384,7 +378,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     }, { merge: true });
 
                 } else if (item.isCounted && act === item.Qty) {
-                    // Kunci SKU yang sudah match
                     batch.update(ref, {
                         isLocked: true,
                         updatedAt: timestampNow
@@ -492,7 +485,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         triggerNotification("Audit Trail Log (.xlsx) berhasil diunduh!");
     };
 
-    // HANDLERS PENGUNCIAN GLOBAL & PER-COUNTER (DENGAN KEY CLEANUP LOWERCASE)
+    // HANDLERS PENGUNCIAN GLOBAL & PER-COUNTER
     const handleToggleGlobalLock = async () => {
         if (!activeProject) return;
         const lockDocId = activeProject.sessionCode || activeProject.id;
@@ -603,7 +596,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         triggerNotification("Template Import KTP (.xlsx) diunduh!");
     };
 
-    // BLAST EMAIL & COPY TEXT KREDENSIAL
     const handleGenerateCredentialsText = () => {
         if (globalAccounts.length === 0) {
             triggerNotification("Belum ada KTP terdaftar.");
@@ -663,6 +655,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         }
     };
 
+    // 4. SIMPLIFIKASI TEMPLATE EMAIL SIMPEL DEFAULT
     const handleBlastEmailCredentials = () => {
         if (globalAccounts.length === 0) {
             triggerNotification('Belum ada akun KTP Cloud terdaftar.');
@@ -675,21 +668,12 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         }
 
         const emailList = validAccounts.map(a => a.email.trim()).join(',');
-        const subject = encodeURIComponent("Kredensial Login Stock Opname 360");
-        const bodyContent = `Halo Tim,\n\nBerikut daftar kredensial login akun Stock Opname 360:\n\n` +
-            validAccounts.map(a => `• Username: ${a.username} | PIN: ${a.pin} | Nama: ${a.name} (${a.email})`).join('\n') +
-            `\n\nSilakan gunakan Username & PIN masing-masing untuk login.\nTerima kasih.`;
+        const subject = encodeURIComponent("Akses Login Stock Opname 360");
+        const bodyContent = encodeURIComponent("Halo Tim,\n\nBerikut kredensial akun kamu untuk masuk ke Stock Opname 360. Gunakan Username dan PIN yang terdaftar.\n\nTerima kasih.");
 
-        const mailtoUrl = `mailto:?bcc=${encodeURIComponent(emailList)}&subject=${subject}&body=${encodeURIComponent(bodyContent)}`;
-
-        try {
-            navigator.clipboard.writeText(bodyContent);
-            triggerNotification(`Kredensial disalin ke clipboard! Membuka aplikasi email blast ke ${validAccounts.length} akun...`);
-        } catch (e) {
-            triggerNotification(`Membuka aplikasi email blast ke ${validAccounts.length} akun...`);
-        }
-
+        const mailtoUrl = `mailto:?bcc=${emailList}&subject=${subject}&body=${bodyContent}`;
         triggerMailto(mailtoUrl);
+        triggerNotification(`Membuka email blast ke ${validAccounts.length} akun...`);
     };
 
     const handleSendIndividualEmail = (acc: GlobalAccount) => {
@@ -697,18 +681,12 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             triggerNotification(`Akun ${acc.username} tidak memiliki alamat email!`);
             return;
         }
-        const subject = encodeURIComponent(`Kredensial Akses Stock Opname 360 - ${acc.name}`);
-        const bodyText = `Halo ${acc.name},\n\nBerikut kredensial akun kamu untuk masuk ke aplikasi Stock Opname 360:\n\nUsername: ${acc.username}\nPIN: ${acc.pin}\n\nSalam,\nTim Operations WMS`;
-        const mailtoUrl = `mailto:${acc.email.trim()}?subject=${subject}&body=${encodeURIComponent(bodyText)}`;
-
-        try {
-            navigator.clipboard.writeText(`Username: ${acc.username}\nPIN: ${acc.pin}`);
-            triggerNotification(`Kredensial ${acc.username} disalin ke clipboard! Membuka email ke ${acc.email}...`);
-        } catch (e) {
-            triggerNotification(`Mengirim email kredensial ke ${acc.email}...`);
-        }
+        const subject = encodeURIComponent(`Akses Login Stock Opname 360 - ${acc.name}`);
+        const bodyText = encodeURIComponent(`Halo ${acc.name},\n\nBerikut kredensial akun kamu:\nUsername: ${acc.username}\nPIN: ${acc.pin}\n\nTerima kasih.`);
+        const mailtoUrl = `mailto:${acc.email.trim()}?subject=${subject}&body=${bodyText}`;
 
         triggerMailto(mailtoUrl);
+        triggerNotification(`Membuka email ke ${acc.email}...`);
     };
 
     const [newAccUser, setNewAccUser] = useState('');
@@ -1020,7 +998,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
     const activeTeamMembers = activeProject ? allProjectTeams.filter(t => t.projectId === activeProject.id) : [];
 
-    // AGGREGASI MONITORING PIC COUNTER REALTIME
     const counterGroups = masterDataList.reduce((acc: any, item) => {
         const cName = item.counter || 'Unassigned';
         if (!acc[cName]) acc[cName] = { total: 0, counted: 0, errorCount: 0 };
@@ -1056,11 +1033,34 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         return { name, total: group.total, counted: group.counted, percentage: Math.round((group.counted / group.total) * 100) };
     });
 
+    // 2. REVISI KALKULASI AKURASI BRAND (SKU BELUM DIHITUNG TIDAK BOLEH 100% MATCH)
     const brandAccuracyList = Array.from(new Set(masterDataList.map(m => m.SKUBrand))).map(brandName => {
         const brandSKUs = masterDataList.filter(m => m.SKUBrand === brandName);
-        const diffCount = brandSKUs.filter(m => m.isCounted && (m.countedQty ?? m.Qty) !== m.Qty).length;
-        return { brand: brandName || 'No Brand', totalSKUs: brandSKUs.length, diffSKUs: diffCount, accuracyPct: Math.max(0, Math.round(((brandSKUs.length) - diffCount) / (brandSKUs.length) * 100)), skuList: brandSKUs };
-    }).filter(b => b.brand.toLowerCase().includes(brandSearch.toLowerCase()) && (brandStatusFilter === 'all' || (brandStatusFilter === 'selisih' ? b.diffSKUs > 0 : b.diffSKUs === 0)));
+        const countedSKUs = brandSKUs.filter(m => m.isCounted);
+        const diffCount = countedSKUs.filter(m => (m.countedQty ?? m.Qty) !== m.Qty).length;
+
+        let accuracyPct = 0;
+        let isFullyUncounted = countedSKUs.length === 0;
+
+        if (countedSKUs.length > 0) {
+            accuracyPct = Math.max(0, Math.round(((countedSKUs.length - diffCount) / countedSKUs.length) * 100));
+        }
+
+        return {
+            brand: brandName || 'No Brand',
+            totalSKUs: brandSKUs.length,
+            countedCount: countedSKUs.length,
+            diffSKUs: diffCount,
+            accuracyPct,
+            isFullyUncounted,
+            skuList: brandSKUs
+        };
+    }).filter(b =>
+        b.brand.toLowerCase().includes(brandSearch.toLowerCase()) &&
+        (brandStatusFilter === 'all' ||
+            (brandStatusFilter === 'selisih' ? b.diffSKUs > 0 :
+                (brandStatusFilter === 'match' ? (!b.isFullyUncounted && b.diffSKUs === 0) : b.isFullyUncounted)))
+    );
 
     const matchRecoveryCount = masterDataList.filter(m => m.isCounted && (m.countedQty ?? m.Qty) === m.Qty).length;
     const varianceRecoveryCount = masterDataList.filter(m => m.isCounted && (m.countedQty ?? m.Qty) !== m.Qty).length;
@@ -1516,7 +1516,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                     ) : (
                                         <span className="bg-slate-100 text-slate-600 text-[10px] font-black px-2.5 py-1 rounded-lg border border-slate-200">SUPERVISOR</span>
                                     )}
-                                    {/* TOMBOL PENGUNCIAN GLOBAL UNTUK OWNER */}
                                     {effectiveRole === 'owner' && (
                                         <button
                                             onClick={handleToggleGlobalLock}
@@ -1590,7 +1589,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                         const cleanCounterKey = cName.toLowerCase().trim();
                                         const isLocked = !!lockedCounters[cleanCounterKey];
 
-                                        // Deteksi otomatis ronde aktif milik counter ini
                                         const cTasks = masterDataList.filter(m => m.counter === cleanCounterKey);
                                         const cMaxRound = cTasks.length > 0 ? Math.max(...cTasks.map(t => t.currentRound || 1)) : 1;
 
@@ -1607,7 +1605,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                         <span className="text-[10px] font-black px-2.5 py-1 rounded-lg bg-indigo-100 text-indigo-800">{pct}% Done</span>
                                                         {effectiveRole === 'owner' && (
                                                             <>
-                                                                {/* DEPLOY RONDE BERIKUTNYA DENGAN DETEKSI OTOMATIS PER COUNTER */}
                                                                 <button
                                                                     onClick={(e) => { e.stopPropagation(); handleDeployNextRoundForCounter(cName); }}
                                                                     title={cMaxRound >= 3 ? 'Sudah mencapai Ronde 3 Maksimal' : `Deploy Ronde ${cMaxRound + 1} Khusus ${cName}`}
@@ -1690,6 +1687,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                 <option value="all">All</option>
                                                 <option value="selisih">Selisih</option>
                                                 <option value="match">Match</option>
+                                                <option value="uncounted">Belum Dihitung</option>
                                             </select>
                                         </div>
                                     </div>
@@ -1699,10 +1697,20 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                 <div className="flex justify-between items-center">
                                                     <div>
                                                         <span className="text-sm font-black text-slate-900">{bAcc.brand}</span>
-                                                        <div className="text-xs text-slate-500 font-medium mt-0.5">{bAcc.totalSKUs} SKU Total • <span className="text-red-500 font-bold">{bAcc.diffSKUs} Selisih</span></div>
+                                                        <div className="text-xs text-slate-500 font-medium mt-0.5">
+                                                            {bAcc.totalSKUs} SKU Total ({bAcc.countedCount} Dihitung) • <span className="text-red-500 font-bold">{bAcc.diffSKUs} Selisih</span>
+                                                        </div>
                                                     </div>
                                                     <div className="flex flex-col items-end space-y-2">
-                                                        <span className={`text-[10px] font-black px-2.5 py-1 rounded-lg ${bAcc.accuracyPct === 100 ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}`}>{bAcc.accuracyPct}% Akurat</span>
+                                                        {bAcc.isFullyUncounted ? (
+                                                            <span className="text-[10px] font-black px-2.5 py-1 rounded-lg bg-slate-200 text-slate-600 border border-slate-300">
+                                                                Belum Dihitung
+                                                            </span>
+                                                        ) : (
+                                                            <span className={`text-[10px] font-black px-2.5 py-1 rounded-lg ${bAcc.accuracyPct === 100 ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}`}>
+                                                                {bAcc.accuracyPct}% Akurat
+                                                            </span>
+                                                        )}
                                                         <button onClick={() => setExpandedBrandDetail(prev => ({ ...prev, [bAcc.brand]: !prev[bAcc.brand] }))} className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded-md hover:bg-indigo-100">
                                                             {expandedBrandDetail[bAcc.brand] ? 'Tutup Detail' : 'Lihat SKU'}
                                                         </button>
@@ -1821,7 +1829,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                         </div>
                     )}
 
-                    {/* TAB 4: AUDIT TRAIL COUNTSHEET */}
+                    {/* TAB 4: AUDIT TRAIL COUNTSHEET DENGAN SCROLLBAR DAN MAX HEIGHT */}
                     {activeTab === 'audit' && (
                         <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl space-y-5">
                             <div className="flex justify-between items-center border-b pb-4">
@@ -1842,23 +1850,25 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                     </button>
                                 </div>
                             </div>
-                            <div className="overflow-x-auto border rounded-2xl max-h-125">
+
+                            {/* 1. SCROLLBAR UNTUK AUDIT LOG */}
+                            <div className="overflow-x-auto overflow-y-auto border rounded-2xl max-h-125 scrollbar-thin">
                                 <table className="w-full text-left text-[11px] min-w-max border-collapse">
-                                    <thead className="bg-slate-50 font-black text-slate-600 border-b">
+                                    <thead className="bg-slate-50 font-black text-slate-600 border-b sticky top-0 z-10">
                                         <tr>
-                                            <th className="p-3 border-r whitespace-nowrap">TIMESTAMP (JAM SUBMIT)</th>
-                                            <th className="p-3 border-r">LOKASI RAK</th>
-                                            <th className="p-3 border-r">OWNER SKU</th>
-                                            <th className="p-3 border-r">SKU & DESKRIPSI</th>
-                                            <th className="p-3 border-r">UPC 1</th>
-                                            <th className="p-3 border-r">UPC 2</th>
-                                            <th className="p-3 border-r">COUNTER PIC</th>
-                                            <th className="p-3 border-r text-center">RONDE</th>
-                                            <th className="p-3 border-r text-center text-emerald-700">QTY GOOD</th>
-                                            <th className="p-3 border-r text-center text-red-700">QTY BAD</th>
-                                            <th className="p-3 border-r text-center font-black">TOTAL FINAL SUBMITTED</th>
-                                            <th className="p-3 border-r">ED ACTUAL</th>
-                                            <th className="p-3">REMARKS</th>
+                                            <th className="p-3 border-r whitespace-nowrap bg-slate-50">TIMESTAMP (JAM SUBMIT)</th>
+                                            <th className="p-3 border-r bg-slate-50">LOKASI RAK</th>
+                                            <th className="p-3 border-r bg-slate-50">OWNER SKU</th>
+                                            <th className="p-3 border-r bg-slate-50">SKU & DESKRIPSI</th>
+                                            <th className="p-3 border-r bg-slate-50">UPC 1</th>
+                                            <th className="p-3 border-r bg-slate-50">UPC 2</th>
+                                            <th className="p-3 border-r bg-slate-50">COUNTER PIC</th>
+                                            <th className="p-3 border-r text-center bg-slate-50">RONDE</th>
+                                            <th className="p-3 border-r text-center text-emerald-700 bg-slate-50">QTY GOOD</th>
+                                            <th className="p-3 border-r text-center text-red-700 bg-slate-50">QTY BAD</th>
+                                            <th className="p-3 border-r text-center font-black bg-slate-50">TOTAL FINAL SUBMITTED</th>
+                                            <th className="p-3 border-r bg-slate-50">ED ACTUAL</th>
+                                            <th className="p-3 bg-slate-50">REMARKS</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-100 font-medium">
