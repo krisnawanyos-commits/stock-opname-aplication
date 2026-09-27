@@ -247,7 +247,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
     ];
 
     // =======================================================
-    // FITUR BACKUP ALTERNATIF AMAN (DOWNLOAD JSON FULL CLOUD)
+    // HANDLER BACKUP FULL CLOUD DATABASE TO JSON FILE
     // =======================================================
     const handleDownloadFullDatabaseBackupJSON = () => {
         if (masterDataList.length === 0) {
@@ -271,7 +271,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         downloadAnchor.click();
         downloadAnchor.remove();
 
-        triggerNotification("🛡️ Backup Cloud JSON Berhasil Diunduh ke Penyimpanan Lokal!");
+        triggerNotification("🛡️ Backup Cloud JSON Berhasil Diunduh!");
     };
 
     // RESTORE DATABASE DARI FILE BACKUP JSON
@@ -281,13 +281,12 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             try {
                 const backup = JSON.parse(e.target?.result as string);
                 if (!backup.masterTasks || !Array.isArray(backup.masterTasks)) {
-                    triggerNotification("File JSON tidak valid atau bukan format backup SO 360.");
+                    triggerNotification("File JSON tidak valid!");
                     return;
                 }
 
-                triggerNotification("Memulai pemulihan data dari file backup JSON...");
+                triggerNotification("Memulihkan data dari JSON...");
 
-                // Write Master Tasks
                 const taskBatch = writeBatch(db);
                 backup.masterTasks.forEach((task: any) => {
                     const taskRef = doc(db, "master_tasks", task.id);
@@ -295,7 +294,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 });
                 await taskBatch.commit();
 
-                // Write Audit Logs
                 if (backup.auditTrailLogs && Array.isArray(backup.auditTrailLogs)) {
                     const auditBatch = writeBatch(db);
                     backup.auditTrailLogs.forEach((log: any) => {
@@ -305,10 +303,10 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     await auditBatch.commit();
                 }
 
-                triggerNotification("✅ PEMULIHAN SUKSES! Seluruh data dari JSON berhasil dipulihkan ke Cloud!");
+                triggerNotification("✅ PEMULIHAN SUKSES! Seluruh data berhasil dipulihkan!");
             } catch (err: any) {
                 console.error("Restore Error:", err);
-                triggerNotification("Gagal memulihkan database. File rusak atau salah format.");
+                triggerNotification("Gagal memulihkan database.");
             }
         };
         reader.readAsText(file);
@@ -2102,7 +2100,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                 <td className="p-3 border-r text-center font-black text-red-600">{log.qtyBad ?? 0}</td>
                                                 <td className="p-3 border-r text-center font-black bg-slate-50">{log.totalFinalSubmitted ?? log.qtyActual ?? 0} PCS</td>
                                                 <td className="p-3 border-r font-mono">{log.edActual || log.expiredDateActual || '-'}</td>
-                                                <td className="p-3 text-slate-500">{log.remarks || log.Remarks || '-'}</td>
+                                                <td className="p-3 bg-slate-50">{log.remarks || log.Remarks || '-'}</td>
                                             </tr>
                                         ))}
                                         {auditLogs.length === 0 && (
@@ -2121,7 +2119,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     {/* TAB 5: SETTINGS & BACKUP EMERGENCY */}
                     {activeTab === 'settings' && effectiveRole === 'owner' && (
                         <div className="space-y-6">
-                            {/* TOMBOL EMERGENCY BACKUP JSON & RESTORE */}
+                            {/* KARTU EMERGENCY BACKUP JSON & RESTORE */}
                             <div className="bg-white rounded-3xl border border-indigo-100 p-6 shadow-xl space-y-4">
                                 <div className="border-b pb-3 flex justify-between items-center">
                                     <h3 className="text-base font-black text-slate-900 flex items-center space-x-2">
