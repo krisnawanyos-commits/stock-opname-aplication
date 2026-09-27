@@ -31,6 +31,7 @@ interface GroupedSKUItem {
   docIds: string[];
   batchCount: number;
   allSystemEds: string[];
+  isUnmappedFound?: boolean; // Tanda apakah ini barang temuan baru
 }
 
 export default function Step4CountDetail({ sessionData, rack, onBackToList, onLogout, onSelectNextRack }: Step4CountDetailProps) {
@@ -47,7 +48,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     isOpen: false, title: '', message: '',
   });
 
-  // 1. LISTEN GEMBOK LOCK SESI GLOBAL & COUNTER
+  // 1. LISTEN LOCK STATUS SESI GLOBAL & COUNTER
   useEffect(() => {
     const lockDocId = sessionData.sessionCode || sessionData.sessionId || "SO-WRG-2026-09";
     const lockRef = doc(db, "round_locks", lockDocId);
@@ -76,7 +77,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     return () => unsubMaster();
   }, []);
 
-  // 3. LISTEN MASTER TASKS LOKASI RAK AKTIF
+  // 3. LISTEN MASTER TASKS LOKASI RAK AKTIF & PERTAHANKAN (PRESERVE) STATE KETIKAN COUNTER
   useEffect(() => {
     const primaryCounter = (sessionData.primaryCounter || "Unassigned").toLowerCase().trim();
     const targetLocation = rack.rackNumber || rack.id;
@@ -88,74 +89,100 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     );
 
     const unsubscribe = onSnapshot(qTasks, (snapshot) => {
-      const groupedMap: Record<string, GroupedSKUItem> = {};
-
-      snapshot.docs.forEach(docSnap => {
-        const data = docSnap.data();
-        if (data.isLocked) return;
-        if (!data.SKU || data.SKU === 'SKU_UNKNOWN') return;
-
-        const skuKey = data.SKU.toUpperCase().trim();
-        const sysQty = parseInt(data.Qty || data.QTY_SYSTEM) || 0;
-
-        const rawActQty = data.QTY_ACTUAL ?? data.countedQty;
-        const numActQty = parseInt(rawActQty, 10);
-        const hasActQty = rawActQty !== undefined && rawActQty !== null && !isNaN(numActQty);
-
-        const rawGoodQty = data.QTY_GOOD ?? data.qtyGood;
-        const numGoodQty = parseInt(rawGoodQty, 10);
-
-        const rawBadQty = data.QTY_BAD ?? data.qtyBad;
-        const numBadQty = parseInt(rawBadQty, 10);
-
-        const edSys = data.expiredDateSystem || '';
-        const taskRound = parseInt(data.currentRound, 10) || 1;
-
-        if (!groupedMap[skuKey]) {
-          groupedMap[skuKey] = {
-            sku: skuKey,
-            upc: data.UPC1 || data.upc || 'N/A',
-            upc2: data.UPC2 || '',
-            name: data.Description || data.name || skuKey,
-            category: `${data.Zone || 'RACKING'} • ${data.SKUBrand || 'General'}`,
-            uom: (data.satuanHitung as 'PCS' | 'CARTON') || 'PCS',
-            totalSystemQty: sysQty,
-            qtyGood: !isNaN(numGoodQty) ? numGoodQty.toString() : (hasActQty ? numActQty.toString() : ""),
-            qtyBad: !isNaN(numBadQty) && numBadQty > 0 ? numBadQty.toString() : "",
-            expDateSystem: edSys,
-            expDateActual: data.expDateActual || data.expiredDateActual || '',
-            isBadStock: (!isNaN(numBadQty) && numBadQty > 0) || !!data.badRemarks,
-            badRemarks: data.badRemarks || '',
-            isCounted: !!data.isCounted || hasActQty,
-            currentRound: taskRound,
-            docIds: [docSnap.id],
-            batchCount: 1,
-            allSystemEds: edSys ? [edSys] : []
+      setSkuList((prevSkuList) => {
+        // Buat map dari inputan lokal yang sedang diketik counter agar tidak ter-reset saat Firestore snapshot update
+        const localStateMap: Record<string, { qtyGood: string; qtyBad: string; expDateActual: string; isBadStock: boolean; badRemarks: string }> = {};
+        prevSkuList.forEach(item => {
+          localStateMap[item.sku] = {
+            qtyGood: item.qtyGood,
+            qtyBad: item.qtyBad,
+            expDateActual: item.expDateActual,
+            isBadStock: item.isBadStock,
+            badRemarks: item.badRemarks
           };
-        } else {
-          groupedMap[skuKey].totalSystemQty += sysQty;
-          groupedMap[skuKey].docIds.push(docSnap.id);
-          groupedMap[skuKey].batchCount += 1;
+        });
 
-          if (edSys && !groupedMap[skuKey].allSystemEds.includes(edSys)) {
-            groupedMap[skuKey].allSystemEds.push(edSys);
-            groupedMap[skuKey].allSystemEds.sort();
-          }
+        const groupedMap: Record<string, GroupedSKUItem> = {};
 
-          if (hasActQty) {
-            const currentGood = parseInt(groupedMap[skuKey].qtyGood || "0", 10);
-            groupedMap[skuKey].qtyGood = (currentGood + numActQty).toString();
-            groupedMap[skuKey].isCounted = true;
-          }
+        snapshot.docs.forEach(docSnap => {
+          const data = docSnap.data();
+          if (data.isLocked) return;
+          if (!data.SKU || data.SKU === 'SKU_UNKNOWN') return;
 
-          const currentEd = groupedMap[skuKey].expDateSystem;
-          if (edSys && (!currentEd || edSys < currentEd)) {
-            groupedMap[skuKey].expDateSystem = edSys;
+          const skuKey = data.SKU.toUpperCase().trim();
+          const sysQty = parseInt(data.Qty || data.QTY_SYSTEM) || 0;
+
+          const rawActQty = data.QTY_ACTUAL ?? data.countedQty;
+          const numActQty = parseInt(rawActQty, 10);
+          const hasActQty = rawActQty !== undefined && rawActQty !== null && !isNaN(numActQty);
+
+          const rawGoodQty = data.QTY_GOOD ?? data.qtyGood;
+          const numGoodQty = parseInt(rawGoodQty, 10);
+
+          const rawBadQty = data.QTY_BAD ?? data.qtyBad;
+          const numBadQty = parseInt(rawBadQty, 10);
+
+          const edSys = data.expiredDateSystem || '';
+          const taskRound = parseInt(data.currentRound, 10) || 1;
+          const isUnmapped = sysQty === 0 || docSnap.id.includes('_TEMUAN_');
+
+          if (!groupedMap[skuKey]) {
+            // Jika ada ketikan lokal di memori HP, pakai nilai lokal tersebut
+            const existingLocal = localStateMap[skuKey];
+
+            groupedMap[skuKey] = {
+              sku: skuKey,
+              upc: data.UPC1 || data.upc || 'N/A',
+              upc2: data.UPC2 || '',
+              name: data.Description || data.name || skuKey,
+              category: `${data.Zone || 'RACKING'} • ${data.SKUBrand || 'General'}`,
+              uom: (data.satuanHitung as 'PCS' | 'CARTON') || 'PCS',
+              totalSystemQty: sysQty,
+              qtyGood: existingLocal ? existingLocal.qtyGood : (!isNaN(numGoodQty) ? numGoodQty.toString() : (hasActQty ? numActQty.toString() : "")),
+              qtyBad: existingLocal ? existingLocal.qtyBad : (!isNaN(numBadQty) && numBadQty > 0 ? numBadQty.toString() : ""),
+              expDateSystem: edSys,
+              expDateActual: existingLocal ? existingLocal.expDateActual : (data.expDateActual || data.expiredDateActual || ''),
+              isBadStock: existingLocal ? existingLocal.isBadStock : ((!isNaN(numBadQty) && numBadQty > 0) || !!data.badRemarks),
+              badRemarks: existingLocal ? existingLocal.badRemarks : (data.badRemarks || ''),
+              isCounted: !!data.isCounted || hasActQty,
+              currentRound: taskRound,
+              docIds: [docSnap.id],
+              batchCount: 1,
+              allSystemEds: edSys ? [edSys] : [],
+              isUnmappedFound: isUnmapped
+            };
+          } else {
+            groupedMap[skuKey].totalSystemQty += sysQty;
+            groupedMap[skuKey].docIds.push(docSnap.id);
+            groupedMap[skuKey].batchCount += 1;
+
+            if (edSys && !groupedMap[skuKey].allSystemEds.includes(edSys)) {
+              groupedMap[skuKey].allSystemEds.push(edSys);
+              groupedMap[skuKey].allSystemEds.sort();
+            }
+
+            if (!localStateMap[skuKey] && hasActQty) {
+              const currentGood = parseInt(groupedMap[skuKey].qtyGood || "0", 10);
+              groupedMap[skuKey].qtyGood = (currentGood + numActQty).toString();
+              groupedMap[skuKey].isCounted = true;
+            }
+
+            const currentEd = groupedMap[skuKey].expDateSystem;
+            if (edSys && (!currentEd || edSys < currentEd)) {
+              groupedMap[skuKey].expDateSystem = edSys;
+            }
           }
-        }
+        });
+
+        // POIN 2: SORTING FIXED RAK (Master SKU WMS selalu di atas, Barang Temuan di Bawah)
+        const sortedList = Object.values(groupedMap).sort((a, b) => {
+          if (a.isUnmappedFound && !b.isUnmappedFound) return 1;  // a temuan -> taruh bawah
+          if (!a.isUnmappedFound && b.isUnmappedFound) return -1; // b temuan -> a di atas
+          return a.sku.localeCompare(b.sku);
+        });
+
+        return sortedList;
       });
-
-      setSkuList(Object.values(groupedMap));
     });
 
     return () => unsubscribe();
@@ -266,7 +293,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     }
   };
 
-  // TAMBAH UNMAPPED & SINKRONISASI INSTAN KE FIRESTORE
+  // TAMBAH UNMAPPED & SINKRONISASI INSTAN KE FIRESTORE TANPA MERESET INPUT SKU LAIN
   const handleAddUnmapped = async () => {
     if (isSessionLocked) return;
     if (!unmappedBarcode.trim()) {
@@ -283,7 +310,6 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     const badQtyNum = unmappedIsBadStock ? parseInt(unmappedBadQty || "0", 10) : 0;
     const cleanCounter = (sessionData.primaryCounter || 'Unassigned').toLowerCase().trim();
 
-    // WARISKAN SKU RESMI JIKA RELEVAN & TANPA PREFIX "TEMUAN-"
     const unmSku = matchedMasterSKU?.SKU ? matchedMasterSKU.SKU.toUpperCase().trim() : unmappedBarcode.trim();
     const unmOwner = matchedMasterSKU?.Owner || 'DDI';
     const unmPrice = parseInt(matchedMasterSKU?.unitPrice) || 0;
@@ -308,6 +334,29 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     const taskRef = doc(db, "master_tasks", taskId);
 
     const batch = writeBatch(db);
+
+    // POIN 1: SIMPAN SEKALIGUS ANGKA INPUTAN LOKAL SKU LAIN KE FIRESTORE SO THEY DON'T GET RESET
+    skuList.forEach(skuItem => {
+      const finalGoodQty = parseInt(skuItem.qtyGood || "0", 10);
+      const finalBadQty = parseInt(skuItem.qtyBad || "0", 10);
+      const skuTotalSubmitted = finalGoodQty + finalBadQty;
+
+      skuItem.docIds.forEach((docId, i) => {
+        const existingTaskRef = doc(db, "master_tasks", docId);
+        batch.set(existingTaskRef, {
+          counter: cleanCounter,
+          isCounted: skuTotalSubmitted > 0 ? true : skuItem.isCounted,
+          QTY_ACTUAL: i === 0 ? skuTotalSubmitted : 0,
+          QTY_GOOD: i === 0 ? finalGoodQty : 0,
+          QTY_BAD: i === 0 ? finalBadQty : 0,
+          badRemarks: i === 0 ? (skuItem.badRemarks || '') : '',
+          expDateActual: skuItem.expDateActual || '',
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+      });
+    });
+
+    // MASUKKAN DOKUMEN TEMUAN BARU
     batch.set(taskRef, {
       Owner: unmOwner,
       SKU: unmSku,
@@ -356,7 +405,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     setUnmappedIsBadStock(false);
     setUnmappedBadQty("");
     setUnmappedBadRemarks('');
-    setModal({ isOpen: true, type: 'success', title: 'Item Temuan Tersimpan!', message: `Item ${unmSku} pada Rak ${rack.rackNumber} langsung tersimpan ke Cloud. Status rak resmi Selesai!` });
+    setModal({ isOpen: true, type: 'success', title: 'Item Temuan Tersimpan!', message: `Item ${unmSku} pada Rak ${rack.rackNumber} langsung tersimpan ke Cloud. Input SKU lain tetap aman!` });
   };
 
   const handleDeleteUnmapped = (id: string) => {
@@ -524,14 +573,16 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             </div>
           </div>
 
-          {/* RENDER KARTU SKU MASTER WMS */}
+          {/* RENDER KARTU SKU MASTER WMS (TERURUT DI ATAS) & TEMUAN (DI BAWAH) */}
           {skuList.map((currentSku, idx) => (
-            <div key={currentSku.sku} className="bg-white rounded-xl p-space-md shadow-xs border border-slate-200 space-y-space-md relative overflow-hidden">
-              <div className="absolute top-0 left-0 right-0 h-1.5 bg-blue-600"></div>
+            <div key={currentSku.sku} className={`bg-white rounded-xl p-space-md shadow-xs border space-y-space-md relative overflow-hidden ${currentSku.isUnmappedFound ? 'border-amber-300' : 'border-slate-200'}`}>
+              <div className={`absolute top-0 left-0 right-0 h-1.5 ${currentSku.isUnmappedFound ? 'bg-amber-500' : 'bg-blue-600'}`}></div>
 
               <div className="space-y-1 pt-1">
                 <div className="flex items-center justify-between">
-                  <span className="font-label-lg text-blue-700 tracking-wider font-bold">SKU: {currentSku.sku}</span>
+                  <span className={`font-label-lg tracking-wider font-bold ${currentSku.isUnmappedFound ? 'text-amber-800' : 'text-blue-700'}`}>
+                    {currentSku.isUnmappedFound ? `[TEMUAN] SKU: ${currentSku.sku}` : `SKU: ${currentSku.sku}`}
+                  </span>
                   <span className="bg-slate-100 text-slate-700 border border-slate-200 px-2 py-0.5 rounded font-label-sm">{currentSku.uom}</span>
                 </div>
                 <p className="font-mono text-xs font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded-md w-fit">
