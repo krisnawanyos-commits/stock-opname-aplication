@@ -65,6 +65,8 @@ interface MasterSKUItem {
     thirdPartyQty?: number;
     unitPrice?: number;
     isCounted?: boolean;
+    round1Actual?: number;
+    round2Actual?: number;
 }
 
 interface LocationOption {
@@ -396,7 +398,9 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     qtyBad: isCounted ? calcBad : undefined,
                     Remarks: data.badRemarks || data.Remarks || '',
                     isCounted: !!isCounted,
-                    unitPrice: parseInt(data.unitPrice) || 0
+                    unitPrice: parseInt(data.unitPrice) || 0,
+                    round1Actual: data.round1Actual,
+                    round2Actual: data.round2Actual
                 };
             });
 
@@ -420,6 +424,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         return () => { unsubscribe(); lockUnsubscribe(); };
     }, [activeProject]);
 
+    // DEPLOY RONDE MANDIRI DENGAN ATURAN KUNCI JIKA HITUNGAN SAMA
     const handleDeployNextRoundForCounter = async (targetCounter: string) => {
         if (effectiveRole === 'spv') {
             triggerNotification('Hanya Super Admin/Owner yang memiliki hak deploy ronde.');
@@ -446,6 +451,10 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
         const disputeTasks = counterTasks.filter(item => {
             const act = item.countedQty ?? item.Qty;
+            // Jika R2 = R1, kualifikasikan sebagai Match Valid
+            if (currentCounterRound === 2 && item.round1Actual !== undefined && act === item.round1Actual) {
+                return false;
+            }
             return item.isCounted && act !== item.Qty;
         });
 
@@ -454,7 +463,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             return;
         }
 
-        if (!window.confirm(`AKSI OWNER: Deploy RONDE ${nextRound} KHUSUS untuk Counter "${cleanCounter}"? (${disputeTasks.length} SKU Selisih akan di-reset untuk dihitung ulang)`)) return;
+        if (!window.confirm(`AKSI OWNER: Deploy RONDE ${nextRound} KHUSUS untuk Counter "${cleanCounter}"? (${disputeTasks.length} SKU Selisih akan di-reset)`)) return;
 
         try {
             const batch = writeBatch(db);
@@ -465,7 +474,9 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 const ref = doc(db, "master_tasks", item.id);
                 const act = item.countedQty ?? item.Qty;
 
-                if (item.isCounted && act !== item.Qty) {
+                const isR2MatchR1 = (currentCounterRound === 2 && item.round1Actual !== undefined && act === item.round1Actual);
+
+                if (item.isCounted && act !== item.Qty && !isR2MatchR1) {
                     batch.update(ref, {
                         currentRound: nextRound,
                         QTY_ACTUAL: null,
@@ -495,7 +506,8 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                         remarks: `[DEPLOY R${nextRound} PIC: ${cleanCounter}] Di-reset untuk hitung ulang karena selisih R${currentCounterRound} (Act: ${act} vs WMS: ${item.Qty})`
                     }, { merge: true });
 
-                } else if (item.isCounted && act === item.Qty) {
+                } else {
+                    // Kunci otomatis SKU yang Match
                     batch.update(ref, {
                         isLocked: true,
                         updatedAt: timestampNow
@@ -504,7 +516,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             });
 
             await batch.commit();
-            triggerNotification(`🚀 Ronde ${nextRound} Berhasil Dideploy Khusus untuk Counter "${cleanCounter}"! (${disputeTasks.length} SKU)`);
+            triggerNotification(`🚀 Ronde ${nextRound} Berhasil Dideploy Khusus untuk Counter "${cleanCounter}"! (${disputeTasks.length} SKU Selisih)`);
         } catch (err: any) {
             console.error(`Deploy Round ${nextRound} Error:`, err);
             triggerNotification(`Gagal Deploy Ronde ${nextRound}: ${err.message || String(err)}`);
@@ -752,13 +764,13 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
                     triggerNotification("Reset data lama & mengunggah data baru ke Cloud...");
 
-                    // CLEAR MASTER TASKS LAMA
+                    // 1. WIPE CLEAN MASTER TASKS
                     const oldDocsSnap = await getDocs(collection(db, "master_tasks"));
                     const cleanBatch = writeBatch(db);
                     oldDocsSnap.docs.forEach(oldDoc => cleanBatch.delete(oldDoc.ref));
                     await cleanBatch.commit();
 
-                    // WIPE CLEAN AUDIT LOGS DENGAN PROJEK BARU
+                    // 2. WIPE CLEAN AUDIT LOGS UNTUK SINKRONISASI PROJECT BARU
                     const oldAuditSnap = await getDocs(collection(db, "audit_logs"));
                     const cleanAuditBatch = writeBatch(db);
                     oldAuditSnap.docs.forEach(oldDoc => cleanAuditBatch.delete(oldDoc.ref));
@@ -1046,13 +1058,21 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
     const activeTeamMembers = activeProject ? allProjectTeams.filter(t => t.projectId === activeProject.id) : [];
 
+    // ACCURATE COUNTER PIC PROGRESS (MENGHITUNG RONDE AKTIF SECARA PRESISI)
     const counterGroups = masterDataList.reduce((acc: any, item) => {
         const cName = item.counter || 'Unassigned';
         if (!acc[cName]) acc[cName] = { total: 0, counted: 0, errorCount: 0 };
-        acc[cName].total++;
-        if (item.isCounted) {
-            acc[cName].counted++;
-            if ((item.countedQty ?? item.Qty) !== item.Qty) acc[cName].errorCount++;
+
+        // Hanya hitung task pada ronde aktif counter tersebut
+        const cTasks = masterDataList.filter(m => m.counter === cName);
+        const activeRound = cTasks.length > 0 ? Math.max(...cTasks.map(t => t.currentRound || 1)) : 1;
+
+        if (item.currentRound === activeRound) {
+            acc[cName].total++;
+            if (item.isCounted) {
+                acc[cName].counted++;
+                if ((item.countedQty ?? item.Qty) !== item.Qty) acc[cName].errorCount++;
+            }
         }
         return acc;
     }, {});
@@ -1099,10 +1119,32 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         return { name, total: group.total, counted: group.counted, percentage: Math.round((group.counted / group.total) * 100) };
     });
 
+    // FIX: GROUPING SKU SEJENIS DENGAN BRAND YANG SAMA UNTUK MENCEGAH DUPLIKASI BARIS
     const brandAccuracyList = Array.from(new Set(masterDataList.map(m => m.SKUBrand))).map(brandName => {
         const brandSKUs = masterDataList.filter(m => m.SKUBrand === brandName);
-        const countedSKUs = brandSKUs.filter(m => m.isCounted);
-        const diffCount = countedSKUs.filter(m => (m.countedQty ?? m.Qty) !== m.Qty).length;
+
+        // Agregasi SKU sejenis agar tidak muncul dua baris dengan SKU sama
+        const groupedSKUMap: Record<string, { SKU: string; Qty: number; countedQty: number; isCounted: boolean }> = {};
+        brandSKUs.forEach(item => {
+            if (!groupedSKUMap[item.SKU]) {
+                groupedSKUMap[item.SKU] = {
+                    SKU: item.SKU,
+                    Qty: item.Qty || 0,
+                    countedQty: item.countedQty || 0,
+                    isCounted: !!item.isCounted
+                };
+            } else {
+                groupedSKUMap[item.SKU].Qty += (item.Qty || 0);
+                if (item.isCounted) {
+                    groupedSKUMap[item.SKU].countedQty += (item.countedQty || 0);
+                    groupedSKUMap[item.SKU].isCounted = true;
+                }
+            }
+        });
+
+        const aggregatedSKUList = Object.values(groupedSKUMap);
+        const countedSKUs = aggregatedSKUList.filter(m => m.isCounted);
+        const diffCount = countedSKUs.filter(m => m.countedQty !== m.Qty).length;
 
         let accuracyPct = 0;
         let isFullyUncounted = countedSKUs.length === 0;
@@ -1113,12 +1155,12 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
         return {
             brand: brandName || 'No Brand',
-            totalSKUs: brandSKUs.length,
+            totalSKUs: aggregatedSKUList.length,
             countedCount: countedSKUs.length,
             diffSKUs: diffCount,
             accuracyPct,
             isFullyUncounted,
-            skuList: brandSKUs
+            skuList: aggregatedSKUList
         };
     }).filter(b =>
         b.brand.toLowerCase().includes(brandSearch.toLowerCase()) &&

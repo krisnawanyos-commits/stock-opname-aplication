@@ -10,9 +10,9 @@ interface Step2TeamSetupProps {
 export default function Step2TeamSetup({ sessionData, onSaveTeam, onLogout }: Step2TeamSetupProps) {
   const [partnerName, setPartnerName] = useState<string>(sessionData.partners?.[0] || 'Budi Prasetyo');
 
-  // GUARD: JIKA USER DI-ASSIGN SPV / ADMIN, OTOMATIS REDIRECT DARI LAYAR COUNTER INI
+  // GUARD: REDIRECT SPV OTOMATIS KE DASHBOARD ADMIN
   useEffect(() => {
-    if (sessionData.role === 'admin' || sessionData.primaryCounter === 'owner') {
+    if (sessionData.role === 'admin' || sessionData.primaryCounter === 'owner' || sessionData.primaryCounter === 'pamungkas') {
       window.location.reload();
     }
   }, [sessionData.role, sessionData.primaryCounter]);

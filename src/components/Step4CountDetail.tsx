@@ -47,7 +47,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     isOpen: false, title: '', message: '',
   });
 
-  // 1. LISTEN LOCK STATUS SESI GLOBAL & COUNTER
+  // 1. LISTEN GEMBOK LOCK SESI GLOBAL & COUNTER
   useEffect(() => {
     const lockDocId = sessionData.sessionCode || sessionData.sessionId || "SO-WRG-2026-09";
     const lockRef = doc(db, "round_locks", lockDocId);
@@ -67,7 +67,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     return () => unsub();
   }, [sessionData.sessionCode, sessionData.sessionId, sessionData.primaryCounter]);
 
-  // 2. FETCH KATALOG MASTER SKU
+  // 2. FETCH KATALOG MASTER SKU UTAMA
   useEffect(() => {
     const unsubMaster = onSnapshot(collection(db, "master_tasks"), (snapshot) => {
       const items = snapshot.docs.map(d => d.data());
@@ -76,7 +76,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     return () => unsubMaster();
   }, []);
 
-  // 3. LISTEN MASTER TASKS RAK AKTIF
+  // 3. LISTEN MASTER TASKS LOKASI RAK AKTIF
   useEffect(() => {
     const primaryCounter = (sessionData.primaryCounter || "Unassigned").toLowerCase().trim();
     const targetLocation = rack.rackNumber || rack.id;
@@ -161,7 +161,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     return () => unsubscribe();
   }, [rack, sessionData]);
 
-  // STATE UNMAPPED ITEM
+  // STATE UNMAPPED FORM
   const [unmappedBarcode, setUnmappedBarcode] = useState<string>('');
   const [unmappedQty, setUnmappedQty] = useState<string>("1");
   const [unmappedUnit, setUnmappedUnit] = useState<'PCS' | 'CARTON'>('PCS');
@@ -170,7 +170,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
   const [unmappedDesc, setUnmappedDesc] = useState<string>('');
   const [unmappedPhotoUrl, setUnmappedPhotoUrl] = useState<string>('');
 
-  // STATE BAD STOCK PADA UNMAPPED (STRING KOSONG UNTUK MENCEGAH "01")
+  // STATE BAD STOCK DENGAN INITIAL STRING KOSONG (MENCEGAH NGETIK "01")
   const [unmappedIsBadStock, setUnmappedIsBadStock] = useState<boolean>(false);
   const [unmappedBadQty, setUnmappedBadQty] = useState<string>("");
   const [unmappedBadRemarks, setUnmappedBadRemarks] = useState<string>('');
@@ -266,7 +266,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     }
   };
 
-  // TAMBAH UNMAPPED & SYNC LANGSUNG KE FIRESTORE
+  // TAMBAH UNMAPPED & SINKRONISASI INSTAN KE FIRESTORE
   const handleAddUnmapped = async () => {
     if (isSessionLocked) return;
     if (!unmappedBarcode.trim()) {
@@ -283,7 +283,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     const badQtyNum = unmappedIsBadStock ? parseInt(unmappedBadQty || "0", 10) : 0;
     const cleanCounter = (sessionData.primaryCounter || 'Unassigned').toLowerCase().trim();
 
-    // HAPUS PREFIX "TEMUAN-" DARI KOLOM SKU
+    // WARISKAN SKU RESMI JIKA RELEVAN & TANPA PREFIX "TEMUAN-"
     const unmSku = matchedMasterSKU?.SKU ? matchedMasterSKU.SKU.toUpperCase().trim() : unmappedBarcode.trim();
     const unmOwner = matchedMasterSKU?.Owner || 'DDI';
     const unmPrice = parseInt(matchedMasterSKU?.unitPrice) || 0;
@@ -302,10 +302,8 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       photoUrl: unmappedPhotoUrl,
     };
 
-    // 1. Simpan ke local state unmappedList agar dibaca oleh UI
     setUnmappedList((prev) => [...prev, newItem]);
 
-    // 2. Direct Sync ke Firestore
     const taskId = `${rack.rackNumber}_${unmSku}_TEMUAN_${Date.now()}`;
     const taskRef = doc(db, "master_tasks", taskId);
 
@@ -361,7 +359,6 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     setModal({ isOpen: true, type: 'success', title: 'Item Temuan Tersimpan!', message: `Item ${unmSku} pada Rak ${rack.rackNumber} langsung tersimpan ke Cloud. Status rak resmi Selesai!` });
   };
 
-  // FUNGSI HAPUS UNMAPPED DARI STATE
   const handleDeleteUnmapped = (id: string) => {
     if (isSessionLocked) return;
     setUnmappedList((prev) => prev.filter((item) => item.id !== id));
@@ -511,7 +508,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
         </div>
       </header>
 
-      {/* KONTEN UTAMA DENGAN SELURUH KARTU SKU & DRAWER UNMAPPED */}
+      {/* KONTEN UTAMA DENGAN KARTU SKU & DRAWER UNMAPPED */}
       <main className="flex-1 flex flex-col relative w-full px-margin pt-36 pb-32 bg-slate-50 min-h-screen max-w-md mx-auto">
         <div className="flex flex-col w-full pb-12 space-y-4">
 
@@ -527,7 +524,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             </div>
           </div>
 
-          {/* RENDER KARTU SKU BAWAAN MASTER WMS */}
+          {/* RENDER KARTU SKU MASTER WMS */}
           {skuList.map((currentSku, idx) => (
             <div key={currentSku.sku} className="bg-white rounded-xl p-space-md shadow-xs border border-slate-200 space-y-space-md relative overflow-hidden">
               <div className="absolute top-0 left-0 right-0 h-1.5 bg-blue-600"></div>
@@ -697,7 +694,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                   </div>
                 </div>
 
-                {/* FORM BAD STOCK UNMAPPED */}
+                {/* FORM BAD STOCK UNMAPPED DENGAN STRING KOSONG DEFAULT */}
                 <div className="p-3 bg-amber-50/80 border border-amber-200 rounded-xl space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold text-amber-900">Temuan Ini Memiliki Bad Stock?</span>
@@ -750,7 +747,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             )}
           </div>
 
-          {/* RENDER DAFTAR UNMAPPED UNTUK MEMBACA STATE UNMAPPEDLIST & HANDLEDELETEUNMAPPED */}
+          {/* RENDER LIST TEMUAN UNMAPPED */}
           {unmappedList.length > 0 && (
             <div className="bg-white rounded-xl p-space-md shadow-xs border border-slate-200 space-y-2">
               <h4 className="font-bold text-sm text-slate-800 border-b pb-2">Daftar Temuan di Rak Ini ({unmappedList.length})</h4>
