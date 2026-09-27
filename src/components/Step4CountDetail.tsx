@@ -31,7 +31,7 @@ interface GroupedSKUItem {
   docIds: string[];
   batchCount: number;
   allSystemEds: string[];
-  isUnmappedFound?: boolean; // Tanda apakah ini barang temuan baru
+  isUnmappedFound?: boolean;
 }
 
 export default function Step4CountDetail({ sessionData, rack, onBackToList, onLogout, onSelectNextRack }: Step4CountDetailProps) {
@@ -48,7 +48,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     isOpen: false, title: '', message: '',
   });
 
-  // 1. LISTEN LOCK STATUS SESI GLOBAL & COUNTER
+  // 1. LISTEN GEMBOK LOCK SESI GLOBAL & COUNTER
   useEffect(() => {
     const lockDocId = sessionData.sessionCode || sessionData.sessionId || "SO-WRG-2026-09";
     const lockRef = doc(db, "round_locks", lockDocId);
@@ -77,7 +77,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     return () => unsubMaster();
   }, []);
 
-  // 3. LISTEN MASTER TASKS LOKASI RAK AKTIF & PERTAHANKAN (PRESERVE) STATE KETIKAN COUNTER
+  // 3. LISTEN MASTER TASKS LOKASI RAK AKTIF & PERTAHANKAN MEMORI INPUT KETIKAN
   useEffect(() => {
     const primaryCounter = (sessionData.primaryCounter || "Unassigned").toLowerCase().trim();
     const targetLocation = rack.rackNumber || rack.id;
@@ -90,7 +90,6 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
 
     const unsubscribe = onSnapshot(qTasks, (snapshot) => {
       setSkuList((prevSkuList) => {
-        // Buat map dari inputan lokal yang sedang diketik counter agar tidak ter-reset saat Firestore snapshot update
         const localStateMap: Record<string, { qtyGood: string; qtyBad: string; expDateActual: string; isBadStock: boolean; badRemarks: string }> = {};
         prevSkuList.forEach(item => {
           localStateMap[item.sku] = {
@@ -127,7 +126,6 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
           const isUnmapped = sysQty === 0 || docSnap.id.includes('_TEMUAN_');
 
           if (!groupedMap[skuKey]) {
-            // Jika ada ketikan lokal di memori HP, pakai nilai lokal tersebut
             const existingLocal = localStateMap[skuKey];
 
             groupedMap[skuKey] = {
@@ -174,14 +172,12 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
           }
         });
 
-        // POIN 2: SORTING FIXED RAK (Master SKU WMS selalu di atas, Barang Temuan di Bawah)
-        const sortedList = Object.values(groupedMap).sort((a, b) => {
-          if (a.isUnmappedFound && !b.isUnmappedFound) return 1;  // a temuan -> taruh bawah
-          if (!a.isUnmappedFound && b.isUnmappedFound) return -1; // b temuan -> a di atas
+        // SORTING MASTER WMS SELALU DI ATAS, ITEM TEMUAN DI BAWAH
+        return Object.values(groupedMap).sort((a, b) => {
+          if (a.isUnmappedFound && !b.isUnmappedFound) return 1;
+          if (!a.isUnmappedFound && b.isUnmappedFound) return -1;
           return a.sku.localeCompare(b.sku);
         });
-
-        return sortedList;
       });
     });
 
@@ -197,7 +193,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
   const [unmappedDesc, setUnmappedDesc] = useState<string>('');
   const [unmappedPhotoUrl, setUnmappedPhotoUrl] = useState<string>('');
 
-  // STATE BAD STOCK DENGAN INITIAL STRING KOSONG (MENCEGAH NGETIK "01")
+  // STATE BAD STOCK DENGAN INITIAL STRING KOSONG
   const [unmappedIsBadStock, setUnmappedIsBadStock] = useState<boolean>(false);
   const [unmappedBadQty, setUnmappedBadQty] = useState<string>("");
   const [unmappedBadRemarks, setUnmappedBadRemarks] = useState<string>('');
@@ -293,7 +289,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     }
   };
 
-  // TAMBAH UNMAPPED & SINKRONISASI INSTAN KE FIRESTORE TANPA MERESET INPUT SKU LAIN
+  // HANDLER "+ Tambahkan Ke Temuan & Simpan" DENGAN AUTO-SAVE INPUTAN SKU LAIN
   const handleAddUnmapped = async () => {
     if (isSessionLocked) return;
     if (!unmappedBarcode.trim()) {
@@ -317,46 +313,35 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     const unmDesc = unmappedDesc.trim() || (matchedMasterSKU ? (matchedMasterSKU.Description || matchedMasterSKU.SKU) : 'Barang Fisik Baru Unmapped');
     const totalSubmitted = qtyNumber + badQtyNum;
 
-    const newItem: UnmappedItem = {
-      id: Date.now().toString(),
-      barcode: unmappedBarcode.trim(),
-      name: unmDesc,
-      qty: totalSubmitted,
-      uom: unmappedUnit,
-      expDate: unmappedExpDate,
-      batchNumber: unmappedBatchNumber,
-      photoUrl: unmappedPhotoUrl,
-    };
-
-    setUnmappedList((prev) => [...prev, newItem]);
-
-    const taskId = `${rack.rackNumber}_${unmSku}_TEMUAN_${Date.now()}`;
-    const taskRef = doc(db, "master_tasks", taskId);
-
     const batch = writeBatch(db);
 
-    // POIN 1: SIMPAN SEKALIGUS ANGKA INPUTAN LOKAL SKU LAIN KE FIRESTORE SO THEY DON'T GET RESET
+    // 1. SIMPAN SEKALIGUS SELURUH KETIKAN INPUT LOKAL SKU LAIN KE FIRESTORE (ANTI RESET)
     skuList.forEach(skuItem => {
       const finalGoodQty = parseInt(skuItem.qtyGood || "0", 10);
       const finalBadQty = parseInt(skuItem.qtyBad || "0", 10);
       const skuTotalSubmitted = finalGoodQty + finalBadQty;
 
-      skuItem.docIds.forEach((docId, i) => {
-        const existingTaskRef = doc(db, "master_tasks", docId);
-        batch.set(existingTaskRef, {
-          counter: cleanCounter,
-          isCounted: skuTotalSubmitted > 0 ? true : skuItem.isCounted,
-          QTY_ACTUAL: i === 0 ? skuTotalSubmitted : 0,
-          QTY_GOOD: i === 0 ? finalGoodQty : 0,
-          QTY_BAD: i === 0 ? finalBadQty : 0,
-          badRemarks: i === 0 ? (skuItem.badRemarks || '') : '',
-          expDateActual: skuItem.expDateActual || '',
-          updatedAt: new Date().toISOString()
-        }, { merge: true });
-      });
+      if (skuTotalSubmitted > 0 || skuItem.expDateActual) {
+        skuItem.docIds.forEach((docId, i) => {
+          const existingTaskRef = doc(db, "master_tasks", docId);
+          batch.set(existingTaskRef, {
+            counter: cleanCounter,
+            isCounted: true,
+            QTY_ACTUAL: i === 0 ? skuTotalSubmitted : 0,
+            QTY_GOOD: i === 0 ? finalGoodQty : 0,
+            QTY_BAD: i === 0 ? finalBadQty : 0,
+            badRemarks: i === 0 ? (skuItem.badRemarks || '') : '',
+            expDateActual: skuItem.expDateActual || '',
+            updatedAt: new Date().toISOString()
+          }, { merge: true });
+        });
+      }
     });
 
-    // MASUKKAN DOKUMEN TEMUAN BARU
+    // 2. SIMPAN DOKUMEN TEMUAN BARU
+    const taskId = `${rack.rackNumber}_${unmSku}_TEMUAN_${Date.now()}`;
+    const taskRef = doc(db, "master_tasks", taskId);
+
     batch.set(taskRef, {
       Owner: unmOwner,
       SKU: unmSku,
@@ -377,6 +362,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       updatedAt: new Date().toISOString()
     }, { merge: true });
 
+    // 3. LOG AUDIT TRAIL
     const logId = `${sessionData.sessionCode || 'SO'}_TEMUAN_${rack.rackNumber}_${unmSku}`;
     const auditRef = doc(db, "audit_logs", logId);
     batch.set(auditRef, {
@@ -405,7 +391,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     setUnmappedIsBadStock(false);
     setUnmappedBadQty("");
     setUnmappedBadRemarks('');
-    setModal({ isOpen: true, type: 'success', title: 'Item Temuan Tersimpan!', message: `Item ${unmSku} pada Rak ${rack.rackNumber} langsung tersimpan ke Cloud. Input SKU lain tetap aman!` });
+    setModal({ isOpen: true, type: 'success', title: 'Item Temuan Tersimpan!', message: `Item ${unmSku} & seluruh inputan SKU lain pada Rak ${rack.rackNumber} tersimpan aman!` });
   };
 
   const handleDeleteUnmapped = (id: string) => {
@@ -745,7 +731,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                   </div>
                 </div>
 
-                {/* FORM BAD STOCK UNMAPPED DENGAN STRING KOSONG DEFAULT */}
+                {/* FORM BAD STOCK UNMAPPED */}
                 <div className="p-3 bg-amber-50/80 border border-amber-200 rounded-xl space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold text-amber-900">Temuan Ini Memiliki Bad Stock?</span>
