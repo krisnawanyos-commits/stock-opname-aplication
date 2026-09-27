@@ -12,7 +12,7 @@ import {
     CheckCircle2, XCircle, Search, Building2, DollarSign,
     Download, Scale, PlayCircle, Archive, ArrowLeft, AlertTriangle,
     LogOut, GripHorizontal, Contact, Eye, EyeOff, UserCheck, Clock, Store, Link2, KeyRound,
-    Mail, Edit2, Smartphone, Lock, Unlock, Repeat, Copy, Tag
+    Mail, Edit2, Smartphone, Lock, Unlock, Repeat, Copy, Tag, RefreshCw, HardDrive
 } from 'lucide-react';
 import type { UserRole } from '../types';
 
@@ -246,6 +246,74 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         ...consignmentStoreList.map(s => ({ value: s.id, label: `[Store Offline] ${s.name}` }))
     ];
 
+    // =======================================================
+    // FITUR BACKUP ALTERNATIF AMAN (DOWNLOAD JSON FULL CLOUD)
+    // =======================================================
+    const handleDownloadFullDatabaseBackupJSON = () => {
+        if (masterDataList.length === 0) {
+            triggerNotification("Tidak ada data untuk dibackup.");
+            return;
+        }
+
+        const fullBackupData = {
+            backupDate: new Date().toISOString(),
+            project: activeProject,
+            masterTasks: masterDataList,
+            auditTrailLogs: auditLogs,
+            teamMembers: activeTeamMembers
+        };
+
+        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(fullBackupData, null, 2));
+        const downloadAnchor = document.createElement('a');
+        downloadAnchor.setAttribute("href", dataStr);
+        downloadAnchor.setAttribute("download", `EMERGENCY_BACKUP_SO360_${activeProject?.sessionCode || 'PROJECT'}_${Date.now()}.json`);
+        document.body.appendChild(downloadAnchor);
+        downloadAnchor.click();
+        downloadAnchor.remove();
+
+        triggerNotification("🛡️ Backup Cloud JSON Berhasil Diunduh ke Penyimpanan Lokal!");
+    };
+
+    // RESTORE DATABASE DARI FILE BACKUP JSON
+    const handleRestoreDatabaseFromJSON = (file: File) => {
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+            try {
+                const backup = JSON.parse(e.target?.result as string);
+                if (!backup.masterTasks || !Array.isArray(backup.masterTasks)) {
+                    triggerNotification("File JSON tidak valid atau bukan format backup SO 360.");
+                    return;
+                }
+
+                triggerNotification("Memulai pemulihan data dari file backup JSON...");
+
+                // Write Master Tasks
+                const taskBatch = writeBatch(db);
+                backup.masterTasks.forEach((task: any) => {
+                    const taskRef = doc(db, "master_tasks", task.id);
+                    taskBatch.set(taskRef, task, { merge: true });
+                });
+                await taskBatch.commit();
+
+                // Write Audit Logs
+                if (backup.auditTrailLogs && Array.isArray(backup.auditTrailLogs)) {
+                    const auditBatch = writeBatch(db);
+                    backup.auditTrailLogs.forEach((log: any) => {
+                        const logRef = doc(db, "audit_logs", log.id);
+                        auditBatch.set(logRef, log, { merge: true });
+                    });
+                    await auditBatch.commit();
+                }
+
+                triggerNotification("✅ PEMULIHAN SUKSES! Seluruh data dari JSON berhasil dipulihkan ke Cloud!");
+            } catch (err: any) {
+                console.error("Restore Error:", err);
+                triggerNotification("Gagal memulihkan database. File rusak atau salah format.");
+            }
+        };
+        reader.readAsText(file);
+    };
+
     const handleUpdateOwnerAccount = async () => {
         if (!ownerNewEmail.trim() || !ownerNewPin.trim()) {
             triggerNotification('Email dan PIN Baru (4-Digit) wajib diisi.');
@@ -424,7 +492,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         return () => { unsubscribe(); lockUnsubscribe(); };
     }, [activeProject]);
 
-    // DEPLOY RONDE MANDIRI DENGAN ATURAN KUNCI JIKA HITUNGAN SAMA
     const handleDeployNextRoundForCounter = async (targetCounter: string) => {
         if (effectiveRole === 'spv') {
             triggerNotification('Hanya Super Admin/Owner yang memiliki hak deploy ronde.');
@@ -451,7 +518,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
         const disputeTasks = counterTasks.filter(item => {
             const act = item.countedQty ?? item.Qty;
-            // Jika R2 = R1, kualifikasikan sebagai Match Valid
             if (currentCounterRound === 2 && item.round1Actual !== undefined && act === item.round1Actual) {
                 return false;
             }
@@ -507,7 +573,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     }, { merge: true });
 
                 } else {
-                    // Kunci otomatis SKU yang Match
                     batch.update(ref, {
                         isLocked: true,
                         updatedAt: timestampNow
@@ -764,13 +829,11 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
                     triggerNotification("Reset data lama & mengunggah data baru ke Cloud...");
 
-                    // 1. WIPE CLEAN MASTER TASKS
                     const oldDocsSnap = await getDocs(collection(db, "master_tasks"));
                     const cleanBatch = writeBatch(db);
                     oldDocsSnap.docs.forEach(oldDoc => cleanBatch.delete(oldDoc.ref));
                     await cleanBatch.commit();
 
-                    // 2. WIPE CLEAN AUDIT LOGS UNTUK SINKRONISASI PROJECT BARU
                     const oldAuditSnap = await getDocs(collection(db, "audit_logs"));
                     const cleanAuditBatch = writeBatch(db);
                     oldAuditSnap.docs.forEach(oldDoc => cleanAuditBatch.delete(oldDoc.ref));
@@ -1058,12 +1121,10 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
     const activeTeamMembers = activeProject ? allProjectTeams.filter(t => t.projectId === activeProject.id) : [];
 
-    // ACCURATE COUNTER PIC PROGRESS (MENGHITUNG RONDE AKTIF SECARA PRESISI)
     const counterGroups = masterDataList.reduce((acc: any, item) => {
         const cName = item.counter || 'Unassigned';
         if (!acc[cName]) acc[cName] = { total: 0, counted: 0, errorCount: 0 };
 
-        // Hanya hitung task pada ronde aktif counter tersebut
         const cTasks = masterDataList.filter(m => m.counter === cName);
         const activeRound = cTasks.length > 0 ? Math.max(...cTasks.map(t => t.currentRound || 1)) : 1;
 
@@ -1119,11 +1180,9 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         return { name, total: group.total, counted: group.counted, percentage: Math.round((group.counted / group.total) * 100) };
     });
 
-    // FIX: GROUPING SKU SEJENIS DENGAN BRAND YANG SAMA UNTUK MENCEGAH DUPLIKASI BARIS
     const brandAccuracyList = Array.from(new Set(masterDataList.map(m => m.SKUBrand))).map(brandName => {
         const brandSKUs = masterDataList.filter(m => m.SKUBrand === brandName);
 
-        // Agregasi SKU sejenis agar tidak muncul dua baris dengan SKU sama
         const groupedSKUMap: Record<string, { SKU: string; Qty: number; countedQty: number; isCounted: boolean }> = {};
         brandSKUs.forEach(item => {
             if (!groupedSKUMap[item.SKU]) {
@@ -1181,7 +1240,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 </div>
             )}
 
-            {/* MODAL POPUP TEKS KREDENSIAL */}
             {credentialsModalText && (
                 <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
                     <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl border border-slate-200">
@@ -1216,7 +1274,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 </div>
             )}
 
-            {/* MODAL POPUP BULK REASSIGN COUNTER ABSEN */}
             {transferSourceCounter && (
                 <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
                     <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-5 shadow-2xl border border-slate-200">
@@ -1263,7 +1320,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 </div>
             )}
 
-            {/* MODAL EDIT KTP CLOUD */}
             {editingAccount && (
                 <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
                     <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-5 shadow-2xl border border-slate-200">
@@ -1295,7 +1351,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 </div>
             )}
 
-            {/* MODAL POPUP DETAIL SELISIH COUNTER */}
             {selectedCounterForDetail && (
                 <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
                     <div className="bg-white rounded-3xl max-w-2xl w-full p-6 space-y-5 shadow-2xl border border-slate-200">
@@ -1458,7 +1513,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                         </div>
                     )}
 
-                    {/* ACCOUNTS (KTP) TAB DENGAN IMPORT MASSAL & MODAL TEKS KREDENSIAL */}
                     {landingTab === 'accounts' && effectiveRole === 'owner' && (
                         <div className="space-y-6">
                             <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl space-y-4">
@@ -2064,9 +2118,41 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                         </div>
                     )}
 
-                    {/* TAB 5: SETTINGS (KHUSUS OWNER) */}
+                    {/* TAB 5: SETTINGS & BACKUP EMERGENCY */}
                     {activeTab === 'settings' && effectiveRole === 'owner' && (
                         <div className="space-y-6">
+                            {/* TOMBOL EMERGENCY BACKUP JSON & RESTORE */}
+                            <div className="bg-white rounded-3xl border border-indigo-100 p-6 shadow-xl space-y-4">
+                                <div className="border-b pb-3 flex justify-between items-center">
+                                    <h3 className="text-base font-black text-slate-900 flex items-center space-x-2">
+                                        <HardDrive className="w-5 h-5 text-indigo-600" />
+                                        <span>System Emergency Backup & Restore (JSON Cloud Snapshot)</span>
+                                    </h3>
+                                    <span className="text-xs font-extrabold text-indigo-700 bg-indigo-50 px-3 py-1 rounded-xl">Solusi Anti Crash</span>
+                                </div>
+                                <p className="text-xs text-slate-500">Unduh snapshot backup seluruh database ke file komputer/HP kamu untuk amunisi cadangan darurat jika koneksi bermasalah.</p>
+                                <div className="flex flex-wrap gap-3 pt-1">
+                                    <button
+                                        onClick={handleDownloadFullDatabaseBackupJSON}
+                                        className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-extrabold flex items-center space-x-2 shadow-md cursor-pointer"
+                                    >
+                                        <Download className="w-4 h-4" />
+                                        <span>Download Cloud Backup (.JSON)</span>
+                                    </button>
+
+                                    <label className="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-extrabold flex items-center space-x-2 shadow-md cursor-pointer">
+                                        <RefreshCw className="w-4 h-4" />
+                                        <span>Restore Database dari File (.JSON)</span>
+                                        <input
+                                            type="file"
+                                            accept=".json"
+                                            className="hidden"
+                                            onChange={(e) => { if (e.target.files?.[0]) handleRestoreDatabaseFromJSON(e.target.files[0]); }}
+                                        />
+                                    </label>
+                                </div>
+                            </div>
+
                             <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl space-y-4">
                                 <h3 className="text-base font-black text-slate-900 flex items-center space-x-2">
                                     <Link2 className="w-5 h-5 text-purple-600" />
