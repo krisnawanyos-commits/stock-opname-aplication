@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../firebase';
 import {
     collection, onSnapshot, doc, setDoc, deleteDoc, writeBatch, getDocs, query, orderBy, limit
@@ -167,7 +167,9 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
     const [credentialsModalText, setCredentialsModalText] = useState<string | null>(null);
     const [auditLogs, setAuditLogs] = useState<any[]>([]);
 
+    // UPLOAD PROGRESS & CANCELLATION REF
     const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number } | null>(null);
+    const isUploadCancelledRef = useRef<boolean>(false);
 
     // STATE KATEGORI BAD STOCK (CONFIGURABLE BY OWNER)
     const [badStockCategories, setBadStockCategories] = useState<string[]>(['Dus Penyok', 'Kemasan Bocor', 'Segel Rusak', 'Basah / Lembab', 'Barang Expired']);
@@ -238,7 +240,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             }
         });
 
-        // LISTEN CONFIG BAD STOCK CATEGORIES DARI FIRESTORE
         const unsubBadStock = onSnapshot(doc(db, "settings", "bad_stock_config"), (snap) => {
             if (snap.exists() && snap.data().categories) {
                 setBadStockCategories(snap.data().categories);
@@ -863,6 +864,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         acc.email.toLowerCase().includes(ktpSearch.toLowerCase())
     );
 
+    // OPTIMASI PARALEL NGEBUT (CONCURRENCY POOL) DENGAN FITUR CANCEL & ERROR CATCH
     const parseXLSXFile = (file: File, currentProjId?: string): Promise<MasterSKUItem[]> => {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
@@ -879,20 +881,31 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                         return;
                     }
 
-                    triggerNotification("Mempersiapkan upload data massal ke Cloud...");
+                    isUploadCancelledRef.current = false;
+                    triggerNotification("Mempersiapkan upload data paralel ke Cloud...");
                     setUploadProgress({ current: 0, total: json.length });
 
                     const CHUNK_SIZE = 400;
+                    const CONCURRENCY_LIMIT = 6; // Kirim 6 batch sekaligus bersamaan
                     const totalRows = json.length;
-                    const newMasterList: MasterSKUItem[] = [];
-                    const pId = currentProjId || activeProject?.id;
+                    let completedRows = 0;
 
+                    const pId = currentProjId || activeProject?.id;
+                    const newMasterList: MasterSKUItem[] = [];
+
+                    // Bagi JSON menjadi array of chunks
+                    const chunks: any[][] = [];
                     for (let i = 0; i < totalRows; i += CHUNK_SIZE) {
-                        const chunk = json.slice(i, i + CHUNK_SIZE);
+                        chunks.push(json.slice(i, i + CHUNK_SIZE));
+                    }
+
+                    const processChunk = async (chunk: any[], chunkIndex: number) => {
+                        if (isUploadCancelledRef.current) return;
                         const batch = writeBatch(db);
+                        const startIndex = chunkIndex * CHUNK_SIZE;
 
                         chunk.forEach((row: any, idxInChunk: number) => {
-                            const globalIdx = i + idxInChunk;
+                            const globalIdx = startIndex + idxInChunk;
                             const rawCounter = (row['counter'] || row['Counter'] || row['COUNTER'] || 'Unassigned').toString().toLowerCase().trim();
                             const locStr = (row['Location'] || row['LOCATION'] || `LOC-${globalIdx + 1}`).toString().trim();
                             const skuStr = (row['SKU'] || `SKU-${globalIdx + 1}`).toString().trim();
@@ -959,17 +972,32 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                         });
 
                         await batch.commit();
-                        setUploadProgress({ current: Math.min(i + CHUNK_SIZE, totalRows), total: totalRows });
+                        completedRows = Math.min(completedRows + chunk.length, totalRows);
+                        setUploadProgress({ current: completedRows, total: totalRows });
+                    };
+
+                    // Eksekusi Pool Concurrency
+                    for (let i = 0; i < chunks.length; i += CONCURRENCY_LIMIT) {
+                        if (isUploadCancelledRef.current) {
+                            triggerNotification("Upload dibatalkan oleh pengguna.");
+                            setUploadProgress(null);
+                            reject("Upload dibatalkan");
+                            return;
+                        }
+                        const batchGroup = chunks.slice(i, i + CONCURRENCY_LIMIT);
+                        await Promise.all(batchGroup.map((chunk, idxInGroup) => processChunk(chunk, i + idxInGroup)));
                     }
 
-                    setMasterDataList(newMasterList);
-                    setUploadProgress(null);
-                    triggerNotification(`Upload Berhasil! ${totalRows} data berhasil diproses.`);
-                    resolve(newMasterList);
+                    if (!isUploadCancelledRef.current) {
+                        setMasterDataList(newMasterList);
+                        setUploadProgress(null);
+                        triggerNotification(`🚀 Upload Selesai Ngebut! ${totalRows} data berhasil diproses.`);
+                        resolve(newMasterList);
+                    }
                 } catch (err: any) {
                     console.error("Batch upload error:", err);
                     setUploadProgress(null);
-                    triggerNotification(`Gagal upload: ${err?.message || String(err)}`);
+                    triggerNotification(`⚠️ Upload terputus / koneksi terganggu: ${err?.message || String(err)}`);
                     reject(err);
                 }
             };
@@ -1072,16 +1100,15 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         triggerNotification(`Membuka Dashboard Project "${proj.sessionCode}"`);
     };
 
+    // PROSES HAPUS PROJECT BERSIH TOTAL SECARA PARALEL CHUNK
     const handleConfirmDeleteProject = async () => {
         if (!projectToDelete) return;
 
         try {
             triggerNotification(`Menghapus project ${projectToDelete.sessionCode} & seluruh data task...`);
 
-            // 1. Hapus dokumen project dari koleksi "projects"
             await deleteDoc(doc(db, "projects", projectToDelete.id));
 
-            // 2. Hapus seluruh data master_tasks dari Firestore (menggunakan chunking batch)
             const tasksSnap = await getDocs(collection(db, "master_tasks"));
             const CHUNK = 400;
             const taskDocs = tasksSnap.docs;
@@ -1093,7 +1120,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 await batch.commit();
             }
 
-            // 3. Hapus log audit trail terkait
             const auditSnap = await getDocs(collection(db, "audit_logs"));
             for (let i = 0; i < auditSnap.docs.length; i += CHUNK) {
                 const chunk = auditSnap.docs.slice(i, i + CHUNK);
@@ -1315,13 +1341,14 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
     return (
         <div className="min-h-screen bg-slate-50 text-slate-800 p-4 lg:p-8 max-w-7xl mx-auto font-sans relative">
+            {/* OVERLAY MODAL UPLOAD PROGRESS DENGAN TOMBOL CANCEL */}
             {uploadProgress && (
                 <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-md z-50 flex items-center justify-center p-4">
                     <div className="bg-white rounded-3xl p-6 max-w-sm w-full text-center space-y-4 shadow-2xl border border-slate-100">
                         <Loader2 className="w-10 h-10 text-indigo-600 animate-spin mx-auto" />
                         <div>
-                            <h3 className="font-black text-slate-900 text-base">Mengunggah Task ke Cloud</h3>
-                            <p className="text-xs text-slate-500 font-medium mt-1">Memproses batch data secara bertahap...</p>
+                            <h3 className="font-black text-slate-900 text-base">Mengunggah Task ke Cloud (Ngebut)</h3>
+                            <p className="text-xs text-slate-500 font-medium mt-1">Memproses beberapa batch secara paralel...</p>
                         </div>
                         <div className="space-y-1.5">
                             <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
@@ -1334,6 +1361,15 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                 {uploadProgress.current.toLocaleString('id-ID')} / {uploadProgress.total.toLocaleString('id-ID')} Data ({Math.round((uploadProgress.current / uploadProgress.total) * 100)}%)
                             </span>
                         </div>
+                        <button
+                            onClick={() => {
+                                isUploadCancelledRef.current = true;
+                                triggerNotification("Membatalkan proses upload...");
+                            }}
+                            className="w-full py-2 bg-slate-100 hover:bg-red-50 text-slate-600 hover:text-red-600 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                        >
+                            Hentikan / Cancel Upload
+                        </button>
                     </div>
                 </div>
             )}
