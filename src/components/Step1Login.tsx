@@ -97,63 +97,108 @@ export default function Step1Login({ onSuccessLogin }: Step1LoginProps) {
   };
 
   return (
-    <div className="bg-slate-900 font-sans min-h-screen flex flex-col justify-center items-center p-4">
-      <div className="w-full max-w-sm bg-white rounded-3xl p-6 shadow-2xl space-y-6">
-        <div className="text-center space-y-2">
-          <div className="w-20 h-20 bg-slate-950 rounded-full flex items-center justify-center mx-auto shadow-2xl shadow-black/30 border-2 border-slate-800 p-3.5">
-            <img src="/logo.png" alt="Noctus Count Logo" className="w-full h-full object-contain filter drop-shadow-md" />
+    <div className="relative min-h-screen bg-[#0B0F14] font-sans flex flex-col justify-center items-center p-4 overflow-hidden select-none">
+      {/* 1. ATMOSPHERIC DARK SPACE - MESH/GRID OVERLAY */}
+      <div 
+        className="absolute inset-0 pointer-events-none opacity-5"
+        style={{
+          backgroundImage: `linear-gradient(to right, #ffffff 1px, transparent 1px), linear-gradient(to bottom, #ffffff 1px, transparent 1px)`,
+          backgroundSize: '36px 36px'
+        }}
+      />
+
+      {/* 2. AMBIENT RADIAL GLOW (COOL CYAN / TOSCA #00F2FE) */}
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-130 h-130 bg-cyan-400/15 rounded-full blur-[140px] pointer-events-none" />
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-70 h-70 bg-sky-600/20 rounded-full blur-[90px] pointer-events-none" />
+
+      {/* 3. LOGIN CARD (FROSTED GLASSMORPHISM) */}
+      <div 
+        className="relative z-10 w-full max-w-sm rounded-[28px] p-8 sm:p-9 backdrop-blur-xl bg-slate-900/65 border border-cyan-400/25 space-y-7 animate-in fade-in zoom-in-95 duration-500"
+        style={{
+          boxShadow: '0 25px 60px rgba(0,0,0,0.85), 0 10px 35px rgba(0,242,254,0.08)'
+        }}
+      >
+        {/* LOGO & CINEMATIC TYPOGRAPHY */}
+        <div className="text-center space-y-3">
+          {/* LOGO NC MONOGRAM MURNI TRANSPARAN + CYAN RIM LIGHT */}
+          <div className="w-24 h-24 mx-auto flex items-center justify-center">
+            <img 
+              src="/logo.png" 
+              alt="Noctus Count Monogram" 
+              className="w-full h-full object-contain transition-transform duration-500 hover:scale-105"
+              style={{
+                filter: 'drop-shadow(0 0 18px rgba(0,242,254,0.45)) drop-shadow(0 4px 12px rgba(0,0,0,0.9))'
+              }}
+            />
           </div>
-          <h1 className="text-2xl font-black text-slate-900 pt-1 tracking-tight">Noctus Count</h1>
-          <p className="text-xs text-slate-500 font-medium">Masukan Username &amp; PIN Akses Kamu</p>
+
+          <div className="space-y-1 pt-1">
+            <h1 className="text-xl font-light text-white tracking-[0.3em] uppercase leading-none pl-[0.3em]">
+              NOCTUS COUNT
+            </h1>
+            <p className="font-mono text-[10px] text-slate-400 tracking-[0.2em] uppercase font-medium">
+              ENTER AUTHORIZED CREDENTIALS
+            </p>
+          </div>
         </div>
 
+        {/* ERROR NOTIFICATION */}
         {errorMsg && (
-          <div className="bg-rose-50 border border-rose-200 text-rose-700 p-3 rounded-2xl text-xs font-bold text-center animate-in fade-in">
+          <div className="bg-rose-950/50 border border-rose-500/30 text-rose-300 px-4 py-2.5 rounded-xl text-xs font-mono text-center shadow-inner animate-in fade-in">
             {errorMsg}
           </div>
         )}
 
+        {/* INPUT FIELDS & CYBER-MINIMALIST BUTTON */}
         <form onSubmit={handleLogin} className="space-y-4">
-          <div className="space-y-1">
-            <label className="text-xs font-extrabold text-slate-700 block uppercase">Username</label>
+          {/* USERNAME FIELD */}
+          <div className="space-y-1.5">
+            <label className="font-mono text-[10px] tracking-[0.18em] text-slate-400 block uppercase font-medium">
+              IDENTIFIER / USERNAME
+            </label>
             <input
               type="text"
               value={usernameInput}
               onChange={(e) => setUsernameInput(e.target.value)}
-              placeholder="Contoh: bambang / pamungkas / owner"
-              className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500/30 transition-all"
+              placeholder="e.g. pamungkas / spv / owner"
+              className="cipher-input w-full h-12 px-4 rounded-xl text-sm font-mono outline-none transition-all duration-300 focus:ring-1 focus:ring-cyan-400/40"
               required
             />
           </div>
 
-          <div className="space-y-1">
-            <label className="text-xs font-extrabold text-slate-700 block uppercase">PIN Akses (4-Digit)</label>
+          {/* PIN FIELD */}
+          <div className="space-y-1.5">
+            <label className="font-mono text-[10px] tracking-[0.18em] text-slate-400 block uppercase font-medium">
+              SECURITY PIN (4-DIGIT)
+            </label>
             <input
               type="password"
               maxLength={6}
               value={pinInput}
               onChange={(e) => setPinInput(e.target.value)}
               placeholder="••••"
-              className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-mono font-bold text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500/30 transition-all"
+              className="cipher-input w-full h-12 px-4 rounded-xl text-sm font-mono tracking-widest outline-none transition-all duration-300 focus:ring-1 focus:ring-cyan-400/40"
               required
             />
           </div>
 
+          {/* SUBMIT BUTTON (CYBER-MINIMALIST GLOW) */}
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full h-12 bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] disabled:opacity-50 text-white rounded-2xl text-sm font-black shadow-lg shadow-indigo-600/30 transition-all cursor-pointer mt-2"
+            className="w-full h-12 mt-2 rounded-xl text-xs font-mono font-bold tracking-[0.2em] uppercase transition-all duration-300 cursor-pointer disabled:opacity-50 text-slate-950 bg-cyan-400 hover:bg-cyan-300 shadow-[0_0_20px_rgba(0,242,254,0.35)] hover:shadow-[0_0_30px_rgba(0,242,254,0.6)] active:scale-[0.98] flex items-center justify-center space-x-2"
           >
-            {isLoading ? 'Memverifikasi...' : 'Masuk Aplikasi'}
+            <span>{isLoading ? 'AUTHENTICATING...' : 'MASUK APLIKASI'}</span>
           </button>
         </form>
 
-        <div className="pt-3 border-t border-slate-100 text-center space-y-0.5">
-          <p className="text-[11px] font-black text-slate-700 uppercase tracking-wider">
-            Noctus Count™
+        {/* FOOTER METADATA */}
+        <div className="pt-4 border-t border-white/6 text-center space-y-1">
+          <p className="font-mono text-[9px] text-slate-400 tracking-[0.25em] uppercase">
+            NOCTUS COUNT™ • SECURE TERMINAL
           </p>
-          <p className="text-[10px] text-slate-400 font-medium">
-            Developed by <span className="font-bold text-indigo-600">Noctus</span>
+          <p className="font-mono text-[9px] text-slate-500 tracking-wider">
+            DEVELOPED BY <span className="text-cyan-400 font-bold">NOCTUS</span>
           </p>
         </div>
       </div>

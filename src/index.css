@@ -121,3 +121,16 @@
 
 .font-label-sm { font-family: 'Inter', sans-serif; }
 .text-label-sm { font-size: 0.6875rem; line-height: 0.875rem; letter-spacing: 0.05em; font-weight: 700; }
+
+.cipher-input {
+  color: #ffffff;
+  background-color: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+.cipher-input::placeholder {
+  color: #475569;
+}
+.cipher-input:focus {
+  background-color: rgba(255, 255, 255, 0.05);
+  border-color: #00f2fe;
+}

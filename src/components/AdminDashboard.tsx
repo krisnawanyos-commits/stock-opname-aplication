@@ -2003,7 +2003,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                             >
                                 <ArrowLeft className="w-4 h-4" />
                             </button>
-                            <div className="w-11 h-11 rounded-full bg-slate-950 p-2 flex items-center justify-center shadow-md border border-slate-800 shrink-0">
+                            <div className="w-10 h-10 flex items-center justify-center shrink-0">
                                 <img src="/logo.png" alt="Noctus Count Logo" className="w-full h-full object-contain filter drop-shadow-sm" />
                             </div>
                                 <div>
@@ -2025,16 +2025,16 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
                             {/* CENTER: CONNECTED 4-PILL KPI CAPSULE (MOCKUP ACCURATE) */}
                             <div className="flex justify-center">
-                                <div className="inline-flex items-center bg-[#0F172A] text-white p-1 rounded-2xl border border-slate-800 shadow-md divide-x divide-slate-800 text-xs">
-                                    <div className="px-3.5 py-1 text-center">
+                                <div className="inline-flex items-center bg-[#0F172A] text-white p-1 rounded-2xl border border-slate-800 shadow-md text-xs">
+                                    <div className="px-3.5 py-1 text-center border-r border-slate-800">
                                         <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-widest block">TOTAL ITEMS</span>
                                         <span className="text-xs sm:text-sm font-black text-white">{totalSKUs.toLocaleString('id-ID')}</span>
                                     </div>
-                                    <div className="px-3.5 py-1 text-center">
+                                    <div className="px-3.5 py-1 text-center border-r border-slate-800">
                                         <span className="text-[9px] text-amber-400 font-extrabold uppercase tracking-widest block">COUNTED</span>
                                         <span className="text-xs sm:text-sm font-black text-amber-400">{totalCounted.toLocaleString('id-ID')}</span>
                                     </div>
-                                    <div className="px-3.5 py-1 text-center">
+                                    <div className="px-3.5 py-1 text-center border-r border-slate-800">
                                         <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-widest block">REMAINING</span>
                                         <span className="text-xs sm:text-sm font-black text-slate-300">{Math.max(0, totalSKUs - totalCounted).toLocaleString('id-ID')}</span>
                                     </div>
@@ -2044,6 +2044,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                     </div>
                                 </div>
                             </div>
+
 
                             {/* RIGHT: Round Filter, Role Badge & Session Lock Status */}
                             <div className="flex items-center space-x-2.5 justify-end shrink-0">
@@ -2964,9 +2965,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             {/* TRADEMARK FOOTER */}
             <div className={`pt-8 pb-4 text-center border-t border-slate-200/60 ${viewState === 'DASHBOARD' ? 'mt-8 px-6 bg-slate-100' : 'mt-12'}`}>
                 <div className="flex items-center justify-center gap-2 mb-1">
-                    <div className="w-6 h-6 rounded-full bg-slate-950 p-1 flex items-center justify-center shadow-xs border border-slate-800">
-                        <img src="/logo.png" alt="Noctus Count Logo" className="w-full h-full object-contain" />
-                    </div>
+                    <img src="/logo.png" alt="Noctus Count Logo" className="w-5 h-5 object-contain filter drop-shadow-xs" />
                     <span className="text-xs font-black text-slate-800 tracking-wider">NOCTUS COUNT™</span>
                 </div>
                 <p className="text-[11px] text-slate-400 font-medium">
