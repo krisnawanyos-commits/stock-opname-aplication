@@ -1517,7 +1517,22 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
     }, [filteredDiscrepancies, reconCurrentPage]);
 
     return (
-        <div className={`min-h-screen bg-slate-50 text-slate-800 font-sans relative ${viewState === 'DASHBOARD' ? 'w-full p-0 max-w-none' : 'p-4 lg:p-8 max-w-7xl mx-auto'}`}>
+        <div className={`min-h-screen font-sans relative ${viewState === 'DASHBOARD' ? 'w-full p-0 max-w-none bg-slate-50 text-slate-800' : 'bg-[#0B0F14] text-slate-100 p-4 lg:p-8 min-h-screen'}`}>
+            {/* ATMOSPHERIC DARK SPACE - MESH/GRID & AMBIENT RADIAL GLOW (THE CIPHER SANCTUM) */}
+            {viewState !== 'DASHBOARD' && (
+                <>
+                    <div 
+                        className="fixed inset-0 pointer-events-none opacity-5 z-0"
+                        style={{
+                            backgroundImage: 'linear-gradient(to right, #ffffff 1px, transparent 1px), linear-gradient(to bottom, #ffffff 1px, transparent 1px)',
+                            backgroundSize: '36px 36px'
+                        }}
+                    />
+                    <div className="fixed top-10 left-1/4 -translate-x-1/2 w-130 h-130 bg-cyan-400/10 rounded-full blur-[150px] pointer-events-none z-0" />
+                    <div className="fixed bottom-10 right-1/4 translate-x-1/2 w-100 h-100 bg-sky-600/15 rounded-full blur-[130px] pointer-events-none z-0" />
+                </>
+            )}
+
             {/* OVERLAY MODAL UPLOAD PROGRESS DENGAN TOMBOL CANCEL */}
             {uploadProgress && (
                 <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-md z-50 flex items-center justify-center p-4">
@@ -1734,50 +1749,108 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
             {/* SCREEN 1: LANDING PAGE */}
             {viewState === 'LANDING' && (
-                <div className="space-y-6 animate-in fade-in duration-500">
-                    <div className="bg-white p-6 rounded-3xl shadow-xl shadow-slate-200/40 border border-slate-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-5 relative overflow-hidden">
+                <div className="space-y-6 animate-in fade-in duration-500 relative z-10 max-w-7xl mx-auto">
+                    {/* TOP COMMAND HEADER */}
+                    <div className="relative overflow-hidden rounded-3xl p-6 sm:p-7 backdrop-blur-xl bg-slate-900/65 border border-cyan-400/25 shadow-[0_20px_60px_rgba(0,0,0,0.8),0_5px_25px_rgba(0,242,254,0.06)] flex flex-col md:flex-row justify-between items-start md:items-center gap-5">
                         <div className="flex items-center space-x-4 relative z-10">
-                            <div className="w-14 h-14 rounded-full bg-slate-950 p-2.5 flex items-center justify-center shadow-lg border border-slate-800 shrink-0">
-                                <img src="/logo.png" alt="Noctus Count Logo" className="w-full h-full object-contain filter drop-shadow-sm" />
+                            <div className="w-13 h-13 flex items-center justify-center shrink-0">
+                                <img 
+                                    src="/logo.png" 
+                                    alt="Noctus Count Monogram" 
+                                    className="w-full h-full object-contain transition-transform duration-300 hover:scale-105"
+                                    style={{ filter: 'drop-shadow(0 0 16px rgba(0,242,254,0.45)) drop-shadow(0 4px 10px rgba(0,0,0,0.8))' }}
+                                />
                             </div>
-                            <div>
-                                <h1 className="text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2">
-                                    <span>Noctus Count</span>
-                                    <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-lg">Systems</span>
+                            <div className="space-y-0.5">
+                                <h1 className="text-xl sm:text-2xl font-light text-white tracking-[0.2em] uppercase flex items-center gap-2.5">
+                                    <span>NOCTUS COUNT</span>
+                                    <span className="text-[9px] font-mono font-bold uppercase tracking-[0.15em] px-2 py-0.5 bg-cyan-400/10 text-cyan-300 border border-cyan-400/30 rounded-md shadow-[0_0_10px_rgba(0,242,254,0.15)]">
+                                        SYSTEMS
+                                    </span>
                                 </h1>
-                                <p className="text-xs text-slate-500 font-medium">Developed by Noctus • Enterprise Stock Opname</p>
+                                <p className="font-mono text-[10px] text-slate-400 tracking-[0.15em] uppercase">
+                                    ENTERPRISE STOCK OPNAME • DEVELOPED BY <span className="text-cyan-400 font-bold">NOCTUS</span>
+                                </p>
                             </div>
                         </div>
                         <div className="flex items-center space-x-3 w-full md:w-auto relative z-10">
                             {onSwitchToCounterView && (
                                 <button
                                     onClick={onSwitchToCounterView}
-                                    className="px-4 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl text-sm font-extrabold flex items-center justify-center space-x-2 shadow-lg transition-all cursor-pointer"
+                                    className="px-4 py-2.5 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 border border-emerald-400/30 rounded-xl text-xs font-mono font-bold uppercase tracking-wider flex items-center justify-center space-x-2 shadow-[0_0_15px_rgba(16,185,129,0.15)] transition-all cursor-pointer"
                                     title="Buka Tampilan HP Counter untuk Demo"
                                 >
-                                    <Smartphone className="w-5 h-5" />
+                                    <Smartphone className="w-4 h-4 text-emerald-400" />
                                     <span className="hidden sm:inline">Demo Mode Counter</span>
                                 </button>
                             )}
                             {effectiveRole === 'owner' && (
-                                <button onClick={() => setViewState('WIZARD_SETUP')} className="flex-1 md:flex-none px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl text-sm font-extrabold flex items-center justify-center space-x-2 shadow-xl">
-                                    <Plus className="w-5 h-5" /><span>New Project</span>
+                                <button 
+                                    onClick={() => setViewState('WIZARD_SETUP')} 
+                                    className="flex-1 md:flex-none px-5 py-2.5 bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-mono text-xs font-bold uppercase tracking-wider rounded-xl flex items-center justify-center space-x-2 shadow-[0_0_20px_rgba(0,242,254,0.35)] hover:shadow-[0_0_25px_rgba(0,242,254,0.55)] transition-all cursor-pointer active:scale-95"
+                                >
+                                    <Plus className="w-4 h-4" /><span>New Project</span>
                                 </button>
                             )}
-                            <button onClick={onBackToApp} className="px-4 py-3 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl text-sm font-extrabold flex items-center justify-center shadow-lg">
-                                <LogOut className="w-5 h-5" />
+                            <button 
+                                onClick={onBackToApp} 
+                                className="px-3.5 py-2.5 bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white border border-white/10 rounded-xl text-xs font-bold flex items-center justify-center transition-all cursor-pointer"
+                                title="Keluar"
+                            >
+                                <LogOut className="w-4 h-4" />
                             </button>
                         </div>
                     </div>
 
+                    {/* INTERACTIVE NAVIGATION & TELEMETRY STRIP (FILLS THE EMPTY VOID) */}
                     {effectiveRole === 'owner' && (
-                        <div className="flex space-x-3 p-1.5 bg-white border border-slate-200 rounded-2xl w-fit shadow-xs">
-                            <button onClick={() => setLandingTab('projects')} className={`px-5 py-2.5 text-sm font-bold rounded-xl transition-all flex items-center space-x-2 ${landingTab === 'projects' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}>
-                                <Building2 className="w-4 h-4" /><span>Lokasi & Project</span>
-                            </button>
-                            <button onClick={() => setLandingTab('accounts')} className={`px-5 py-2.5 text-sm font-bold rounded-xl transition-all flex items-center space-x-2 ${landingTab === 'accounts' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}>
-                                <Contact className="w-4 h-4" /><span>KTP Cloud</span>
-                            </button>
+                        <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-4 p-2 rounded-2xl backdrop-blur-xl bg-slate-900/60 border border-white/10">
+                            {/* LEFT: TABS */}
+                            <div className="flex space-x-2">
+                                <button 
+                                    onClick={() => setLandingTab('projects')} 
+                                    className={`px-4 py-2 text-xs font-mono font-bold tracking-wider uppercase rounded-xl transition-all flex items-center space-x-2 cursor-pointer ${
+                                        landingTab === 'projects' 
+                                            ? 'bg-cyan-400 text-slate-950 shadow-[0_0_15px_rgba(0,242,254,0.3)]' 
+                                            : 'text-slate-400 hover:text-white hover:bg-white/5'
+                                    }`}
+                                >
+                                    <Building2 className="w-3.5 h-3.5" /><span>Lokasi & Project</span>
+                                </button>
+                                <button 
+                                    onClick={() => setLandingTab('accounts')} 
+                                    className={`px-4 py-2 text-xs font-mono font-bold tracking-wider uppercase rounded-xl transition-all flex items-center space-x-2 cursor-pointer ${
+                                        landingTab === 'accounts' 
+                                            ? 'bg-cyan-400 text-slate-950 shadow-[0_0_15px_rgba(0,242,254,0.3)]' 
+                                            : 'text-slate-400 hover:text-white hover:bg-white/5'
+                                    }`}
+                                >
+                                    <Contact className="w-3.5 h-3.5" /><span>KTP Cloud</span>
+                                </button>
+                            </div>
+
+                            {/* RIGHT: SYSTEM TELEMETRY CAPSULE */}
+                            <div className="flex items-center space-x-4 px-3.5 py-1.5 bg-black/40 border border-white/5 rounded-xl text-xs font-mono">
+                                <div className="flex items-center space-x-1.5 text-slate-400">
+                                    <span className="text-[10px] uppercase tracking-wider text-slate-500">WMS:</span>
+                                    <span className="font-bold text-white">{warehouseList.length}</span>
+                                </div>
+                                <span className="text-slate-700">•</span>
+                                <div className="flex items-center space-x-1.5 text-slate-400">
+                                    <span className="text-[10px] uppercase tracking-wider text-slate-500">Consign:</span>
+                                    <span className="font-bold text-white">{consignmentStoreList.length}</span>
+                                </div>
+                                <span className="text-slate-700">•</span>
+                                <div className="flex items-center space-x-1.5 text-slate-400">
+                                    <span className="text-[10px] uppercase tracking-wider text-slate-500">Projects:</span>
+                                    <span className="font-bold text-cyan-400">{projectHistory.length}</span>
+                                </div>
+                                <span className="text-slate-700">•</span>
+                                <div className="flex items-center space-x-1.5">
+                                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
+                                    <span className="text-[10px] text-emerald-400 uppercase tracking-widest font-bold">ONLINE</span>
+                                </div>
+                            </div>
                         </div>
                     )}
 
@@ -1785,56 +1858,146 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                         <div className="space-y-6">
                             {effectiveRole === 'owner' && (
                                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                                    <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl space-y-4">
-                                        <div className="border-b border-slate-100 pb-3 flex justify-between items-center">
-                                            <h3 className="text-base font-black text-slate-900 flex items-center space-x-2"><Building2 className="w-5 h-5 text-indigo-600" /><span>Master Gudang WMS</span></h3>
+                                    {/* MASTER GUDANG WMS */}
+                                    <div className="rounded-3xl backdrop-blur-xl bg-slate-900/60 border border-cyan-400/20 p-6 shadow-xl space-y-4">
+                                        <div className="border-b border-white/10 pb-3 flex justify-between items-center">
+                                            <h3 className="text-sm font-mono font-bold text-white uppercase tracking-wider flex items-center space-x-2">
+                                                <Building2 className="w-4 h-4 text-cyan-400" />
+                                                <span>Master Gudang WMS</span>
+                                            </h3>
+                                            <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-cyan-400/10 text-cyan-400 border border-cyan-400/20">
+                                                {warehouseList.length} Gudang
+                                            </span>
                                         </div>
                                         <div className="flex gap-2">
-                                            <input type="text" placeholder="Nama Gudang Baru..." value={newWhName} onChange={(e) => setNewWhName(e.target.value)} className="flex-1 px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl outline-none" />
-                                            <button onClick={handleAddWarehouseCloud} className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold">+ Tambah</button>
+                                            <input 
+                                                type="text" 
+                                                placeholder="Nama Gudang Baru..." 
+                                                value={newWhName} 
+                                                onChange={(e) => setNewWhName(e.target.value)} 
+                                                className="cipher-input flex-1 px-3.5 py-2 text-xs font-mono rounded-xl outline-none" 
+                                            />
+                                            <button 
+                                                onClick={handleAddWarehouseCloud} 
+                                                className="px-4 py-2 bg-cyan-400 hover:bg-cyan-300 text-slate-950 rounded-xl text-xs font-mono font-bold uppercase tracking-wider shadow-[0_0_12px_rgba(0,242,254,0.3)] transition-all cursor-pointer"
+                                            >
+                                                + Tambah
+                                            </button>
                                         </div>
-                                        <div className="max-h-48 overflow-y-auto space-y-2">
+                                        <div className="max-h-52 overflow-y-auto space-y-2 pr-1 scrollbar-thin">
                                             {warehouseList.map((wh) => (
-                                                <div key={wh.id} className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex justify-between items-center"><span className="font-bold text-xs text-slate-800">{wh.name}</span></div>
+                                                <div key={wh.id} className="p-3 bg-white/3 hover:bg-white/6 border border-white/8 rounded-xl flex justify-between items-center transition-colors">
+                                                    <span className="font-mono font-semibold text-xs text-slate-200">{wh.name}</span>
+                                                    <span className="text-[9px] font-mono uppercase tracking-wider text-slate-500 bg-white/5 px-2 py-0.5 rounded border border-white/5">WMS Node</span>
+                                                </div>
                                             ))}
+                                            {warehouseList.length === 0 && (
+                                                <p className="text-xs text-slate-500 font-mono text-center py-4">Belum ada gudang terdaftar.</p>
+                                            )}
                                         </div>
                                     </div>
 
-                                    <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl space-y-4">
-                                        <div className="border-b border-slate-100 pb-3 flex justify-between items-center">
-                                            <h3 className="text-base font-black text-slate-900 flex items-center space-x-2"><Store className="w-5 h-5 text-purple-600" /><span>Master Toko Consignment</span></h3>
+                                    {/* MASTER TOKO CONSIGNMENT */}
+                                    <div className="rounded-3xl backdrop-blur-xl bg-slate-900/60 border border-purple-400/20 p-6 shadow-xl space-y-4">
+                                        <div className="border-b border-white/10 pb-3 flex justify-between items-center">
+                                            <h3 className="text-sm font-mono font-bold text-white uppercase tracking-wider flex items-center space-x-2">
+                                                <Store className="w-4 h-4 text-purple-400" />
+                                                <span>Master Toko Consignment</span>
+                                            </h3>
+                                            <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-purple-400/10 text-purple-300 border border-purple-400/20">
+                                                {consignmentStoreList.length} Outlet
+                                            </span>
                                         </div>
                                         <div className="flex gap-2">
-                                            <input type="text" placeholder="Nama Toko Baru..." value={newStoreName} onChange={(e) => setNewStoreName(e.target.value)} className="flex-1 px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl outline-none" />
-                                            <button onClick={handleAddStoreCloud} className="px-4 py-2 bg-purple-600 text-white rounded-xl text-xs font-bold">+ Tambah</button>
+                                            <input 
+                                                type="text" 
+                                                placeholder="Nama Toko Baru..." 
+                                                value={newStoreName} 
+                                                onChange={(e) => setNewStoreName(e.target.value)} 
+                                                className="cipher-input flex-1 px-3.5 py-2 text-xs font-mono rounded-xl outline-none" 
+                                            />
+                                            <button 
+                                                onClick={handleAddStoreCloud} 
+                                                className="px-4 py-2 bg-purple-500 hover:bg-purple-400 text-white rounded-xl text-xs font-mono font-bold uppercase tracking-wider shadow-[0_0_12px_rgba(168,85,247,0.3)] transition-all cursor-pointer"
+                                            >
+                                                + Tambah
+                                            </button>
                                         </div>
-                                        <div className="max-h-48 overflow-y-auto space-y-2">
+                                        <div className="max-h-52 overflow-y-auto space-y-2 pr-1 scrollbar-thin">
                                             {consignmentStoreList.map((st) => (
-                                                <div key={st.id} className="p-3 bg-purple-50/40 border border-purple-200 rounded-xl flex justify-between items-center"><span className="font-bold text-xs text-slate-800">{st.name}</span></div>
+                                                <div key={st.id} className="p-3 bg-white/3 hover:bg-white/6 border border-white/8 rounded-xl flex justify-between items-center transition-colors">
+                                                    <span className="font-mono font-semibold text-xs text-slate-200">{st.name}</span>
+                                                    <span className="text-[9px] font-mono uppercase tracking-wider text-purple-400 bg-purple-500/10 px-2 py-0.5 rounded border border-purple-500/20">Consignment</span>
+                                                </div>
                                             ))}
+                                            {consignmentStoreList.length === 0 && (
+                                                <p className="text-xs text-slate-500 font-mono text-center py-4">Belum ada toko terdaftar.</p>
+                                            )}
                                         </div>
                                     </div>
                                 </div>
                             )}
 
-                            <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl space-y-5">
-                                <h3 className="text-base font-black text-slate-800 flex items-center space-x-2"><Database className="w-5 h-5 text-indigo-600" /><span>Live Firestore Projects</span></h3>
-                                <div className="overflow-x-auto border border-slate-200 rounded-2xl">
-                                    <table className="w-full text-left text-sm">
-                                        <thead className="bg-slate-50 font-bold text-slate-500 border-b"><tr><th className="p-4">KODE PROJECT</th><th className="p-4">LOKASI</th><th className="p-4">TANGGAL</th><th className="p-4 text-center">STATUS</th><th className="p-4 text-right">AKSI</th></tr></thead>
-                                        <tbody className="divide-y divide-slate-100 font-medium">
+                            {/* LIVE FIRESTORE PROJECTS TABLE */}
+                            <div className="rounded-3xl backdrop-blur-xl bg-slate-900/60 border border-white/10 p-6 shadow-xl space-y-5">
+                                <div className="flex justify-between items-center border-b border-white/10 pb-3">
+                                    <h3 className="text-sm font-mono font-bold text-white uppercase tracking-wider flex items-center space-x-2">
+                                        <Database className="w-4 h-4 text-cyan-400" />
+                                        <span>Live Firestore Projects</span>
+                                    </h3>
+                                    <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider">
+                                        {projectHistory.length} sesi terarsip
+                                    </span>
+                                </div>
+                                <div className="overflow-x-auto border border-white/10 rounded-2xl">
+                                    <table className="w-full text-left text-xs font-mono">
+                                        <thead className="bg-white/5 font-bold text-slate-400 border-b border-white/10">
+                                            <tr>
+                                                <th className="p-4 uppercase tracking-wider">KODE PROJECT</th>
+                                                <th className="p-4 uppercase tracking-wider">LOKASI</th>
+                                                <th className="p-4 uppercase tracking-wider">TANGGAL</th>
+                                                <th className="p-4 text-center uppercase tracking-wider">STATUS</th>
+                                                <th className="p-4 text-right uppercase tracking-wider">AKSI</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-white/5">
                                             {projectHistory.map((proj) => (
-                                                <tr key={proj.id} className="hover:bg-slate-50">
-                                                    <td className="p-4 font-bold font-mono text-indigo-600">{proj.sessionCode}</td>
-                                                    <td className="p-4 font-bold text-slate-800">{proj.locationName}</td>
-                                                    <td className="p-4 font-mono text-slate-500">{proj.opnameDate}</td>
-                                                    <td className="p-4 text-center"><span className="px-3 py-1 rounded-lg bg-emerald-100 text-emerald-700 font-black text-[11px]">{proj.status}</span></td>
+                                                <tr key={proj.id} className="hover:bg-white/4 transition-colors">
+                                                    <td className="p-4 font-bold text-cyan-400">{proj.sessionCode}</td>
+                                                    <td className="p-4 font-medium text-slate-200">{proj.locationName}</td>
+                                                    <td className="p-4 text-slate-400">{proj.opnameDate}</td>
+                                                    <td className="p-4 text-center">
+                                                        <span className="px-2.5 py-1 rounded-md bg-emerald-400/10 text-emerald-400 border border-emerald-400/30 text-[10px] font-bold uppercase tracking-wider shadow-[0_0_8px_rgba(52,211,153,0.15)]">
+                                                            {proj.status}
+                                                        </span>
+                                                    </td>
                                                     <td className="p-4 text-right space-x-2">
-                                                        <button onClick={() => handleOpenHistoricalProject(proj)} className="px-4 py-2 bg-slate-900 text-white rounded-xl text-xs font-bold inline-flex items-center space-x-1.5"><PlayCircle className="w-4 h-4" /><span>Buka Dashboard</span></button>
-                                                        {effectiveRole === 'owner' && (<button onClick={() => setProjectToDelete(proj)} className="p-2 text-slate-400 hover:text-red-600 rounded-xl"><Trash2 className="w-4 h-4" /></button>)}
+                                                        <button 
+                                                            onClick={() => handleOpenHistoricalProject(proj)} 
+                                                            className="px-3.5 py-1.5 bg-cyan-400 hover:bg-cyan-300 text-slate-950 rounded-xl text-xs font-bold inline-flex items-center space-x-1.5 shadow-[0_0_12px_rgba(0,242,254,0.25)] transition-all cursor-pointer"
+                                                        >
+                                                            <PlayCircle className="w-3.5 h-3.5" />
+                                                            <span>Buka Dashboard</span>
+                                                        </button>
+                                                        {effectiveRole === 'owner' && (
+                                                            <button 
+                                                                onClick={() => setProjectToDelete(proj)} 
+                                                                className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-xl transition-colors cursor-pointer"
+                                                                title="Hapus Project"
+                                                            >
+                                                                <Trash2 className="w-3.5 h-3.5" />
+                                                            </button>
+                                                        )}
                                                     </td>
                                                 </tr>
                                             ))}
+                                            {projectHistory.length === 0 && (
+                                                <tr>
+                                                    <td colSpan={5} className="p-8 text-center text-slate-500">
+                                                        Belum ada project aktif di Firestore. Klik + New Project untuk membuat baru.
+                                                    </td>
+                                                </tr>
+                                            )}
                                         </tbody>
                                     </table>
                                 </div>
@@ -1844,85 +2007,148 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
                     {landingTab === 'accounts' && effectiveRole === 'owner' && (
                         <div className="space-y-6">
-                            <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl space-y-4">
-                                <div className="border-b border-slate-100 pb-3 flex justify-between items-center">
-                                    <h3 className="text-base font-black text-slate-900 flex items-center space-x-2">
-                                        <KeyRound className="w-5 h-5 text-indigo-600" />
+                            {/* OWNER PROFILE */}
+                            <div className="rounded-3xl backdrop-blur-xl bg-slate-900/60 border border-white/10 p-6 shadow-xl space-y-4">
+                                <div className="border-b border-white/10 pb-3 flex justify-between items-center">
+                                    <h3 className="text-sm font-mono font-bold text-white uppercase tracking-wider flex items-center space-x-2">
+                                        <KeyRound className="w-4 h-4 text-cyan-400" />
                                         <span>Pengaturan Akun & Profil Owner</span>
                                     </h3>
-                                    <span className="text-xs font-bold text-indigo-700 bg-indigo-50 px-3 py-1 rounded-xl">Otorisasi Master</span>
+                                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-cyan-400/10 text-cyan-300 border border-cyan-400/20">
+                                        Master Authorization
+                                    </span>
                                 </div>
                                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                                    <input type="text" value={ownerNewName} onChange={(e) => setOwnerNewName(e.target.value)} placeholder="Nama Lengkap Owner" className="px-4 py-2.5 text-xs bg-slate-50 border rounded-xl outline-none" />
-                                    <input type="email" value={ownerNewEmail} onChange={(e) => setOwnerNewEmail(e.target.value)} placeholder="Email Owner" className="px-4 py-2.5 text-xs bg-slate-50 border rounded-xl outline-none" />
-                                    <input type="password" maxLength={6} value={ownerNewPin} onChange={(e) => setOwnerNewPin(e.target.value)} placeholder="PIN Baru (4-Digit)" className="px-4 py-2.5 text-xs font-mono bg-slate-50 border rounded-xl outline-none" />
+                                    <input 
+                                        type="text" 
+                                        value={ownerNewName} 
+                                        onChange={(e) => setOwnerNewName(e.target.value)} 
+                                        placeholder="Nama Lengkap Owner" 
+                                        className="cipher-input px-4 py-2.5 text-xs font-mono rounded-xl outline-none" 
+                                    />
+                                    <input 
+                                        type="email" 
+                                        value={ownerNewEmail} 
+                                        onChange={(e) => setOwnerNewEmail(e.target.value)} 
+                                        placeholder="Email Owner" 
+                                        className="cipher-input px-4 py-2.5 text-xs font-mono rounded-xl outline-none" 
+                                    />
+                                    <input 
+                                        type="password" 
+                                        maxLength={6} 
+                                        value={ownerNewPin} 
+                                        onChange={(e) => setOwnerNewPin(e.target.value)} 
+                                        placeholder="PIN Baru (4-Digit)" 
+                                        className="cipher-input px-4 py-2.5 text-xs font-mono rounded-xl outline-none" 
+                                    />
                                 </div>
                                 <div className="flex justify-end">
-                                    <button onClick={handleUpdateOwnerAccount} className="px-6 py-2.5 bg-indigo-600 text-white rounded-xl text-xs font-bold shadow-md hover:bg-indigo-700 flex items-center space-x-1.5 cursor-pointer">
+                                    <button 
+                                        onClick={handleUpdateOwnerAccount} 
+                                        className="px-5 py-2.5 bg-cyan-400 hover:bg-cyan-300 text-slate-950 rounded-xl text-xs font-mono font-bold uppercase tracking-wider shadow-[0_0_15px_rgba(0,242,254,0.3)] flex items-center space-x-1.5 transition-all cursor-pointer"
+                                    >
                                         <Save className="w-4 h-4" />
                                         <span>Simpan Profil Owner</span>
                                     </button>
                                 </div>
                             </div>
 
-                            <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl space-y-6">
-                                <div className="flex flex-col md:flex-row justify-between md:items-center gap-4">
-                                    <div><h3 className="text-base font-black text-slate-900">Master KTP & Otorisasi</h3></div>
-                                    <div className="flex items-center space-x-2">
-                                        <button onClick={handleDownloadKTPTemplate} className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold flex items-center space-x-1">
-                                            <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                            {/* MASTER KTP & AUTHORIZATION */}
+                            <div className="rounded-3xl backdrop-blur-xl bg-slate-900/60 border border-white/10 p-6 shadow-xl space-y-6">
+                                <div className="flex flex-col md:flex-row justify-between md:items-center gap-4 border-b border-white/10 pb-4">
+                                    <div>
+                                        <h3 className="text-sm font-mono font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                                            <Contact className="w-4 h-4 text-cyan-400" />
+                                            <span>Master KTP & Otorisasi Personel</span>
+                                        </h3>
+                                        <p className="text-[11px] font-mono text-slate-400 mt-0.5">Kelola akun counter dan supervisor cloud</p>
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <button 
+                                            onClick={handleDownloadKTPTemplate} 
+                                            className="px-3 py-2 bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10 rounded-xl text-xs font-mono flex items-center space-x-1 transition-all cursor-pointer"
+                                        >
+                                            <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
                                             <span>Template KTP</span>
                                         </button>
-                                        <label className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center space-x-1.5 shadow-md cursor-pointer">
+                                        <label className="px-3.5 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-400/30 rounded-xl text-xs font-mono font-bold flex items-center space-x-1.5 shadow-[0_0_12px_rgba(16,185,129,0.2)] transition-all cursor-pointer">
                                             <Upload className="w-4 h-4" />
                                             <span>Upload KTP Massal</span>
                                             <input type="file" accept=".xlsx, .xls, .csv" className="hidden" onChange={(e) => { if (e.target.files?.[0]) handleUploadBulkKTPAccounts(e.target.files[0]); }} />
                                         </label>
-                                        <button onClick={handleGenerateCredentialsText} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center space-x-1.5 shadow-md">
+                                        <button 
+                                            onClick={handleGenerateCredentialsText} 
+                                            className="px-3.5 py-2 bg-cyan-400 hover:bg-cyan-300 text-slate-950 rounded-xl text-xs font-mono font-bold flex items-center space-x-1.5 shadow-[0_0_12px_rgba(0,242,254,0.3)] transition-all cursor-pointer"
+                                        >
                                             <Copy className="w-4 h-4" />
-                                            <span>Salin Teks Kredensial</span>
+                                            <span>Salin Kredensial</span>
                                         </button>
-                                        <button onClick={handleBlastEmailCredentials} className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold flex items-center space-x-1.5 shadow-md">
+                                        <button 
+                                            onClick={handleBlastEmailCredentials} 
+                                            className="px-3.5 py-2 bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 border border-purple-400/30 rounded-xl text-xs font-mono font-bold flex items-center space-x-1.5 shadow-[0_0_12px_rgba(168,85,247,0.2)] transition-all cursor-pointer"
+                                        >
                                             <Mail className="w-4 h-4" />
                                             <span>Blast Email</span>
                                         </button>
                                     </div>
                                 </div>
 
-                                <div className="p-5 bg-slate-50 border border-slate-200 rounded-2xl space-y-4">
-                                    <h4 className="text-sm font-bold text-slate-800">Daftar KTP Manual</h4>
+                                {/* MANUAL KTP REGISTRATION */}
+                                <div className="p-4 bg-black/40 border border-white/5 rounded-2xl space-y-3">
+                                    <h4 className="text-xs font-mono font-bold text-slate-300 uppercase tracking-wider">Daftar KTP Manual</h4>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                        <input type="text" placeholder="Username..." value={newAccUser} onChange={(e) => setNewAccUser(e.target.value)} className="px-4 py-2.5 text-sm bg-white border rounded-xl outline-none" />
-                                        <input type="text" placeholder="Nama Lengkap..." value={newAccName} onChange={(e) => setNewAccName(e.target.value)} className="px-4 py-2.5 text-sm bg-white border rounded-xl outline-none" />
-                                        <input type="password" maxLength={4} placeholder="PIN 4-Digit..." value={newAccPin} onChange={(e) => setNewAccPin(e.target.value)} className="px-4 py-2.5 text-sm font-mono bg-white border rounded-xl outline-none" />
-                                        <input type="email" placeholder="Email..." value={newAccEmail} onChange={(e) => setNewAccEmail(e.target.value)} className="px-4 py-2.5 text-sm bg-white border rounded-xl outline-none" />
+                                        <input type="text" placeholder="Username..." value={newAccUser} onChange={(e) => setNewAccUser(e.target.value)} className="cipher-input px-3.5 py-2 text-xs font-mono rounded-xl outline-none" />
+                                        <input type="text" placeholder="Nama Lengkap..." value={newAccName} onChange={(e) => setNewAccName(e.target.value)} className="cipher-input px-3.5 py-2 text-xs font-mono rounded-xl outline-none" />
+                                        <input type="password" maxLength={4} placeholder="PIN 4-Digit..." value={newAccPin} onChange={(e) => setNewAccPin(e.target.value)} className="cipher-input px-3.5 py-2 text-xs font-mono rounded-xl outline-none" />
+                                        <input type="email" placeholder="Email..." value={newAccEmail} onChange={(e) => setNewAccEmail(e.target.value)} className="cipher-input px-3.5 py-2 text-xs font-mono rounded-xl outline-none" />
                                     </div>
-                                    <div className="flex justify-end"><button onClick={handleAddGlobalAccount} className="px-5 py-2.5 bg-slate-900 text-white rounded-xl text-sm font-bold flex items-center space-x-2"><UserPlus className="w-4 h-4" /><span>Buat Akun KTP</span></button></div>
+                                    <div className="flex justify-end">
+                                        <button onClick={handleAddGlobalAccount} className="px-4 py-2 bg-cyan-400 hover:bg-cyan-300 text-slate-950 rounded-xl text-xs font-mono font-bold uppercase tracking-wider shadow-[0_0_12px_rgba(0,242,254,0.3)] flex items-center space-x-2 cursor-pointer transition-all">
+                                            <UserPlus className="w-4 h-4" /><span>Buat Akun KTP</span>
+                                        </button>
+                                    </div>
                                 </div>
 
+                                {/* SEARCH BAR */}
                                 <div className="relative w-full">
-                                    <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
-                                    <input type="text" value={ktpSearch} onChange={(e) => setKtpSearch(e.target.value)} placeholder="Cari counter berdasarkan username, nama, atau email..." className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border rounded-xl text-xs font-bold outline-none" />
+                                    <Search className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
+                                    <input 
+                                        type="text" 
+                                        value={ktpSearch} 
+                                        onChange={(e) => setKtpSearch(e.target.value)} 
+                                        placeholder="Cari counter berdasarkan username, nama, atau email..." 
+                                        className="cipher-input w-full pl-10 pr-4 py-2.5 text-xs font-mono rounded-xl outline-none" 
+                                    />
                                 </div>
 
-                                <div className="overflow-x-auto border border-slate-200 rounded-2xl">
-                                    <table className="w-full text-left text-sm"><thead className="bg-slate-50 font-bold text-slate-500 border-b"><tr><th className="p-4">USERNAME</th><th className="p-4">NAMA PEGAWAI</th><th className="p-4">EMAIL</th><th className="p-4 text-center">PIN</th><th className="p-4 text-right">AKSI</th></tr></thead>
-                                        <tbody className="divide-y divide-slate-100 font-medium">
+                                {/* TABLE */}
+                                <div className="overflow-x-auto border border-white/10 rounded-2xl">
+                                    <table className="w-full text-left text-xs font-mono">
+                                        <thead className="bg-white/5 font-bold text-slate-400 border-b border-white/10">
+                                            <tr>
+                                                <th className="p-4 uppercase tracking-wider">USERNAME</th>
+                                                <th className="p-4 uppercase tracking-wider">NAMA PEGAWAI</th>
+                                                <th className="p-4 uppercase tracking-wider">EMAIL</th>
+                                                <th className="p-4 text-center uppercase tracking-wider">PIN</th>
+                                                <th className="p-4 text-right uppercase tracking-wider">AKSI</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-white/5">
                                             {filteredGlobalAccounts.map((acc) => (
-                                                <tr key={acc.id} className="hover:bg-slate-50">
-                                                    <td className="p-4 font-bold font-mono text-indigo-600">{acc.username}</td>
-                                                    <td className="p-4 font-bold text-slate-800">{acc.name}</td>
-                                                    <td className="p-4 text-slate-500 text-xs">{acc.email || '-'}</td>
-                                                    <td className="p-4 text-center font-mono font-bold text-slate-600 flex justify-center items-center space-x-2">
+                                                <tr key={acc.id} className="hover:bg-white/4 transition-colors">
+                                                    <td className="p-4 font-bold text-cyan-400">{acc.username}</td>
+                                                    <td className="p-4 font-medium text-slate-200">{acc.name}</td>
+                                                    <td className="p-4 text-slate-400 text-xs">{acc.email || '-'}</td>
+                                                    <td className="p-4 text-center font-bold text-slate-300 flex justify-center items-center space-x-2">
                                                         <span>{visiblePins[acc.id] ? acc.pin : '••••'}</span>
-                                                        <button onClick={() => togglePinVisibility(acc.id)} className="text-slate-400 hover:text-indigo-600">
+                                                        <button onClick={() => togglePinVisibility(acc.id)} className="text-slate-500 hover:text-cyan-400 cursor-pointer">
                                                             {visiblePins[acc.id] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                                                         </button>
                                                     </td>
                                                     <td className="p-4 text-right space-x-2">
-                                                        <button onClick={() => setEditingAccount(acc)} className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-xl" title="Edit Akun KTP"><Edit2 className="w-4 h-4" /></button>
-                                                        <button onClick={() => handleSendIndividualEmail(acc)} className="p-2 text-purple-600 hover:bg-purple-50 rounded-xl" title="Kirim Email Individual"><Mail className="w-4 h-4" /></button>
-                                                        <button onClick={() => handleDeleteGlobalAccount(acc.username)} className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl"><Trash2 className="w-4 h-4" /></button>
+                                                        <button onClick={() => setEditingAccount(acc)} className="p-1.5 text-cyan-400 hover:bg-cyan-400/10 rounded-lg cursor-pointer" title="Edit Akun KTP"><Edit2 className="w-4 h-4" /></button>
+                                                        <button onClick={() => handleSendIndividualEmail(acc)} className="p-1.5 text-purple-400 hover:bg-purple-400/10 rounded-lg cursor-pointer" title="Kirim Email Individual"><Mail className="w-4 h-4" /></button>
+                                                        <button onClick={() => handleDeleteGlobalAccount(acc.username)} className="p-1.5 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg cursor-pointer"><Trash2 className="w-4 h-4" /></button>
                                                     </td>
                                                 </tr>
                                             ))}
@@ -1937,54 +2163,82 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
             {/* SCREEN 2: WIZARD SETUP */}
             {viewState === 'WIZARD_SETUP' && (
-                <div className="max-w-2xl mx-auto space-y-6 animate-in slide-in-from-bottom-4 duration-500">
-                    <div className="bg-white p-6 rounded-3xl shadow-xl border border-slate-100 flex items-center justify-between">
-                        <div className="flex items-center space-x-4"><div className="p-3 bg-indigo-50 text-indigo-600 rounded-2xl"><SlidersHorizontal className="w-6 h-6" /></div><div><h1 className="text-xl font-black text-slate-900">Project Setup</h1></div></div>
-                        <button onClick={() => setViewState('LANDING')} className="p-2.5 bg-slate-100 rounded-xl"><ArrowLeft className="w-5 h-5 text-slate-700" /></button>
+                <div className="max-w-2xl mx-auto space-y-6 animate-in slide-in-from-bottom-4 duration-500 relative z-10">
+                    <div className="rounded-3xl backdrop-blur-xl bg-slate-900/65 border border-cyan-400/25 p-6 shadow-xl flex items-center justify-between">
+                        <div className="flex items-center space-x-4">
+                            <div className="p-3 bg-cyan-400/10 text-cyan-400 border border-cyan-400/20 rounded-2xl">
+                                <SlidersHorizontal className="w-6 h-6" />
+                            </div>
+                            <div>
+                                <h1 className="text-xl font-mono font-bold text-white uppercase tracking-wider">Project Setup</h1>
+                                <p className="text-xs font-mono text-slate-400">Konfigurasi sesi opname baru</p>
+                            </div>
+                        </div>
+                        <button onClick={() => setViewState('LANDING')} className="p-2.5 bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 rounded-xl cursor-pointer transition-colors">
+                            <ArrowLeft className="w-5 h-5" />
+                        </button>
                     </div>
-                    <div className="bg-white rounded-3xl p-8 shadow-xl border border-slate-100 space-y-6">
+                    <div className="rounded-3xl backdrop-blur-xl bg-slate-900/65 border border-white/10 p-8 shadow-xl space-y-6">
                         <div className="space-y-2">
-                            <label className="text-sm font-extrabold text-slate-800">1. Tipe Lokasi Opname:</label>
+                            <label className="text-xs font-mono font-bold text-slate-300 uppercase tracking-wider">1. Tipe Lokasi Opname:</label>
                             <SearchableSelect options={combinedLocationOptions} value={wizLocationId} onChange={setWizLocationId} placeholder="-- Cari Lokasi --" className="w-full" />
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div className="space-y-2"><label className="text-sm font-extrabold text-slate-800">2. Kode Sesi:</label><input type="text" value={wizSessionCode} onChange={(e) => setWizSessionCode(e.target.value)} className="w-full p-3.5 bg-slate-50 border rounded-2xl text-sm font-bold font-mono text-indigo-600 outline-none" /></div>
-                            <div className="space-y-2"><label className="text-sm font-extrabold text-slate-800">3. Tanggal:</label><input type="date" value={wizOpnameDate} onChange={(e) => setWizOpnameDate(e.target.value)} className="w-full p-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" /></div>
+                            <div className="space-y-2">
+                                <label className="text-xs font-mono font-bold text-slate-300 uppercase tracking-wider">2. Kode Sesi:</label>
+                                <input type="text" value={wizSessionCode} onChange={(e) => setWizSessionCode(e.target.value)} className="cipher-input w-full p-3.5 rounded-2xl text-sm font-bold font-mono text-cyan-400 outline-none" />
+                            </div>
+                            <div className="space-y-2">
+                                <label className="text-xs font-mono font-bold text-slate-300 uppercase tracking-wider">3. Tanggal:</label>
+                                <input type="date" value={wizOpnameDate} onChange={(e) => setWizOpnameDate(e.target.value)} className="cipher-input w-full p-3.5 rounded-2xl text-sm font-mono outline-none" />
+                            </div>
                         </div>
                         <div className="space-y-3 pt-2">
-                            <label className="text-sm font-extrabold text-slate-800">4. Metode Lock:</label>
+                            <label className="text-xs font-mono font-bold text-slate-300 uppercase tracking-wider">4. Metode Lock:</label>
                             <div className="grid grid-cols-2 gap-4">
-                                <div onClick={() => setWizMethod('LIST_TO_FLOOR')} className={`p-4 rounded-2xl border-2 cursor-pointer ${wizMethod === 'LIST_TO_FLOOR' ? 'border-indigo-600 bg-indigo-50' : 'border-slate-100 bg-slate-50'}`}><div className="text-sm font-black text-center text-slate-900">LIST TO FLOOR</div></div>
-                                <div onClick={() => setWizMethod('FLOOR_TO_LIST')} className={`p-4 rounded-2xl border-2 cursor-pointer ${wizMethod === 'FLOOR_TO_LIST' ? 'border-indigo-600 bg-indigo-50' : 'border-slate-100 bg-slate-50'}`}><div className="text-sm font-black text-center text-slate-900">FLOOR TO LIST</div></div>
+                                <div onClick={() => setWizMethod('LIST_TO_FLOOR')} className={`p-4 rounded-2xl border cursor-pointer transition-all ${wizMethod === 'LIST_TO_FLOOR' ? 'border-cyan-400 bg-cyan-400/10 text-cyan-300 shadow-[0_0_15px_rgba(0,242,254,0.15)]' : 'border-white/10 bg-white/3 text-slate-400'}`}>
+                                    <div className="text-xs font-mono font-bold uppercase text-center tracking-wider">LIST TO FLOOR</div>
+                                </div>
+                                <div onClick={() => setWizMethod('FLOOR_TO_LIST')} className={`p-4 rounded-2xl border cursor-pointer transition-all ${wizMethod === 'FLOOR_TO_LIST' ? 'border-cyan-400 bg-cyan-400/10 text-cyan-300 shadow-[0_0_15px_rgba(0,242,254,0.15)]' : 'border-white/10 bg-white/3 text-slate-400'}`}>
+                                    <div className="text-xs font-mono font-bold uppercase text-center tracking-wider">FLOOR TO LIST</div>
+                                </div>
                             </div>
                         </div>
 
-                        <div className="p-5 bg-linear-to-br from-indigo-50 to-blue-50 border border-indigo-100 rounded-2xl text-center space-y-3">
-                            <div className="flex justify-center"><FileSpreadsheet className="w-8 h-8 text-indigo-600" /></div>
+                        <div className="p-5 bg-black/40 border border-cyan-400/20 rounded-2xl text-center space-y-3">
+                            <div className="flex justify-center"><FileSpreadsheet className="w-8 h-8 text-cyan-400" /></div>
                             <div>
-                                <div className="text-sm font-bold text-indigo-900">Pre-load Master Task Excel (.xlsx)</div>
-                                <p className="text-xs text-indigo-600/70 mt-1">Upload sekarang untuk mempercepat sesi opname.</p>
+                                <div className="text-xs font-mono font-bold text-white uppercase tracking-wider">Pre-load Master Task Excel (.xlsx)</div>
+                                <p className="text-[11px] font-mono text-slate-400 mt-1">Upload sekarang untuk mempercepat sesi opname.</p>
                             </div>
 
-                            <div className="flex flex-col sm:flex-row justify-center items-center gap-3 pt-2">
+                            <div className="flex flex-col sm:flex-row justify-center items-center gap-3 pt-2 text-slate-400">
                                 <button
                                     type="button"
                                     onClick={handleDownloadTemplateXLSX}
-                                    className="px-4 py-2 bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-50 rounded-xl text-xs font-bold flex items-center space-x-1.5 shadow-xs transition-colors cursor-pointer"
+                                    className="px-4 py-2 bg-white/5 border border-white/15 text-slate-200 hover:bg-white/10 rounded-xl text-xs font-mono font-bold flex items-center space-x-1.5 shadow-xs transition-colors cursor-pointer"
                                 >
-                                    <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                                    <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
                                     <span>Download Template (.xlsx)</span>
                                 </button>
                                 <input
                                     type="file"
                                     accept=".xlsx, .xls"
                                     onChange={(e) => setInitialFileToUpload(e.target.files?.[0] || null)}
-                                    className="text-xs file:mr-2 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:font-bold file:bg-indigo-600 file:text-white hover:file:bg-indigo-700 cursor-pointer"
+                                    className="text-xs font-mono file:mr-2 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:font-bold file:bg-cyan-400 file:text-slate-950 hover:file:bg-cyan-300 cursor-pointer"
                                 />
                             </div>
                         </div>
 
-                        <div className="flex justify-end pt-4"><button onClick={handleStartNewProjectSession} className="w-full md:w-auto px-8 py-3.5 bg-slate-900 text-white rounded-2xl text-sm font-black flex items-center justify-center space-x-2 shadow-xl"><PlayCircle className="w-5 h-5" /><span>Launch Dashboard</span></button></div>
+                        <div className="flex justify-end pt-4">
+                            <button 
+                                onClick={handleStartNewProjectSession} 
+                                className="w-full md:w-auto px-8 py-3.5 bg-cyan-400 hover:bg-cyan-300 text-slate-950 rounded-2xl text-xs font-mono font-bold uppercase tracking-wider flex items-center justify-center space-x-2 shadow-[0_0_20px_rgba(0,242,254,0.35)] transition-all cursor-pointer"
+                            >
+                                <PlayCircle className="w-5 h-5" />
+                                <span>Launch Dashboard</span>
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}
@@ -2963,13 +3217,20 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             )}
 
             {/* TRADEMARK FOOTER */}
-            <div className={`pt-8 pb-4 text-center border-t border-slate-200/60 ${viewState === 'DASHBOARD' ? 'mt-8 px-6 bg-slate-100' : 'mt-12'}`}>
+            <div className={`pt-8 pb-4 text-center border-t ${viewState === 'DASHBOARD' ? 'border-slate-200/60 mt-8 px-6 bg-slate-100' : 'border-white/10 mt-12 bg-transparent relative z-10'}`}>
                 <div className="flex items-center justify-center gap-2 mb-1">
-                    <img src="/logo.png" alt="Noctus Count Logo" className="w-5 h-5 object-contain filter drop-shadow-xs" />
-                    <span className="text-xs font-black text-slate-800 tracking-wider">NOCTUS COUNT™</span>
+                    <img 
+                        src="/logo.png" 
+                        alt="Noctus Count Logo" 
+                        className="w-5 h-5 object-contain"
+                        style={{ filter: 'drop-shadow(0 0 8px rgba(0,242,254,0.45))' }}
+                    />
+                    <span className={`text-xs font-mono font-bold tracking-wider ${viewState === 'DASHBOARD' ? 'text-slate-800' : 'text-slate-200'}`}>
+                        NOCTUS COUNT™
+                    </span>
                 </div>
-                <p className="text-[11px] text-slate-400 font-medium">
-                    Stock Opname Systems • Developed by <span className="font-bold text-indigo-600">Noctus</span>
+                <p className={`text-[11px] font-mono ${viewState === 'DASHBOARD' ? 'text-slate-400 font-medium' : 'text-slate-500'}`}>
+                    Stock Opname Systems • Developed by <span className={viewState === 'DASHBOARD' ? 'font-bold text-indigo-600' : 'font-bold text-cyan-400'}>Noctus</span>
                 </p>
             </div>
         </div>
