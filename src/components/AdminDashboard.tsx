@@ -871,7 +871,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         acc.email.toLowerCase().includes(ktpSearch.toLowerCase())
     );
 
-    // KODINGAN UPLOAD TERBARU (ANTI CONTENTION LOCK & BISA DIBATALKAN)
     const parseXLSXFile = (file: File, currentProjId?: string): Promise<MasterSKUItem[]> => {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
@@ -892,14 +891,15 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     triggerNotification("Mempersiapkan upload data ke Cloud...");
                     setUploadProgress({ current: 0, total: json.length });
 
-                    const CHUNK_SIZE = 400; // DIKEMBALIKAN KE 400 KARENA SUDAH DIOPTIMASI
+                    // MAX 400 DATA (Sangat aman untuk batasan Firestore 500 ops)
+                    const CHUNK_SIZE = 400;
                     const totalRows = json.length;
                     const newMasterList: MasterSKUItem[] = [];
                     const pId = currentProjId || activeProject?.id;
 
-                    // SET UNTUK MENCEGAH UPDATE AKUN KTP BERKALI-KALI DI SETIAP BARIS (SOLUSI STUCK)
                     const processedCounters = new Set<string>();
 
+                    // MENGGUNAKAN LOOP SEKUENSIAL YANG STABIL (TIDAK PARALEL)
                     for (let i = 0; i < totalRows; i += CHUNK_SIZE) {
                         if (isUploadCancelledRef.current) {
                             triggerNotification("Upload dibatalkan oleh pengguna.");
@@ -919,10 +919,8 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
                             const taskId = `${locStr}_${skuStr}_${globalIdx + 1}`.replace(/\//g, '-');
 
-                            // OPTIMASI: Cek apakah akun counter ini udah diproses sebelumnya?
-                            // Jika belum, daftarkan 1x saja, lalu catat di "processedCounters"
                             if (rawCounter !== 'unassigned' && !processedCounters.has(rawCounter)) {
-                                processedCounters.add(rawCounter); // Tandai sudah diproses
+                                processedCounters.add(rawCounter);
 
                                 const accRef = doc(db, "global_accounts", rawCounter);
                                 batch.set(accRef, {
@@ -983,6 +981,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                             });
                         });
 
+                        // TUNGGU BATCH INI SELESAI DULU, BARU LANJUT LOOP BERIKUTNYA
                         await batch.commit();
                         setUploadProgress({ current: Math.min(i + CHUNK_SIZE, totalRows), total: totalRows });
                     }
@@ -990,7 +989,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     if (!isUploadCancelledRef.current) {
                         setMasterDataList(newMasterList);
                         setUploadProgress(null);
-                        triggerNotification(`🚀 Upload Selesai Ngebut! ${totalRows} data berhasil diproses.`);
+                        triggerNotification(`🚀 Upload Berhasil! ${totalRows} data sukses diunggah ke Cloud.`);
                         resolve(newMasterList);
                     }
                 } catch (err: any) {
