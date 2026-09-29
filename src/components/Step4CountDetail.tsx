@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../firebase';
-import { collection, onSnapshot, query, where, doc, writeBatch, getDocs } from 'firebase/firestore';
+import { collection, onSnapshot, query, where, doc, writeBatch, getDocs, limit } from 'firebase/firestore';
 import type { SessionData, RackItem, CustomModalState, UnmappedItem } from '../types';
 import CustomModal from './CustomModal';
 
@@ -52,7 +52,8 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
   const barcodeScanInputRef = useRef<HTMLInputElement>(null);
 
   const [skuList, setSkuList] = useState<GroupedSKUItem[]>([]);
-  const [allMasterSKUs, setAllMasterSKUs] = useState<any[]>([]);
+  const [matchedMasterSKU, setMatchedMasterSKU] = useState<any | null>(null);
+  const [isSearchingBarcode, setIsSearchingBarcode] = useState<boolean>(false);
   const [isSessionLocked, setIsSessionLocked] = useState<boolean>(false);
   const [unmappedDrawerOpen, setUnmappedDrawerOpen] = useState<boolean>(true);
   const [isLoadingSave, setIsLoadingSave] = useState<boolean>(false);
@@ -93,15 +94,6 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
 
     return () => { unsub(); unsubCat(); };
   }, [sessionData.sessionCode, sessionData.sessionId, sessionData.primaryCounter]);
-
-  // 2. FETCH KATALOG MASTER SKU UTAMA
-  useEffect(() => {
-    const unsubMaster = onSnapshot(collection(db, "master_tasks"), (snapshot) => {
-      const items = snapshot.docs.map(d => d.data());
-      setAllMasterSKUs(items);
-    });
-    return () => unsubMaster();
-  }, []);
 
   // 3. LISTEN MASTER TASKS LOKASI RAK AKTIF
   useEffect(() => {
@@ -228,11 +220,84 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
 
   const [unmappedList, setUnmappedList] = useState<UnmappedItem[]>([]);
 
-  const matchedMasterSKU = unmappedBarcode.trim() !== '' ? allMasterSKUs.find(m =>
-    (m.UPC1 && m.UPC1.trim() === unmappedBarcode.trim()) ||
-    (m.UPC2 && m.UPC2.trim() === unmappedBarcode.trim()) ||
-    (m.SKU && m.SKU.toLowerCase().trim() === unmappedBarcode.trim().toLowerCase())
-  ) : null;
+  // ON-DEMAND LOOKUP BARCODE MASTER (0ms untuk rak aktif, ~150ms untuk cloud lookup via limit 1)
+  useEffect(() => {
+    const cleanBarcode = unmappedBarcode.trim();
+    if (!cleanBarcode) {
+      setMatchedMasterSKU(null);
+      setIsSearchingBarcode(false);
+      return;
+    }
+
+    // 1. Cek instan di rak lokal saat ini (0 ms)
+    const foundInCurrentRack = skuList.find(item =>
+      (item.upc && item.upc.trim() === cleanBarcode) ||
+      (item.upc2 && item.upc2.trim() === cleanBarcode) ||
+      (item.sku && item.sku.toLowerCase().trim() === cleanBarcode.toLowerCase())
+    );
+
+    if (foundInCurrentRack) {
+      setMatchedMasterSKU({
+        SKU: foundInCurrentRack.sku,
+        Owner: 'DDI',
+        Description: foundInCurrentRack.name,
+        UPC1: foundInCurrentRack.upc,
+        UPC2: foundInCurrentRack.upc2 || '',
+        SKUBrand: 'General',
+        unitPrice: 0
+      });
+      setIsSearchingBarcode(false);
+      return;
+    }
+
+    // 2. Query ke Firestore on-demand (limit 1) dengan debounce 300ms
+    let isCancelled = false;
+    setIsSearchingBarcode(true);
+
+    const timer = setTimeout(async () => {
+      try {
+        const q1 = query(collection(db, "master_tasks"), where("UPC1", "==", cleanBarcode), limit(1));
+        const snap1 = await getDocs(q1);
+        if (!snap1.empty && !isCancelled) {
+          setMatchedMasterSKU(snap1.docs[0].data());
+          setIsSearchingBarcode(false);
+          return;
+        }
+
+        const q2 = query(collection(db, "master_tasks"), where("UPC2", "==", cleanBarcode), limit(1));
+        const snap2 = await getDocs(q2);
+        if (!snap2.empty && !isCancelled) {
+          setMatchedMasterSKU(snap2.docs[0].data());
+          setIsSearchingBarcode(false);
+          return;
+        }
+
+        const q3 = query(collection(db, "master_tasks"), where("SKU", "==", cleanBarcode.toUpperCase()), limit(1));
+        const snap3 = await getDocs(q3);
+        if (!snap3.empty && !isCancelled) {
+          setMatchedMasterSKU(snap3.docs[0].data());
+          setIsSearchingBarcode(false);
+          return;
+        }
+
+        if (!isCancelled) {
+          setMatchedMasterSKU(null);
+          setIsSearchingBarcode(false);
+        }
+      } catch (err) {
+        console.warn("Barcode search error:", err);
+        if (!isCancelled) {
+          setMatchedMasterSKU(null);
+          setIsSearchingBarcode(false);
+        }
+      }
+    }, 300);
+
+    return () => {
+      isCancelled = true;
+      clearTimeout(timer);
+    };
+  }, [unmappedBarcode, skuList]);
 
   const isBarcodeInSystem = !!matchedMasterSKU;
 
@@ -770,8 +835,20 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                 </div>
 
                 {unmappedBarcode.trim() !== '' && (
-                  <div className={`p-2.5 rounded-lg text-xs font-bold flex items-center justify-between ${isBarcodeInSystem ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-rose-50 text-rose-800 border border-rose-200'}`}>
-                    <span>{isBarcodeInSystem ? `✓ Cocok dgn Master (${matchedMasterSKU?.Owner || 'DDI'} - ${matchedMasterSKU?.SKU} - Brand: ${matchedMasterSKU?.SKUBrand || 'ENFAGROW'})` : '⚠ TIDAK ADA di Master (Wajib Foto!)'}</span>
+                  <div className={`p-2.5 rounded-lg text-xs font-bold flex items-center justify-between ${
+                    isSearchingBarcode
+                      ? 'bg-amber-50 text-amber-800 border border-amber-200'
+                      : isBarcodeInSystem
+                        ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                        : 'bg-rose-50 text-rose-800 border border-rose-200'
+                  }`}>
+                    <span>
+                      {isSearchingBarcode
+                        ? '⏳ Mengecek barcode di master database...'
+                        : isBarcodeInSystem
+                          ? `✓ Cocok dgn Master (${matchedMasterSKU?.Owner || 'DDI'} - ${matchedMasterSKU?.SKU} - Brand: ${matchedMasterSKU?.SKUBrand || 'General'})`
+                          : '⚠ TIDAK ADA di Master (Wajib Foto!)'}
+                    </span>
                   </div>
                 )}
 

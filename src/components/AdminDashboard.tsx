@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { db } from '../firebase';
 import {
     collection, onSnapshot, doc, setDoc, deleteDoc, writeBatch, getDocs, query, orderBy, limit
@@ -159,6 +159,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
     // PAGINATION STATES (Pencegah Lag Memory)
     const [masterCurrentPage, setMasterCurrentPage] = useState<number>(1);
     const [catalogCurrentPage, setCatalogCurrentPage] = useState<number>(1);
+    const [reconCurrentPage, setReconCurrentPage] = useState<number>(1);
     const ITEMS_PER_PAGE = 50;
 
     const [editingAccount, setEditingAccount] = useState<GlobalAccount | null>(null);
@@ -464,57 +465,63 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         if (!activeProject) return;
 
         const qTasks = collection(db, "master_tasks");
+        let updateTimer: any = null;
+
         const unsubscribe = onSnapshot(qTasks, (snapshot) => {
             if (isUploadingRef.current) return; // Cegah UI freeze & re-render berlebihan saat upload massal berlangsung
-            const taskList: MasterSKUItem[] = snapshot.docs.map(docSnap => {
-                const data = docSnap.data();
+            if (updateTimer) clearTimeout(updateTimer);
 
-                const gQty = data.QTY_GOOD ?? data.qtyGood;
-                const bQty = data.QTY_BAD ?? data.qtyBad;
+            updateTimer = setTimeout(() => {
+                const taskList: MasterSKUItem[] = snapshot.docs.map(docSnap => {
+                    const data = docSnap.data();
 
-                const rawActQty = data.QTY_ACTUAL ?? data.countedQty;
-                const numActQty = parseInt(rawActQty, 10);
+                    const gQty = data.QTY_GOOD ?? data.qtyGood;
+                    const bQty = data.QTY_BAD ?? data.qtyBad;
 
-                const isCounted = !!data.isCounted || (rawActQty !== undefined && rawActQty !== null && !isNaN(numActQty));
+                    const rawActQty = data.QTY_ACTUAL ?? data.countedQty;
+                    const numActQty = parseInt(rawActQty, 10);
 
-                const calcGood = gQty !== undefined ? parseInt(gQty, 10) : (isCounted ? (isNaN(numActQty) ? 0 : numActQty) : 0);
-                const calcBad = bQty !== undefined ? parseInt(bQty, 10) : 0;
-                const totalActualCalculated = calcGood + calcBad;
+                    const isCounted = !!data.isCounted || (rawActQty !== undefined && rawActQty !== null && !isNaN(numActQty));
 
-                return {
-                    id: docSnap.id,
-                    Owner: data.Owner || 'DDI',
-                    SKU: data.SKU || '',
-                    Description: data.Description || data.name || '',
-                    UPC1: data.UPC1 || '',
-                    UPC2: data.UPC2 || '',
-                    SKUBrand: data.SKUBrand || '',
-                    satuanHitung: data.satuanHitung || 'PCS',
-                    Location: data.Location || '',
-                    level: data.level || '1',
-                    ailee: data.ailee || '',
-                    Zone: data.Zone || 'RACKING',
-                    LocationType: data.LocationType || 'RACK',
-                    counter: (data.counter || 'Unassigned').toLowerCase().trim(),
-                    Status: data.Status || 'Active',
-                    currentRound: parseInt(data.currentRound, 10) || 1,
-                    expiredDateSystem: data.expiredDateSystem || '',
-                    expiredDateActual: data.expDateActual || data.expiredDateActual || '',
-                    Qty: parseInt(data.Qty || data.QTY_SYSTEM) || 0,
-                    countedQty: isCounted ? totalActualCalculated : undefined,
-                    qtyGood: isCounted ? calcGood : undefined,
-                    qtyBad: isCounted ? calcBad : undefined,
-                    Remarks: data.badRemarks || data.Remarks || '',
-                    isCounted: !!isCounted,
-                    unitPrice: parseInt(data.unitPrice) || 0,
-                    round1Actual: data.round1Actual,
-                    round2Actual: data.round2Actual
-                };
-            });
+                    const calcGood = gQty !== undefined ? parseInt(gQty, 10) : (isCounted ? (isNaN(numActQty) ? 0 : numActQty) : 0);
+                    const calcBad = bQty !== undefined ? parseInt(bQty, 10) : 0;
+                    const totalActualCalculated = calcGood + calcBad;
 
-            if (taskList.length > 0) {
-                setMasterDataList(taskList);
-            }
+                    return {
+                        id: docSnap.id,
+                        Owner: data.Owner || 'DDI',
+                        SKU: data.SKU || '',
+                        Description: data.Description || data.name || '',
+                        UPC1: data.UPC1 || '',
+                        UPC2: data.UPC2 || '',
+                        SKUBrand: data.SKUBrand || '',
+                        satuanHitung: data.satuanHitung || 'PCS',
+                        Location: data.Location || '',
+                        level: data.level || '1',
+                        ailee: data.ailee || '',
+                        Zone: data.Zone || 'RACKING',
+                        LocationType: data.LocationType || 'RACK',
+                        counter: (data.counter || 'Unassigned').toLowerCase().trim(),
+                        Status: data.Status || 'Active',
+                        currentRound: parseInt(data.currentRound, 10) || 1,
+                        expiredDateSystem: data.expiredDateSystem || '',
+                        expiredDateActual: data.expDateActual || data.expiredDateActual || '',
+                        Qty: parseInt(data.Qty || data.QTY_SYSTEM) || 0,
+                        countedQty: isCounted ? totalActualCalculated : undefined,
+                        qtyGood: isCounted ? calcGood : undefined,
+                        qtyBad: isCounted ? calcBad : undefined,
+                        Remarks: data.badRemarks || data.Remarks || '',
+                        isCounted: !!isCounted,
+                        unitPrice: parseInt(data.unitPrice) || 0,
+                        round1Actual: data.round1Actual,
+                        round2Actual: data.round2Actual
+                    };
+                });
+
+                if (taskList.length > 0) {
+                    setMasterDataList(taskList);
+                }
+            }, 250);
         });
 
         const lockDocId = activeProject.sessionCode || activeProject.id;
@@ -529,7 +536,11 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             }
         });
 
-        return () => { unsubscribe(); lockUnsubscribe(); };
+        return () => {
+            if (updateTimer) clearTimeout(updateTimer);
+            unsubscribe();
+            lockUnsubscribe();
+        };
     }, [activeProject]);
 
     const handleDeployNextRoundForCounter = async (targetCounter: string) => {
@@ -1307,137 +1318,216 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
     const activeTeamMembers = activeProject ? allProjectTeams.filter(t => t.projectId === activeProject.id) : [];
 
-    const counterGroups = masterDataList.reduce((acc: any, item) => {
-        const cName = item.counter || 'Unassigned';
-        if (!acc[cName]) acc[cName] = { total: 0, counted: 0, errorCount: 0 };
+    // 1. OPTIMIZED COUNTER GROUPS (Single-pass O(N))
+    const counterGroups = useMemo(() => {
+        const counterMaxRoundMap = new Map<string, number>();
+        for (let i = 0; i < masterDataList.length; i++) {
+            const item = masterDataList[i];
+            const cName = item.counter || 'Unassigned';
+            const round = item.currentRound || 1;
+            const curMax = counterMaxRoundMap.get(cName) || 1;
+            if (round > curMax) counterMaxRoundMap.set(cName, round);
+        }
 
-        const cTasks = masterDataList.filter(m => m.counter === cName);
-        const activeRound = cTasks.length > 0 ? Math.max(...cTasks.map(t => t.currentRound || 1)) : 1;
+        const groups: Record<string, { total: number; counted: number; errorCount: number }> = {};
+        for (let i = 0; i < masterDataList.length; i++) {
+            const item = masterDataList[i];
+            const cName = item.counter || 'Unassigned';
+            if (!groups[cName]) groups[cName] = { total: 0, counted: 0, errorCount: 0 };
 
-        if (item.currentRound === activeRound) {
-            acc[cName].total++;
-            if (item.isCounted) {
-                acc[cName].counted++;
-                if ((item.countedQty ?? item.Qty) !== item.Qty) acc[cName].errorCount++;
+            const activeRound = counterMaxRoundMap.get(cName) || 1;
+            if (item.currentRound === activeRound) {
+                groups[cName].total++;
+                if (item.isCounted) {
+                    groups[cName].counted++;
+                    if ((item.countedQty ?? item.Qty) !== item.Qty) groups[cName].errorCount++;
+                }
             }
         }
-        return acc;
-    }, {});
+        return groups;
+    }, [masterDataList]);
 
-    const filteredCounterNames = Object.keys(counterGroups).filter(cName =>
-        cName.toLowerCase().includes(counterSearch.toLowerCase())
-    );
+    const filteredCounterNames = useMemo(() => {
+        const lowerSearch = counterSearch.toLowerCase();
+        return Object.keys(counterGroups).filter(cName =>
+            cName.toLowerCase().includes(lowerSearch)
+        );
+    }, [counterGroups, counterSearch]);
 
-    const counterDiscrepancies = selectedCounterForDetail
-        ? masterDataList.filter(m => m.counter === selectedCounterForDetail && m.isCounted && (m.countedQty ?? m.Qty) !== m.Qty)
-        : [];
+    const counterDiscrepancies = useMemo(() => {
+        if (!selectedCounterForDetail) return [];
+        return masterDataList.filter(m => m.counter === selectedCounterForDetail && m.isCounted && (m.countedQty ?? m.Qty) !== m.Qty);
+    }, [masterDataList, selectedCounterForDetail]);
 
-    // FILTERED SKU CATALOG WITH PAGINATION
-    const filteredSKUCatalog = Array.from(new Set(masterDataList.map(m => m.SKU))).map(sku => {
-        const matched = masterDataList.find(m => m.SKU === sku);
-        return {
-            SKU: sku,
-            Owner: matched?.Owner || 'DDI',
-            Description: matched?.Description || '-',
-            UPC1: matched?.UPC1 || '-',
-            UPC2: matched?.UPC2 || '-',
-            SKUBrand: matched?.SKUBrand || '-',
-            satuanHitung: matched?.satuanHitung || 'PCS',
-            unitPrice: matched?.unitPrice || 0
-        };
-    }).filter(c =>
-        c.SKU.toLowerCase().includes(catalogSearch.toLowerCase()) ||
-        c.Description.toLowerCase().includes(catalogSearch.toLowerCase()) ||
-        c.UPC1.toLowerCase().includes(catalogSearch.toLowerCase())
-    );
+    // 2. FILTERED SKU CATALOG WITH PAGINATION (Single-pass Map O(N))
+    const filteredSKUCatalog = useMemo(() => {
+        const catalogMap = new Map<string, any>();
+        for (let i = 0; i < masterDataList.length; i++) {
+            const m = masterDataList[i];
+            if (!m.SKU) continue;
+            if (!catalogMap.has(m.SKU)) {
+                catalogMap.set(m.SKU, {
+                    SKU: m.SKU,
+                    Owner: m.Owner || 'DDI',
+                    Description: m.Description || '-',
+                    UPC1: m.UPC1 || '-',
+                    UPC2: m.UPC2 || '-',
+                    SKUBrand: m.SKUBrand || '-',
+                    satuanHitung: m.satuanHitung || 'PCS',
+                    unitPrice: m.unitPrice || 0
+                });
+            }
+        }
+        const lowerSearch = catalogSearch.toLowerCase();
+        const allItems = Array.from(catalogMap.values());
+        if (!lowerSearch) return allItems;
+        return allItems.filter(c =>
+            c.SKU.toLowerCase().includes(lowerSearch) ||
+            c.Description.toLowerCase().includes(lowerSearch) ||
+            c.UPC1.toLowerCase().includes(lowerSearch)
+        );
+    }, [masterDataList, catalogSearch]);
 
     const totalCatalogPages = Math.ceil(filteredSKUCatalog.length / ITEMS_PER_PAGE) || 1;
-    const paginatedSKUCatalog = filteredSKUCatalog.slice(
-        (catalogCurrentPage - 1) * ITEMS_PER_PAGE,
-        catalogCurrentPage * ITEMS_PER_PAGE
-    );
+    const paginatedSKUCatalog = useMemo(() => {
+        return filteredSKUCatalog.slice(
+            (catalogCurrentPage - 1) * ITEMS_PER_PAGE,
+            catalogCurrentPage * ITEMS_PER_PAGE
+        );
+    }, [filteredSKUCatalog, catalogCurrentPage]);
 
-    // FILTERED MASTER TASK WITH PAGINATION
-    const filteredMasterTask = masterDataList.filter(m =>
-        m.SKU.toLowerCase().includes(masterTaskSearch.toLowerCase()) ||
-        m.Location.toLowerCase().includes(masterTaskSearch.toLowerCase()) ||
-        m.Description.toLowerCase().includes(masterTaskSearch.toLowerCase()) ||
-        m.counter.toLowerCase().includes(masterTaskSearch.toLowerCase())
-    );
+    // 3. FILTERED MASTER TASK WITH PAGINATION
+    const filteredMasterTask = useMemo(() => {
+        const lower = masterTaskSearch.toLowerCase();
+        if (!lower) return masterDataList;
+        return masterDataList.filter(m =>
+            m.SKU.toLowerCase().includes(lower) ||
+            m.Location.toLowerCase().includes(lower) ||
+            m.Description.toLowerCase().includes(lower) ||
+            m.counter.toLowerCase().includes(lower)
+        );
+    }, [masterDataList, masterTaskSearch]);
 
     const totalMasterPages = Math.ceil(filteredMasterTask.length / ITEMS_PER_PAGE) || 1;
-    const paginatedMasterTask = filteredMasterTask.slice(
-        (masterCurrentPage - 1) * ITEMS_PER_PAGE,
-        masterCurrentPage * ITEMS_PER_PAGE
-    );
+    const paginatedMasterTask = useMemo(() => {
+        return filteredMasterTask.slice(
+            (masterCurrentPage - 1) * ITEMS_PER_PAGE,
+            masterCurrentPage * ITEMS_PER_PAGE
+        );
+    }, [filteredMasterTask, masterCurrentPage]);
 
+    // 4. STATISTIK GLOBAL & PROGRESS (Memoized)
     const totalSKUs = masterDataList.length;
-    const totalCounted = masterDataList.filter(i => i.isCounted).length;
+    const totalCounted = useMemo(() => masterDataList.filter(i => i.isCounted).length, [masterDataList]);
     const overallPercentage = totalSKUs > 0 ? Math.round((totalCounted / totalSKUs) * 100) : 0;
-    const liveIssues = masterDataList.filter(item => item.isCounted && (item.countedQty ?? item.Qty) !== item.Qty);
+    const liveIssues = useMemo(() => masterDataList.filter(item => item.isCounted && (item.countedQty ?? item.Qty) !== item.Qty), [masterDataList]);
 
-    const levelProgress = Object.keys(masterDataList.reduce((acc: any, item) => {
-        const l = item.level || 'Unassigned'; if (!acc[l]) acc[l] = { total: 0, counted: 0 };
-        acc[l].total++; if (item.isCounted) acc[l].counted++; return acc;
-    }, {})).map(name => {
-        const group = masterDataList.reduce((acc: any, item) => {
-            const l = item.level || 'Unassigned'; if (!acc[l]) acc[l] = { total: 0, counted: 0 };
-            acc[l].total++; if (item.isCounted) acc[l].counted++; return acc;
-        }, {})[name];
-        return { name, total: group.total, counted: group.counted, percentage: Math.round((group.counted / group.total) * 100) };
-    });
+    // 5. LEVEL PROGRESS (Single-pass O(N))
+    const levelProgress = useMemo(() => {
+        const levelMap: Record<string, { total: number; counted: number }> = {};
+        for (let i = 0; i < masterDataList.length; i++) {
+            const item = masterDataList[i];
+            const l = item.level || 'Unassigned';
+            if (!levelMap[l]) levelMap[l] = { total: 0, counted: 0 };
+            levelMap[l].total++;
+            if (item.isCounted) levelMap[l].counted++;
+        }
+        return Object.keys(levelMap).map(name => {
+            const group = levelMap[name];
+            return {
+                name,
+                total: group.total,
+                counted: group.counted,
+                percentage: group.total > 0 ? Math.round((group.counted / group.total) * 100) : 0
+            };
+        });
+    }, [masterDataList]);
 
-    const brandAccuracyList = Array.from(new Set(masterDataList.map(m => m.SKUBrand))).map(brandName => {
-        const brandSKUs = masterDataList.filter(m => m.SKUBrand === brandName);
+    // 6. BRAND ACCURACY (Single-pass Grouping O(N))
+    const brandAccuracyList = useMemo(() => {
+        const brandGroupMap = new Map<string, Map<string, { SKU: string; Qty: number; countedQty: number; isCounted: boolean }>>();
 
-        const groupedSKUMap: Record<string, { SKU: string; Qty: number; countedQty: number; isCounted: boolean }> = {};
-        brandSKUs.forEach(item => {
-            if (!groupedSKUMap[item.SKU]) {
-                groupedSKUMap[item.SKU] = {
+        for (let i = 0; i < masterDataList.length; i++) {
+            const item = masterDataList[i];
+            const brand = item.SKUBrand || 'No Brand';
+            let skuMap = brandGroupMap.get(brand);
+            if (!skuMap) {
+                skuMap = new Map();
+                brandGroupMap.set(brand, skuMap);
+            }
+
+            const existing = skuMap.get(item.SKU);
+            if (!existing) {
+                skuMap.set(item.SKU, {
                     SKU: item.SKU,
                     Qty: item.Qty || 0,
                     countedQty: item.countedQty || 0,
                     isCounted: !!item.isCounted
-                };
+                });
             } else {
-                groupedSKUMap[item.SKU].Qty += (item.Qty || 0);
+                existing.Qty += (item.Qty || 0);
                 if (item.isCounted) {
-                    groupedSKUMap[item.SKU].countedQty += (item.countedQty || 0);
-                    groupedSKUMap[item.SKU].isCounted = true;
+                    existing.countedQty += (item.countedQty || 0);
+                    existing.isCounted = true;
                 }
             }
-        });
-
-        const aggregatedSKUList = Object.values(groupedSKUMap);
-        const countedSKUs = aggregatedSKUList.filter(m => m.isCounted);
-        const diffCount = countedSKUs.filter(m => m.countedQty !== m.Qty).length;
-
-        let accuracyPct = 0;
-        let isFullyUncounted = countedSKUs.length === 0;
-
-        if (countedSKUs.length > 0) {
-            accuracyPct = Math.max(0, Math.round(((countedSKUs.length - diffCount) / countedSKUs.length) * 100));
         }
 
-        return {
-            brand: brandName || 'No Brand',
-            totalSKUs: aggregatedSKUList.length,
-            countedCount: countedSKUs.length,
-            diffSKUs: diffCount,
-            accuracyPct,
-            isFullyUncounted,
-            skuList: aggregatedSKUList
-        };
-    }).filter(b =>
-        b.brand.toLowerCase().includes(brandSearch.toLowerCase()) &&
-        (brandStatusFilter === 'all' ||
-            (brandStatusFilter === 'selisih' ? b.diffSKUs > 0 :
-                (brandStatusFilter === 'match' ? (!b.isFullyUncounted && b.diffSKUs === 0) : b.isFullyUncounted)))
-    );
+        const lowerBrandSearch = brandSearch.toLowerCase();
+        const result = [];
 
-    const matchRecoveryCount = masterDataList.filter(m => m.isCounted && (m.countedQty ?? m.Qty) === m.Qty).length;
-    const varianceRecoveryCount = masterDataList.filter(m => m.isCounted && (m.countedQty ?? m.Qty) !== m.Qty).length;
-    const totalFinancialVarianceValue = masterDataList.reduce((acc, m) => acc + (m.isCounted ? (((m.countedQty ?? m.Qty) - m.Qty) * (m.unitPrice || 0)) : 0), 0);
+        for (const [brandName, skuMap] of brandGroupMap.entries()) {
+            if (lowerBrandSearch && !brandName.toLowerCase().includes(lowerBrandSearch)) {
+                continue;
+            }
+
+            const aggregatedSKUList = Array.from(skuMap.values());
+            const countedSKUs = aggregatedSKUList.filter(m => m.isCounted);
+            const diffCount = countedSKUs.filter(m => m.countedQty !== m.Qty).length;
+
+            let accuracyPct = 0;
+            const isFullyUncounted = countedSKUs.length === 0;
+
+            if (countedSKUs.length > 0) {
+                accuracyPct = Math.max(0, Math.round(((countedSKUs.length - diffCount) / countedSKUs.length) * 100));
+            }
+
+            const passesFilter = brandStatusFilter === 'all' ||
+                (brandStatusFilter === 'selisih' ? diffCount > 0 :
+                    (brandStatusFilter === 'match' ? (!isFullyUncounted && diffCount === 0) : isFullyUncounted));
+
+            if (passesFilter) {
+                result.push({
+                    brand: brandName,
+                    totalSKUs: aggregatedSKUList.length,
+                    countedCount: countedSKUs.length,
+                    diffSKUs: diffCount,
+                    accuracyPct,
+                    isFullyUncounted,
+                    skuList: aggregatedSKUList
+                });
+            }
+        }
+        return result;
+    }, [masterDataList, brandSearch, brandStatusFilter]);
+
+    // 7. FINANCIAL VARIANCE & RECONCILIATION SUMMARY (Memoized)
+    const matchRecoveryCount = useMemo(() => masterDataList.filter(m => m.isCounted && (m.countedQty ?? m.Qty) === m.Qty).length, [masterDataList]);
+    const varianceRecoveryCount = useMemo(() => masterDataList.filter(m => m.isCounted && (m.countedQty ?? m.Qty) !== m.Qty).length, [masterDataList]);
+    const totalFinancialVarianceValue = useMemo(() => masterDataList.reduce((acc, m) => acc + (m.isCounted ? (((m.countedQty ?? m.Qty) - m.Qty) * (m.unitPrice || 0)) : 0), 0), [masterDataList]);
+
+    // 8. DISCREPANCY TABLE LIST & PAGINATION (Pencegah Freeze Layar Rekapitulasi)
+    const filteredDiscrepancies = useMemo(() => {
+        return masterDataList.filter(i => i.isCounted && ((i.countedQty || 0) - i.Qty) !== 0);
+    }, [masterDataList]);
+
+    const totalReconPages = Math.ceil(filteredDiscrepancies.length / ITEMS_PER_PAGE) || 1;
+    const paginatedDiscrepancies = useMemo(() => {
+        return filteredDiscrepancies.slice(
+            (reconCurrentPage - 1) * ITEMS_PER_PAGE,
+            reconCurrentPage * ITEMS_PER_PAGE
+        );
+    }, [filteredDiscrepancies, reconCurrentPage]);
 
     return (
         <div className="min-h-screen bg-slate-50 text-slate-800 p-4 lg:p-8 max-w-7xl mx-auto font-sans relative">
@@ -2352,30 +2442,67 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                 <div className="overflow-x-auto border rounded-2xl">
                                     <table className="w-full text-left text-sm"><thead className="bg-slate-50 font-black text-slate-600 border-b"><tr><th className="p-4">SKU BARANG</th><th className="p-4 text-center">WMS QTY</th><th className="p-4 text-center">QTY GOOD</th><th className="p-4 text-center text-red-600">QTY BAD</th><th className="p-4 text-center">ACTUAL QTY</th><th className="p-4 text-center">SELISIH</th><th className="p-4 text-right bg-amber-50">VALUASI (Rp)</th><th className="p-4 text-right bg-indigo-50">OVERRIDE RECOVERY</th></tr></thead>
                                         <tbody className="divide-y divide-slate-100 font-medium">
-                                            {masterDataList.filter(i => i.isCounted && ((i.countedQty || 0) - i.Qty) !== 0).map((item, i) => {
-                                                const diff = (item.countedQty || 0) - item.Qty;
-                                                const val = diff * (item.unitPrice || 0);
-                                                return (
-                                                    <tr key={i} className="hover:bg-slate-50">
-                                                        <td className="p-4 font-mono font-bold text-indigo-600">{item.SKU}</td>
-                                                        <td className="p-4 text-center text-slate-500">{item.Qty}</td>
-                                                        <td className="p-4 text-center font-bold text-emerald-600">{item.qtyGood ?? item.countedQty}</td>
-                                                        <td className="p-4 text-center font-bold text-red-600">{item.qtyBad ?? 0}</td>
-                                                        <td className="p-4 text-center font-black">{item.countedQty}</td>
-                                                        <td className="p-4 text-center text-red-600 font-black">{diff > 0 ? `+${diff}` : diff}</td>
-                                                        <td className="p-4 text-right font-mono text-amber-700 font-bold bg-amber-50/20">Rp {val.toLocaleString('id-ID')}</td>
-                                                        <td className="p-4 text-right bg-indigo-50/10">
-                                                            <div className="flex items-center justify-end space-x-2">
-                                                                <input type="number" placeholder="Qty Final" className="w-24 px-3 py-1.5 bg-white border border-slate-300 rounded-xl text-xs font-bold font-mono outline-none" onKeyDown={(e) => { if (e.key === 'Enter') handleSaveRecoveryOverride(item.SKU, parseInt((e.target as HTMLInputElement).value, 10)); }} />
-                                                                <button onClick={(e) => handleSaveRecoveryOverride(item.SKU, parseInt(((e.currentTarget.previousElementSibling as HTMLInputElement).value), 10))} className="p-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-md"><Save className="w-4 h-4" /></button>
-                                                            </div>
-                                                        </td>
-                                                    </tr>
-                                                );
-                                            })}
+                                            {paginatedDiscrepancies.length === 0 ? (
+                                                <tr>
+                                                    <td colSpan={8} className="p-8 text-center text-slate-400 font-bold">
+                                                        Tidak ada selisih stok (Seluruh item terhitung cocok / belum ada variansi).
+                                                    </td>
+                                                </tr>
+                                            ) : (
+                                                paginatedDiscrepancies.map((item, i) => {
+                                                    const diff = (item.countedQty || 0) - item.Qty;
+                                                    const val = diff * (item.unitPrice || 0);
+                                                    return (
+                                                        <tr key={item.id || `${item.SKU}_${i}`} className="hover:bg-slate-50">
+                                                            <td className="p-4 font-mono font-bold text-indigo-600">{item.SKU}</td>
+                                                            <td className="p-4 text-center text-slate-500">{item.Qty}</td>
+                                                            <td className="p-4 text-center font-bold text-emerald-600">{item.qtyGood ?? item.countedQty}</td>
+                                                            <td className="p-4 text-center font-bold text-red-600">{item.qtyBad ?? 0}</td>
+                                                            <td className="p-4 text-center font-black">{item.countedQty}</td>
+                                                            <td className="p-4 text-center text-red-600 font-black">{diff > 0 ? `+${diff}` : diff}</td>
+                                                            <td className="p-4 text-right font-mono text-amber-700 font-bold bg-amber-50/20">Rp {val.toLocaleString('id-ID')}</td>
+                                                            <td className="p-4 text-right bg-indigo-50/10">
+                                                                <div className="flex items-center justify-end space-x-2">
+                                                                    <input type="number" placeholder="Qty Final" className="w-24 px-3 py-1.5 bg-white border border-slate-300 rounded-xl text-xs font-bold font-mono outline-none" onKeyDown={(e) => { if (e.key === 'Enter') handleSaveRecoveryOverride(item.SKU, parseInt((e.target as HTMLInputElement).value, 10)); }} />
+                                                                    <button onClick={(e) => handleSaveRecoveryOverride(item.SKU, parseInt(((e.currentTarget.previousElementSibling as HTMLInputElement).value), 10))} className="p-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-md"><Save className="w-4 h-4" /></button>
+                                                                </div>
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })
+                                            )}
                                         </tbody>
                                     </table>
                                 </div>
+
+                                {filteredDiscrepancies.length > ITEMS_PER_PAGE && (
+                                    <div className="flex items-center justify-between pt-2 text-xs font-bold text-slate-600">
+                                        <span>
+                                            Menampilkan {filteredDiscrepancies.length > 0 ? (reconCurrentPage - 1) * ITEMS_PER_PAGE + 1 : 0} - {Math.min(reconCurrentPage * ITEMS_PER_PAGE, filteredDiscrepancies.length)} dari {filteredDiscrepancies.length.toLocaleString('id-ID')} Item Selisih
+                                        </span>
+                                        <div className="flex items-center space-x-2">
+                                            <button
+                                                disabled={reconCurrentPage === 1}
+                                                onClick={() => setReconCurrentPage(p => Math.max(1, p - 1))}
+                                                className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 rounded-xl flex items-center space-x-1 cursor-pointer"
+                                            >
+                                                <ChevronLeft className="w-4 h-4" />
+                                                <span>Prev</span>
+                                            </button>
+                                            <span className="px-3 py-1 bg-slate-100 rounded-xl">
+                                                Halaman {reconCurrentPage} / {totalReconPages}
+                                            </span>
+                                            <button
+                                                disabled={reconCurrentPage >= totalReconPages}
+                                                onClick={() => setReconCurrentPage(p => p + 1)}
+                                                className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 rounded-xl flex items-center space-x-1 cursor-pointer"
+                                            >
+                                                <span>Next</span>
+                                                <ChevronRight className="w-4 h-4" />
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     )}
