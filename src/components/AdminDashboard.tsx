@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../firebase';
 import {
-    collection, onSnapshot, doc, setDoc, deleteDoc, writeBatch, getDocs
+    collection, onSnapshot, doc, setDoc, deleteDoc, writeBatch, getDocs, query, orderBy, limit
 } from 'firebase/firestore';
 import * as XLSX from 'xlsx';
 import emailjs from '@emailjs/browser';
@@ -12,7 +12,7 @@ import {
     CheckCircle2, XCircle, Search, Building2, DollarSign,
     Download, Scale, PlayCircle, Archive, ArrowLeft, AlertTriangle,
     LogOut, GripHorizontal, Contact, Eye, EyeOff, UserCheck, Clock, Store, Link2, KeyRound,
-    Mail, Edit2, Smartphone, Lock, Unlock, Repeat, Copy, Tag, RefreshCw, HardDrive
+    Mail, Edit2, Smartphone, Lock, Unlock, Repeat, Copy, Tag, RefreshCw, HardDrive, Loader2, AlertCircle, X
 } from 'lucide-react';
 import type { UserRole } from '../types';
 
@@ -167,6 +167,12 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
     const [credentialsModalText, setCredentialsModalText] = useState<string | null>(null);
     const [auditLogs, setAuditLogs] = useState<any[]>([]);
 
+    const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number } | null>(null);
+
+    // STATE KATEGORI BAD STOCK (CONFIGURABLE BY OWNER)
+    const [badStockCategories, setBadStockCategories] = useState<string[]>(['Dus Penyok', 'Kemasan Bocor', 'Segel Rusak', 'Basah / Lembab', 'Barang Expired']);
+    const [newCategoryInput, setNewCategoryInput] = useState<string>('');
+
     useEffect(() => {
         setOrderedTabs(ALL_AVAILABLE_TABS.filter(tab => tab.roles.includes(effectiveRole)));
     }, [effectiveRole]);
@@ -232,23 +238,46 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             }
         });
 
-        const unsubAudit = onSnapshot(collection(db, "audit_logs"), (snap) => {
+        // LISTEN CONFIG BAD STOCK CATEGORIES DARI FIRESTORE
+        const unsubBadStock = onSnapshot(doc(db, "settings", "bad_stock_config"), (snap) => {
+            if (snap.exists() && snap.data().categories) {
+                setBadStockCategories(snap.data().categories);
+            }
+        });
+
+        const qAuditLatest = query(collection(db, "audit_logs"), orderBy("timestamp", "desc"), limit(100));
+        const unsubAudit = onSnapshot(qAuditLatest, (snap) => {
             const logs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-            logs.sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
             setAuditLogs(logs);
         });
 
-        return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); unsubOwner(); unsubAudit(); };
+        return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); unsubOwner(); unsubBadStock(); unsubAudit(); };
     }, []);
+
+    const handleAddBadStockCategory = async () => {
+        if (!newCategoryInput.trim()) return;
+        const cleanCat = newCategoryInput.trim();
+        if (badStockCategories.includes(cleanCat)) {
+            triggerNotification('Kategori tersebut sudah ada.');
+            return;
+        }
+        const updated = [...badStockCategories, cleanCat];
+        await setDoc(doc(db, "settings", "bad_stock_config"), { categories: updated }, { merge: true });
+        setNewCategoryInput('');
+        triggerNotification(`Kategori Bad Stock "${cleanCat}" ditambahkan!`);
+    };
+
+    const handleRemoveBadStockCategory = async (catToRemove: string) => {
+        const updated = badStockCategories.filter(c => c !== catToRemove);
+        await setDoc(doc(db, "settings", "bad_stock_config"), { categories: updated }, { merge: true });
+        triggerNotification(`Kategori "${catToRemove}" dihapus.`);
+    };
 
     const combinedLocationOptions = [
         ...warehouseList.map(w => ({ value: w.id, label: `[Gudang WMS] ${w.name}` })),
         ...consignmentStoreList.map(s => ({ value: s.id, label: `[Store Offline] ${s.name}` }))
     ];
 
-    // =======================================================
-    // HANDLER BACKUP FULL CLOUD DATABASE TO JSON FILE
-    // =======================================================
     const handleDownloadFullDatabaseBackupJSON = () => {
         if (masterDataList.length === 0) {
             triggerNotification("Tidak ada data untuk dibackup.");
@@ -263,18 +292,21 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             teamMembers: activeTeamMembers
         };
 
-        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(fullBackupData, null, 2));
+        const jsonString = JSON.stringify(fullBackupData, null, 2);
+        const blob = new Blob([jsonString], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+
         const downloadAnchor = document.createElement('a');
-        downloadAnchor.setAttribute("href", dataStr);
-        downloadAnchor.setAttribute("download", `EMERGENCY_BACKUP_SO360_${activeProject?.sessionCode || 'PROJECT'}_${Date.now()}.json`);
+        downloadAnchor.href = url;
+        downloadAnchor.download = `EMERGENCY_BACKUP_SO360_${activeProject?.sessionCode || 'PROJECT'}_${Date.now()}.json`;
         document.body.appendChild(downloadAnchor);
         downloadAnchor.click();
         downloadAnchor.remove();
+        URL.revokeObjectURL(url);
 
         triggerNotification("🛡️ Backup Cloud JSON Berhasil Diunduh!");
     };
 
-    // RESTORE DATABASE DARI FILE BACKUP JSON
     const handleRestoreDatabaseFromJSON = (file: File) => {
         const reader = new FileReader();
         reader.onload = async (e) => {
@@ -287,20 +319,16 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
                 triggerNotification("Memulihkan data dari JSON...");
 
-                const taskBatch = writeBatch(db);
-                backup.masterTasks.forEach((task: any) => {
-                    const taskRef = doc(db, "master_tasks", task.id);
-                    taskBatch.set(taskRef, task, { merge: true });
-                });
-                await taskBatch.commit();
-
-                if (backup.auditTrailLogs && Array.isArray(backup.auditTrailLogs)) {
-                    const auditBatch = writeBatch(db);
-                    backup.auditTrailLogs.forEach((log: any) => {
-                        const logRef = doc(db, "audit_logs", log.id);
-                        auditBatch.set(logRef, log, { merge: true });
+                const CHUNK = 400;
+                const tasks = backup.masterTasks;
+                for (let i = 0; i < tasks.length; i += CHUNK) {
+                    const chunk = tasks.slice(i, i + CHUNK);
+                    const taskBatch = writeBatch(db);
+                    chunk.forEach((task: any) => {
+                        const taskRef = doc(db, "master_tasks", task.id);
+                        taskBatch.set(taskRef, task, { merge: true });
                     });
-                    await auditBatch.commit();
+                    await taskBatch.commit();
                 }
 
                 triggerNotification("✅ PEMULIHAN SUKSES! Seluruh data berhasil dipulihkan!");
@@ -361,29 +389,33 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     return;
                 }
 
-                const batch = writeBatch(db);
+                const CHUNK = 400;
                 let count = 0;
+                for (let i = 0; i < json.length; i += CHUNK) {
+                    const chunk = json.slice(i, i + CHUNK);
+                    const batch = writeBatch(db);
 
-                json.forEach((row: any) => {
-                    const uName = (row['Username'] || row['username'] || row['USERNAME'] || '').toString().toLowerCase().trim();
-                    const name = (row['Nama'] || row['Name'] || row['NAMA'] || uName).toString().trim();
-                    const pin = (row['PIN'] || row['Pin'] || row['pin'] || '1234').toString().trim();
-                    const email = (row['Email'] || row['email'] || `${uName}@anymindgroup.com`).toString().trim();
+                    chunk.forEach((row: any) => {
+                        const uName = (row['Username'] || row['username'] || row['USERNAME'] || '').toString().toLowerCase().trim();
+                        const name = (row['Nama'] || row['Name'] || row['NAMA'] || uName).toString().trim();
+                        const pin = (row['PIN'] || row['Pin'] || row['pin'] || '1234').toString().trim();
+                        const email = (row['Email'] || row['email'] || `${uName}@anymindgroup.com`).toString().trim();
 
-                    if (uName) {
-                        const accRef = doc(db, "global_accounts", uName);
-                        batch.set(accRef, {
-                            username: uName,
-                            name: name,
-                            pin: pin,
-                            email: email,
-                            role: 'counter'
-                        }, { merge: true });
-                        count++;
-                    }
-                });
+                        if (uName) {
+                            const accRef = doc(db, "global_accounts", uName);
+                            batch.set(accRef, {
+                                username: uName,
+                                name: name,
+                                pin: pin,
+                                email: email,
+                                role: 'counter'
+                            }, { merge: true });
+                            count++;
+                        }
+                    });
 
-                await batch.commit();
+                    await batch.commit();
+                }
                 triggerNotification(`Berhasil upload ${count} Akun KTP Cloud Massal!`);
             } catch (err: any) {
                 console.error("Bulk KTP Upload Error:", err);
@@ -645,35 +677,47 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         triggerNotification("Laporan Recon & Recovery (.xlsx) berhasil diunduh!");
     };
 
-    const handleExportAuditTrailXLSX = () => {
-        if (auditLogs.length === 0) {
-            triggerNotification("Belum ada data Audit Trail untuk di-download!");
-            return;
+    const handleExportAuditTrailXLSX = async () => {
+        try {
+            triggerNotification("Memuat Audit Trail dari Cloud...");
+            const qAuditFull = query(collection(db, "audit_logs"), orderBy("timestamp", "desc"), limit(20000));
+            const snap = await getDocs(qAuditFull);
+
+            if (snap.empty) {
+                triggerNotification("Belum ada data Audit Trail!");
+                return;
+            }
+
+            const exportLogs = snap.docs.map((docSnap, idx) => {
+                const log = docSnap.data();
+                return {
+                    'NO': idx + 1,
+                    'TIMESTAMP (JAM SUBMIT)': log.timestamp ? new Date(log.timestamp).toLocaleString('id-ID') : '-',
+                    'LOKASI RAK': log.rackLocation || log.Location || '-',
+                    'OWNER SKU': log.ownerSku || log.Owner || 'DDI',
+                    'SKU': log.sku || log.SKU || '-',
+                    'DESKRIPSI PRODUK': log.description || log.Description || '-',
+                    'UPC 1': log.upc1 || log.UPC1 || '-',
+                    'UPC 2': log.upc2 || log.UPC2 || '-',
+                    'COUNTER PIC': log.counterPic || log.counter || '-',
+                    'RONDE': `Round ${log.round || log.currentRound || 1}`,
+                    'QTY GOOD': log.qtyGood ?? 0,
+                    'QTY BAD': log.qtyBad ?? 0,
+                    'TOTAL FINAL SUBMITTED': log.totalFinalSubmitted ?? log.qtyActual ?? 0,
+                    'ED ACTUAL': log.edActual || log.expiredDateActual || '-',
+                    'CATATAN (REMARKS)': log.remarks || log.Remarks || '-'
+                };
+            });
+
+            const ws = XLSX.utils.json_to_sheet(exportLogs);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "Audit_Trail_Log");
+            XLSX.writeFile(wb, `Audit_Trail_Snapshot_${activeProject?.sessionCode || '360'}_${Date.now()}.xlsx`);
+            triggerNotification("Audit Trail Log (.xlsx) berhasil diunduh!");
+        } catch (err: any) {
+            console.error("Export Audit Error:", err);
+            triggerNotification("Gagal mengunduh Audit Log.");
         }
-
-        const exportLogs = auditLogs.map((log, idx) => ({
-            'NO': idx + 1,
-            'TIMESTAMP (JAM SUBMIT)': log.timestamp ? new Date(log.timestamp).toLocaleString('id-ID') : '-',
-            'LOKASI RAK': log.rackLocation || log.Location || '-',
-            'OWNER SKU': log.ownerSku || log.Owner || 'DDI',
-            'SKU': log.sku || log.SKU || '-',
-            'DESKRIPSI PRODUK': log.description || log.Description || '-',
-            'UPC 1': log.upc1 || log.UPC1 || '-',
-            'UPC 2': log.upc2 || log.UPC2 || '-',
-            'COUNTER PIC': log.counterPic || log.counter || '-',
-            'RONDE': `Round ${log.round || log.currentRound || 1}`,
-            'QTY GOOD': log.qtyGood ?? 0,
-            'QTY BAD': log.qtyBad ?? 0,
-            'TOTAL FINAL SUBMITTED': log.totalFinalSubmitted ?? log.qtyActual ?? 0,
-            'ED ACTUAL': log.edActual || log.expiredDateActual || '-',
-            'CATATAN (REMARKS)': log.remarks || log.Remarks || '-'
-        }));
-
-        const ws = XLSX.utils.json_to_sheet(exportLogs);
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, "Audit_Trail_Log");
-        XLSX.writeFile(wb, `Audit_Trail_Snapshot_${activeProject?.sessionCode || '360'}_${new Date().toISOString().split('T')[0]}.xlsx`);
-        triggerNotification("Audit Trail Log (.xlsx) berhasil diunduh!");
     };
 
     const handleToggleGlobalLock = async () => {
@@ -724,15 +768,19 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             return;
         }
 
-        const batch = writeBatch(db);
-        tasksToMove.forEach(task => {
-            if (task.id) {
-                const ref = doc(db, "master_tasks", task.id);
-                batch.update(ref, { counter: cleanTarget, updatedAt: new Date().toISOString() });
-            }
-        });
+        const CHUNK = 400;
+        for (let i = 0; i < tasksToMove.length; i += CHUNK) {
+            const chunk = tasksToMove.slice(i, i + CHUNK);
+            const batch = writeBatch(db);
+            chunk.forEach(task => {
+                if (task.id) {
+                    const ref = doc(db, "master_tasks", task.id);
+                    batch.update(ref, { counter: cleanTarget, updatedAt: new Date().toISOString() });
+                }
+            });
+            await batch.commit();
+        }
 
-        await batch.commit();
         triggerNotification(`Sukses! ${tasksToMove.length} task milik ${cleanSource} dipindahkan ke ${cleanTarget}.`);
         setTransferSourceCounter(null);
         setTransferTargetCounter('');
@@ -825,98 +873,103 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     const worksheet = workbook.Sheets[workbook.SheetNames[0]];
                     const json = XLSX.utils.sheet_to_json(worksheet) as any[];
 
-                    triggerNotification("Reset data lama & mengunggah data baru ke Cloud...");
+                    if (json.length === 0) {
+                        triggerNotification("File Excel kosong.");
+                        reject("File kosong");
+                        return;
+                    }
 
-                    const oldDocsSnap = await getDocs(collection(db, "master_tasks"));
-                    const cleanBatch = writeBatch(db);
-                    oldDocsSnap.docs.forEach(oldDoc => cleanBatch.delete(oldDoc.ref));
-                    await cleanBatch.commit();
+                    triggerNotification("Mempersiapkan upload data massal ke Cloud...");
+                    setUploadProgress({ current: 0, total: json.length });
 
-                    const oldAuditSnap = await getDocs(collection(db, "audit_logs"));
-                    const cleanAuditBatch = writeBatch(db);
-                    oldAuditSnap.docs.forEach(oldDoc => cleanAuditBatch.delete(oldDoc.ref));
-                    await cleanAuditBatch.commit();
-
-                    const batch = writeBatch(db);
+                    const CHUNK_SIZE = 400;
+                    const totalRows = json.length;
                     const newMasterList: MasterSKUItem[] = [];
                     const pId = currentProjId || activeProject?.id;
 
-                    for (let idx = 0; idx < json.length; idx++) {
-                        const row = json[idx];
-                        const rawCounter = (row['counter'] || row['Counter'] || row['COUNTER'] || 'Unassigned').toString().toLowerCase().trim();
-                        const locStr = (row['Location'] || row['LOCATION'] || `LOC-${idx + 1}`).toString().trim();
-                        const skuStr = (row['SKU'] || `SKU-${idx + 1}`).toString().trim();
+                    for (let i = 0; i < totalRows; i += CHUNK_SIZE) {
+                        const chunk = json.slice(i, i + CHUNK_SIZE);
+                        const batch = writeBatch(db);
 
-                        const rawTaskId = `${locStr}_${skuStr}_${idx + 1}`;
-                        const taskId = rawTaskId.replace(/\//g, '-');
+                        chunk.forEach((row: any, idxInChunk: number) => {
+                            const globalIdx = i + idxInChunk;
+                            const rawCounter = (row['counter'] || row['Counter'] || row['COUNTER'] || 'Unassigned').toString().toLowerCase().trim();
+                            const locStr = (row['Location'] || row['LOCATION'] || `LOC-${globalIdx + 1}`).toString().trim();
+                            const skuStr = (row['SKU'] || `SKU-${globalIdx + 1}`).toString().trim();
 
-                        if (rawCounter !== 'unassigned') {
-                            const accRef = doc(db, "global_accounts", rawCounter);
-                            batch.set(accRef, {
-                                username: rawCounter,
-                                name: rawCounter.toUpperCase(),
-                                pin: '1234',
-                                email: `${rawCounter}@anymindgroup.com`
-                            }, { merge: true });
+                            const taskId = `${locStr}_${skuStr}_${globalIdx + 1}`.replace(/\//g, '-');
 
-                            if (pId) {
-                                const teamRef = doc(db, "project_teams", `${pId}_${rawCounter}`);
-                                batch.set(teamRef, {
-                                    projectId: pId,
+                            if (rawCounter !== 'unassigned') {
+                                const accRef = doc(db, "global_accounts", rawCounter);
+                                batch.set(accRef, {
                                     username: rawCounter,
-                                    role: 'counter'
+                                    name: rawCounter.toUpperCase(),
+                                    pin: '1234',
+                                    email: `${rawCounter}@anymindgroup.com`
                                 }, { merge: true });
+
+                                if (pId) {
+                                    const teamRef = doc(db, "project_teams", `${pId}_${rawCounter}`);
+                                    batch.set(teamRef, {
+                                        projectId: pId,
+                                        username: rawCounter,
+                                        role: 'counter'
+                                    }, { merge: true });
+                                }
                             }
-                        }
 
-                        const rawActQty = row['QTY ACTUAL'] ?? row['Qty Actual'] ?? row['ACTUAL QTY'];
-                        const numActQty = parseInt(rawActQty, 10);
-                        const isCounted = rawActQty !== undefined && rawActQty !== null && rawActQty !== '' && !isNaN(numActQty);
+                            const rawActQty = row['QTY ACTUAL'] ?? row['Qty Actual'] ?? row['ACTUAL QTY'];
+                            const numActQty = parseInt(rawActQty, 10);
+                            const isCounted = rawActQty !== undefined && rawActQty !== null && rawActQty !== '' && !isNaN(numActQty);
 
-                        const taskDoc = {
-                            Owner: row['Owner'] || 'DDI',
-                            SKU: skuStr,
-                            Description: row['Description'] || '',
-                            UPC1: row['UPC 1']?.toString() || '',
-                            UPC2: row['UPC 2']?.toString() || '',
-                            SKUBrand: row['SKU Brand'] || '',
-                            satuanHitung: row['satuan hitung'] || 'PCS',
-                            Location: locStr,
-                            level: row['level']?.toString() || '1',
-                            ailee: row['ailee']?.toString() || '',
-                            Zone: row['Zone']?.toString() || 'RACKING',
-                            LocationType: row['Location Type'] || 'RACK',
-                            counter: rawCounter,
-                            Status: row['Status'] || 'Active',
-                            currentRound: parseInt(row['current round']) || 1,
-                            expiredDateSystem: row['expired date by system'] || '',
-                            expiredDateActual: row['expired date by actual'] || '',
-                            Qty: parseInt(row['Qty System'] || row['QTY SYSTEM']) || 0,
-                            unitPrice: parseInt(row['Unit Price'] || '0'),
-                            isCounted,
-                            QTY_ACTUAL: isCounted ? numActQty : null,
-                            updatedAt: new Date().toISOString()
-                        };
+                            const taskDoc = {
+                                Owner: row['Owner'] || 'DDI',
+                                SKU: skuStr,
+                                Description: row['Description'] || '',
+                                UPC1: row['UPC 1']?.toString() || '',
+                                UPC2: row['UPC 2']?.toString() || '',
+                                SKUBrand: row['SKU Brand'] || '',
+                                satuanHitung: row['satuan hitung'] || 'PCS',
+                                Location: locStr,
+                                level: row['level']?.toString() || '1',
+                                ailee: row['ailee']?.toString() || '',
+                                Zone: row['Zone']?.toString() || 'RACKING',
+                                LocationType: row['Location Type'] || 'RACK',
+                                counter: rawCounter,
+                                Status: row['Status'] || 'Active',
+                                currentRound: parseInt(row['current round']) || 1,
+                                expiredDateSystem: row['expired date by system'] || '',
+                                expiredDateActual: row['expired date by actual'] || '',
+                                Qty: parseInt(row['Qty System'] || row['QTY SYSTEM']) || 0,
+                                unitPrice: parseInt(row['Unit Price'] || '0'),
+                                isCounted,
+                                QTY_ACTUAL: isCounted ? numActQty : null,
+                                updatedAt: new Date().toISOString()
+                            };
 
-                        const taskRef = doc(db, "master_tasks", taskId);
-                        batch.set(taskRef, taskDoc, { merge: true });
+                            const taskRef = doc(db, "master_tasks", taskId);
+                            batch.set(taskRef, taskDoc, { merge: true });
 
-                        newMasterList.push({
-                            id: taskId,
-                            ...taskDoc,
-                            countedQty: isCounted ? numActQty : undefined,
-                            Remarks: row['REMARKS'] || ''
+                            newMasterList.push({
+                                id: taskId,
+                                ...taskDoc,
+                                countedQty: isCounted ? numActQty : undefined,
+                                Remarks: row['REMARKS'] || ''
+                            });
                         });
+
+                        await batch.commit();
+                        setUploadProgress({ current: Math.min(i + CHUNK_SIZE, totalRows), total: totalRows });
                     }
 
-                    await batch.commit();
                     setMasterDataList(newMasterList);
-                    triggerNotification(`Upload Berhasil! Master Task & Audit Trail dibersihkan untuk project baru.`);
+                    setUploadProgress(null);
+                    triggerNotification(`Upload Berhasil! ${totalRows} data berhasil diproses.`);
                     resolve(newMasterList);
                 } catch (err: any) {
-                    console.error("Batch commit error:", err);
-                    const errorMsg = err?.message || String(err);
-                    triggerNotification(`Gagal upload ke Firestore: ${errorMsg}`);
+                    console.error("Batch upload error:", err);
+                    setUploadProgress(null);
+                    triggerNotification(`Gagal upload: ${err?.message || String(err)}`);
                     reject(err);
                 }
             };
@@ -1232,6 +1285,29 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
     return (
         <div className="min-h-screen bg-slate-50 text-slate-800 p-4 lg:p-8 max-w-7xl mx-auto font-sans relative">
+            {uploadProgress && (
+                <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-md z-50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-3xl p-6 max-w-sm w-full text-center space-y-4 shadow-2xl border border-slate-100">
+                        <Loader2 className="w-10 h-10 text-indigo-600 animate-spin mx-auto" />
+                        <div>
+                            <h3 className="font-black text-slate-900 text-base">Mengunggah Task ke Cloud</h3>
+                            <p className="text-xs text-slate-500 font-medium mt-1">Memproses batch data secara bertahap...</p>
+                        </div>
+                        <div className="space-y-1.5">
+                            <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
+                                <div
+                                    className="bg-indigo-600 h-3 rounded-full transition-all duration-300"
+                                    style={{ width: `${Math.round((uploadProgress.current / uploadProgress.total) * 100)}%` }}
+                                ></div>
+                            </div>
+                            <span className="text-xs font-bold text-indigo-600">
+                                {uploadProgress.current.toLocaleString('id-ID')} / {uploadProgress.total.toLocaleString('id-ID')} Data ({Math.round((uploadProgress.current / uploadProgress.total) * 100)}%)
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {showToast && (
                 <div className="fixed top-6 right-6 z-50 bg-slate-900 text-white px-5 py-3.5 rounded-2xl shadow-2xl flex items-center space-x-3 border border-slate-700 animate-in slide-in-from-top-4 duration-300">
                     <Check className="w-5 h-5 text-emerald-400" /><span className="text-sm font-semibold">{showToast}</span>
@@ -2054,14 +2130,14 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                 </h3>
                                 <div className="flex items-center space-x-3">
                                     <span className="text-xs font-bold text-slate-500 bg-slate-100 px-3 py-1 rounded-lg">
-                                        Total {auditLogs.length} Entri Log
+                                        Monitor Real-Time ({auditLogs.length} Entri Terbaru)
                                     </span>
                                     <button
                                         onClick={handleExportAuditTrailXLSX}
                                         className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center space-x-2 shadow-md cursor-pointer"
                                     >
                                         <FileSpreadsheet className="w-4 h-4" />
-                                        <span>Download Audit Log (.xlsx)</span>
+                                        <span>Download Full Audit Log (.xlsx)</span>
                                     </button>
                                 </div>
                             </div>
@@ -2119,7 +2195,56 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     {/* TAB 5: SETTINGS & BACKUP EMERGENCY */}
                     {activeTab === 'settings' && effectiveRole === 'owner' && (
                         <div className="space-y-6">
-                            {/* KARTU EMERGENCY BACKUP JSON & RESTORE */}
+                            {/* KARTU 1: MASTER KATEGORI BAD STOCK (CONFIGURABLE BY OWNER) */}
+                            <div className="bg-white rounded-3xl border border-amber-200 p-6 shadow-xl space-y-4">
+                                <div className="border-b pb-3 flex justify-between items-center">
+                                    <h3 className="text-base font-black text-slate-900 flex items-center space-x-2">
+                                        <AlertCircle className="w-5 h-5 text-amber-600" />
+                                        <span>Master Kategori Kerusakan (Bad Stock)</span>
+                                    </h3>
+                                    <span className="text-xs font-extrabold text-amber-800 bg-amber-50 px-3 py-1 rounded-xl">Otorisasi Owner</span>
+                                </div>
+                                <p className="text-xs text-slate-500">
+                                    Atur daftar label kategori kerusakan yang akan muncul sebagai pilihan tombol chip di HP Counter saat input Bad Stock.
+                                </p>
+
+                                <div className="flex gap-2">
+                                    <input
+                                        type="text"
+                                        placeholder="Ketik kategori kerusakan baru (contoh: Kemasan Sobek)..."
+                                        value={newCategoryInput}
+                                        onChange={(e) => setNewCategoryInput(e.target.value)}
+                                        onKeyDown={(e) => { if (e.key === 'Enter') handleAddBadStockCategory(); }}
+                                        className="flex-1 px-4 py-2.5 text-xs bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                                    />
+                                    <button
+                                        onClick={handleAddBadStockCategory}
+                                        className="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold shadow-md cursor-pointer"
+                                    >
+                                        + Tambah Kategori
+                                    </button>
+                                </div>
+
+                                <div className="pt-2 flex flex-wrap gap-2">
+                                    {badStockCategories.map((cat, idx) => (
+                                        <div key={idx} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 border border-amber-300 rounded-xl text-xs font-bold text-amber-900 shadow-2xs">
+                                            <span>{cat}</span>
+                                            <button
+                                                onClick={() => handleRemoveBadStockCategory(cat)}
+                                                className="p-0.5 hover:bg-amber-200 rounded-lg text-amber-700 hover:text-red-700 transition-colors cursor-pointer"
+                                                title={`Hapus kategori ${cat}`}
+                                            >
+                                                <X className="w-3.5 h-3.5" />
+                                            </button>
+                                        </div>
+                                    ))}
+                                    {badStockCategories.length === 0 && (
+                                        <span className="text-xs text-slate-400 italic">Belum ada kategori diset. Counter akan melihat opsi default.</span>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* KARTU 2: EMERGENCY BACKUP & RESTORE */}
                             <div className="bg-white rounded-3xl border border-indigo-100 p-6 shadow-xl space-y-4">
                                 <div className="border-b pb-3 flex justify-between items-center">
                                     <h3 className="text-base font-black text-slate-900 flex items-center space-x-2">
@@ -2151,6 +2276,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                 </div>
                             </div>
 
+                            {/* KARTU 3: WEBHOOK SYNC */}
                             <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl space-y-4">
                                 <h3 className="text-base font-black text-slate-900 flex items-center space-x-2">
                                     <Link2 className="w-5 h-5 text-purple-600" />
@@ -2162,6 +2288,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                 </div>
                             </div>
 
+                            {/* KARTU 4: ASSIGN TIM PROJECT */}
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                                 <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl space-y-5">
                                     <div className="flex justify-between items-center border-b pb-3">

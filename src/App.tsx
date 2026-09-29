@@ -23,6 +23,7 @@ export default function App() {
         return JSON.parse(savedUser);
       } catch (e) {
         console.error('Failed to parse saved user data', e);
+        localStorage.removeItem(STORAGE_KEYS.USER);
       }
     }
     return null;
@@ -31,7 +32,8 @@ export default function App() {
   const [currentStep, setCurrentStep] = useState<1 | 2 | 3 | 4 | 'admin' | 'admin_demo'>(() => {
     const savedStep = localStorage.getItem(STORAGE_KEYS.STEP);
     if (savedStep === 'admin' || savedStep === 'admin_demo') return savedStep;
-    return savedStep ? (parseInt(savedStep, 10) as 1 | 2 | 3 | 4) : 1;
+    const parsedStep = savedStep ? parseInt(savedStep, 10) : 1;
+    return (parsedStep >= 1 && parsedStep <= 4) ? (parsedStep as 1 | 2 | 3 | 4) : 1;
   });
 
   const [sessionData, setSessionData] = useState<SessionData>(() => {
@@ -41,6 +43,7 @@ export default function App() {
         return JSON.parse(savedSession);
       } catch (e) {
         console.error('Failed to parse saved session data', e);
+        localStorage.removeItem(STORAGE_KEYS.SESSION);
       }
     }
     return {
@@ -61,20 +64,23 @@ export default function App() {
         return JSON.parse(savedRack);
       } catch (e) {
         console.error('Failed to parse saved rack data', e);
+        localStorage.removeItem(STORAGE_KEYS.RACK);
       }
     }
     return null;
   });
 
-  // LISTEN ROLE REAL-TIME DARI FIRESTORE UNTUK USER AKTIF (SPV REDIRECT INSTAN)
+  // LISTEN ROLE REAL-TIME DARI FIRESTORE UNTUK USER AKTIF
   useEffect(() => {
     if (!currentUser?.username) return;
     const cleanUser = currentUser.username.toLowerCase().trim();
 
     if (cleanUser === 'owner' || cleanUser === 'admin') return;
 
-    // 1. Listen global_accounts
-    const unsubGlobal = onSnapshot(doc(db, "global_accounts", cleanUser), (docSnap) => {
+    let unsubGlobal: () => void = () => { };
+    let unsubTeam: () => void = () => { };
+
+    unsubGlobal = onSnapshot(doc(db, "global_accounts", cleanUser), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
         if (data.role === 'spv' && currentUser.role !== 'spv') {
@@ -82,14 +88,13 @@ export default function App() {
           setCurrentStep('admin');
         }
       }
-    });
+    }, (err) => console.error("Global account sync error:", err));
 
-    // 2. Listen project_teams
     const qTeam = query(
       collection(db, "project_teams"),
       where("username", "==", cleanUser)
     );
-    const unsubTeam = onSnapshot(qTeam, (snap) => {
+    unsubTeam = onSnapshot(qTeam, (snap) => {
       if (!snap.empty) {
         const tData = snap.docs[0].data();
         if (tData.role === 'spv' && currentUser.role !== 'spv') {
@@ -97,14 +102,19 @@ export default function App() {
           setCurrentStep('admin');
         }
       }
-    });
+    }, (err) => console.error("Project team sync error:", err));
 
-    return () => { unsubGlobal(); unsubTeam(); };
+    return () => {
+      unsubGlobal();
+      unsubTeam();
+    };
   }, [currentUser?.username, currentUser?.role]);
 
+  // SINKRONISASI STATE KE LOCALSTORAGE
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.STEP, currentStep.toString());
     localStorage.setItem(STORAGE_KEYS.SESSION, JSON.stringify(sessionData));
+
     if (currentUser) {
       localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(currentUser));
     } else {
@@ -118,7 +128,15 @@ export default function App() {
     }
   }, [currentStep, sessionData, selectedRack, currentUser]);
 
-  const handleLogout = () => {
+  // LOGOUT DENGAN DIALOG PROTEKSI KONFIRMASI
+  const handleLogout = (force = false) => {
+    if (!force) {
+      const confirmed = window.confirm(
+        "⚠️ YAKIN INGIN KELUAR?\n\nPastikan kamu sudah menekan tombol 'Simpan' pada rak yang sedang dihitung agar data ketikan kamu tidak hilang."
+      );
+      if (!confirmed) return;
+    }
+
     localStorage.clear();
     setCurrentUser(null);
     setSessionData({
@@ -138,6 +156,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
+      {/* STEP 1: LOGIN */}
       {currentStep === 1 && (
         <Step1Login
           onSuccessLogin={(username: string, role: UserRole, name?: string) => {
@@ -159,9 +178,10 @@ export default function App() {
         />
       )}
 
+      {/* DASHBOARD ADMIN / SUPERVISOR / OWNER */}
       {currentStep === 'admin' && (
         <AdminDashboard
-          onBackToApp={handleLogout}
+          onBackToApp={() => handleLogout(false)}
           onSwitchToCounterView={() => {
             setSessionData(prev => ({
               ...prev,
@@ -174,10 +194,11 @@ export default function App() {
         />
       )}
 
+      {/* STEP 2: SETUP TIM PENDAMPING WAREHOUSE */}
       {currentStep === 2 && (
         <Step2TeamSetup
           sessionData={sessionData}
-          onLogout={handleLogout}
+          onLogout={() => handleLogout(false)}
           onSaveTeam={(updatedData) => {
             setSessionData(updatedData);
             setCurrentStep(3);
@@ -185,6 +206,7 @@ export default function App() {
         />
       )}
 
+      {/* STEP 3: LIST COUNTSHEET RAK/BIN */}
       {(currentStep === 3 || currentStep === 'admin_demo') && (
         <div className="relative">
           {isDemoMode && (
@@ -201,7 +223,7 @@ export default function App() {
           <div className={isDemoMode ? "pt-8" : ""}>
             <Step3CountsheetList
               sessionData={sessionData}
-              onLogout={handleLogout}
+              onLogout={() => handleLogout(false)}
               onEditTeam={() => setCurrentStep(2)}
               onSelectRack={(rack) => {
                 setSelectedRack(rack);
@@ -212,6 +234,7 @@ export default function App() {
         </div>
       )}
 
+      {/* STEP 4: DETAIL PENGHITUNGAN RAK & BARANG */}
       {currentStep === 4 && selectedRack && (
         <div className="relative">
           {isDemoMode && (
@@ -229,7 +252,7 @@ export default function App() {
             <Step4CountDetail
               sessionData={sessionData}
               rack={selectedRack}
-              onLogout={handleLogout}
+              onLogout={() => handleLogout(false)}
               onBackToList={() => setCurrentStep(isDemoMode ? 'admin_demo' : 3)}
               onSelectNextRack={(nextRack) => {
                 setSelectedRack(nextRack);

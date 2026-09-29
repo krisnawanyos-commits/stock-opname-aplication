@@ -26,6 +26,7 @@ interface GroupedSKUItem {
   expDateActual: string;
   isBadStock: boolean;
   badRemarks: string;
+  selectedCategories: string[];
   isCounted: boolean;
   currentRound: number;
   docIds: string[];
@@ -33,6 +34,18 @@ interface GroupedSKUItem {
   allSystemEds: string[];
   isUnmappedFound?: boolean;
 }
+
+// HELPER SANITASI FORMAT TANGGAL DISPLAY (DD/MM/YYYY)
+const formatDateDisplay = (dateStr: string) => {
+  if (!dateStr || dateStr === '-') return '-';
+  if (dateStr.includes('/')) return dateStr;
+  const parts = dateStr.split('-');
+  if (parts.length === 3) {
+    const [yyyy, mm, dd] = parts;
+    return `${dd}/${mm}/${yyyy}`;
+  }
+  return dateStr;
+};
 
 export default function Step4CountDetail({ sessionData, rack, onBackToList, onLogout, onSelectNextRack }: Step4CountDetailProps) {
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -43,6 +56,9 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
   const [isSessionLocked, setIsSessionLocked] = useState<boolean>(false);
   const [unmappedDrawerOpen, setUnmappedDrawerOpen] = useState<boolean>(true);
   const [isLoadingSave, setIsLoadingSave] = useState<boolean>(false);
+
+  // MASTER KATEGORI BAD STOCK DARI OWNER
+  const [availableCategories, setAvailableCategories] = useState<string[]>([]);
 
   const [modal, setModal] = useState<CustomModalState>({
     isOpen: false, title: '', message: '',
@@ -65,7 +81,17 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
         setIsSessionLocked(false);
       }
     });
-    return () => unsub();
+
+    // LISTEN KATEGORI BAD STOCK DARI CONFIG OWNER
+    const unsubCat = onSnapshot(doc(db, "settings", "bad_stock_config"), (snap) => {
+      if (snap.exists() && snap.data().categories) {
+        setAvailableCategories(snap.data().categories);
+      } else {
+        setAvailableCategories(['Dus Penyok', 'Kemasan Bocor', 'Segel Rusak', 'Basah / Lembab', 'Barang Expired']);
+      }
+    });
+
+    return () => { unsub(); unsubCat(); };
   }, [sessionData.sessionCode, sessionData.sessionId, sessionData.primaryCounter]);
 
   // 2. FETCH KATALOG MASTER SKU UTAMA
@@ -77,7 +103,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     return () => unsubMaster();
   }, []);
 
-  // 3. LISTEN MASTER TASKS LOKASI RAK AKTIF & PERTAHANKAN MEMORI INPUT KETIKAN
+  // 3. LISTEN MASTER TASKS LOKASI RAK AKTIF
   useEffect(() => {
     const primaryCounter = (sessionData.primaryCounter || "Unassigned").toLowerCase().trim();
     const targetLocation = rack.rackNumber || rack.id;
@@ -90,14 +116,15 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
 
     const unsubscribe = onSnapshot(qTasks, (snapshot) => {
       setSkuList((prevSkuList) => {
-        const localStateMap: Record<string, { qtyGood: string; qtyBad: string; expDateActual: string; isBadStock: boolean; badRemarks: string }> = {};
+        const localStateMap: Record<string, { qtyGood: string; qtyBad: string; expDateActual: string; isBadStock: boolean; badRemarks: string; selectedCategories: string[] }> = {};
         prevSkuList.forEach(item => {
           localStateMap[item.sku] = {
             qtyGood: item.qtyGood,
             qtyBad: item.qtyBad,
             expDateActual: item.expDateActual,
             isBadStock: item.isBadStock,
-            badRemarks: item.badRemarks
+            badRemarks: item.badRemarks,
+            selectedCategories: item.selectedCategories || []
           };
         });
 
@@ -125,6 +152,9 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
           const taskRound = parseInt(data.currentRound, 10) || 1;
           const isUnmapped = sysQty === 0 || docSnap.id.includes('_TEMUAN_');
 
+          const existingRemarks = data.badRemarks || '';
+          const initialCats = existingRemarks.replace(/^\[BAD STOCK\]\s*/, '').split(', ').filter(Boolean);
+
           if (!groupedMap[skuKey]) {
             const existingLocal = localStateMap[skuKey];
 
@@ -141,7 +171,8 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
               expDateSystem: edSys,
               expDateActual: existingLocal ? existingLocal.expDateActual : (data.expDateActual || data.expiredDateActual || ''),
               isBadStock: existingLocal ? existingLocal.isBadStock : ((!isNaN(numBadQty) && numBadQty > 0) || !!data.badRemarks),
-              badRemarks: existingLocal ? existingLocal.badRemarks : (data.badRemarks || ''),
+              badRemarks: existingLocal ? existingLocal.badRemarks : existingRemarks,
+              selectedCategories: existingLocal ? existingLocal.selectedCategories : initialCats,
               isCounted: !!data.isCounted || hasActQty,
               currentRound: taskRound,
               docIds: [docSnap.id],
@@ -172,7 +203,6 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
           }
         });
 
-        // SORTING MASTER WMS SELALU DI ATAS, ITEM TEMUAN DI BAWAH
         return Object.values(groupedMap).sort((a, b) => {
           if (a.isUnmappedFound && !b.isUnmappedFound) return 1;
           if (!a.isUnmappedFound && b.isUnmappedFound) return -1;
@@ -184,19 +214,17 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     return () => unsubscribe();
   }, [rack, sessionData]);
 
-  // STATE UNMAPPED FORM
+  // STATE FORM TEMUAN UNMAPPED (BATCH NO DIHAPUS)
   const [unmappedBarcode, setUnmappedBarcode] = useState<string>('');
   const [unmappedQty, setUnmappedQty] = useState<string>("1");
   const [unmappedUnit, setUnmappedUnit] = useState<'PCS' | 'CARTON'>('PCS');
   const [unmappedExpDate, setUnmappedExpDate] = useState<string>('2026-10-15');
-  const [unmappedBatchNumber, setUnmappedBatchNumber] = useState<string>('BATCH-2026-X9');
   const [unmappedDesc, setUnmappedDesc] = useState<string>('');
   const [unmappedPhotoUrl, setUnmappedPhotoUrl] = useState<string>('');
 
-  // STATE BAD STOCK DENGAN INITIAL STRING KOSONG
   const [unmappedIsBadStock, setUnmappedIsBadStock] = useState<boolean>(false);
   const [unmappedBadQty, setUnmappedBadQty] = useState<string>("");
-  const [unmappedBadRemarks, setUnmappedBadRemarks] = useState<string>('');
+  const [unmappedSelectedCategories, setUnmappedSelectedCategories] = useState<string[]>([]);
 
   const [unmappedList, setUnmappedList] = useState<UnmappedItem[]>([]);
 
@@ -241,6 +269,33 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     setSkuList((prev) =>
       prev.map((item, idx) => (idx === index ? { ...item, isBadStock: !item.isBadStock } : item))
     );
+  };
+
+  const toggleCategoryChip = (skuIdx: number, catName: string) => {
+    if (isSessionLocked) return;
+    setSkuList(prev => prev.map((item, idx) => {
+      if (idx === skuIdx) {
+        const currentCats = item.selectedCategories || [];
+        const exists = currentCats.includes(catName);
+        const nextCats = exists ? currentCats.filter(c => c !== catName) : [...currentCats, catName];
+        return {
+          ...item,
+          selectedCategories: nextCats,
+          badRemarks: nextCats.length > 0 ? `[BAD STOCK] ${nextCats.join(', ')}` : ''
+        };
+      }
+      return item;
+    }));
+  };
+
+  const toggleUnmappedCategoryChip = (catName: string) => {
+    if (isSessionLocked) return;
+    setUnmappedSelectedCategories(prev => {
+      if (prev.includes(catName)) {
+        return prev.filter(c => c !== catName);
+      }
+      return [...prev, catName];
+    });
   };
 
   const handleInputText = (index: number, field: 'qtyGood' | 'qtyBad', rawVal: string) => {
@@ -289,7 +344,6 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     }
   };
 
-  // HANDLER "+ Tambahkan Ke Temuan & Simpan" DENGAN AUTO-SAVE INPUTAN SKU LAIN
   const handleAddUnmapped = async () => {
     if (isSessionLocked) return;
     if (!unmappedBarcode.trim()) {
@@ -313,9 +367,11 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     const unmDesc = unmappedDesc.trim() || (matchedMasterSKU ? (matchedMasterSKU.Description || matchedMasterSKU.SKU) : 'Barang Fisik Baru Unmapped');
     const totalSubmitted = qtyNumber + badQtyNum;
 
+    const badCatRemarks = unmappedSelectedCategories.length > 0 ? `[BAD STOCK] ${unmappedSelectedCategories.join(', ')}` : '[BARANG TEMUAN FISIK]';
+
     const batch = writeBatch(db);
 
-    // 1. SIMPAN SEKALIGUS SELURUH KETIKAN INPUT LOKAL SKU LAIN KE FIRESTORE (ANTI RESET)
+    // 1. Simpan inputan lokal SKU lain
     skuList.forEach(skuItem => {
       const finalGoodQty = parseInt(skuItem.qtyGood || "0", 10);
       const finalBadQty = parseInt(skuItem.qtyBad || "0", 10);
@@ -338,7 +394,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       }
     });
 
-    // 2. SIMPAN DOKUMEN TEMUAN BARU
+    // 2. Simpan dokumen temuan baru
     const taskId = `${rack.rackNumber}_${unmSku}_TEMUAN_${Date.now()}`;
     const taskRef = doc(db, "master_tasks", taskId);
 
@@ -358,13 +414,12 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       QTY_BAD: badQtyNum,
       isCounted: true,
       unitPrice: unmPrice,
-      badRemarks: unmappedBadRemarks ? `[BAD STOCK] ${unmappedBadRemarks}` : `[BARANG TEMUAN FISIK] Batch: ${unmappedBatchNumber}`,
+      badRemarks: badCatRemarks,
       updatedAt: new Date().toISOString()
     }, { merge: true });
 
-    // 3. LOG AUDIT TRAIL
-    const logId = `${sessionData.sessionCode || 'SO'}_TEMUAN_${rack.rackNumber}_${unmSku}`;
-    const auditRef = doc(db, "audit_logs", logId);
+    // 3. Log Audit Trail (Auto-ID)
+    const auditRef = doc(collection(db, "audit_logs"));
     batch.set(auditRef, {
       timestamp: new Date().toISOString(),
       rackLocation: rack.rackNumber,
@@ -379,7 +434,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       qtyBad: badQtyNum,
       totalFinalSubmitted: totalSubmitted,
       edActual: unmappedExpDate || '-',
-      remarks: unmappedBadRemarks ? `[BAD STOCK] ${unmappedBadRemarks}` : `[ITEM TEMUAN] Batch: ${unmappedBatchNumber}`
+      remarks: badCatRemarks
     }, { merge: true });
 
     await batch.commit();
@@ -390,7 +445,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     setUnmappedQty("1");
     setUnmappedIsBadStock(false);
     setUnmappedBadQty("");
-    setUnmappedBadRemarks('');
+    setUnmappedSelectedCategories([]);
     setModal({ isOpen: true, type: 'success', title: 'Item Temuan Tersimpan!', message: `Item ${unmSku} & seluruh inputan SKU lain pada Rak ${rack.rackNumber} tersimpan aman!` });
   };
 
@@ -413,6 +468,10 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
         const totalSubmitted = finalGoodQty + finalBadQty;
         const currentRoundNum = skuItem.currentRound || 1;
 
+        const remarksText = skuItem.selectedCategories && skuItem.selectedCategories.length > 0
+          ? `[BAD STOCK] ${skuItem.selectedCategories.join(', ')}`
+          : (skuItem.badRemarks || '-');
+
         skuItem.docIds.forEach((docId, i) => {
           const taskRef = doc(db, "master_tasks", docId);
           batch.set(taskRef, {
@@ -421,15 +480,13 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             QTY_ACTUAL: i === 0 ? totalSubmitted : 0,
             QTY_GOOD: i === 0 ? finalGoodQty : 0,
             QTY_BAD: i === 0 ? finalBadQty : 0,
-            badRemarks: i === 0 ? (skuItem.badRemarks || '') : '',
+            badRemarks: i === 0 ? remarksText : '',
             expDateActual: skuItem.expDateActual || '',
             updatedAt: new Date().toISOString()
           }, { merge: true });
         });
 
-        const sessCode = sessionData.sessionCode || sessionData.sessionId || 'SO-WRG-2026-09';
-        const logId = `${sessCode}_R${currentRoundNum}_${rack.rackNumber}_${skuItem.sku}`;
-        const auditRef = doc(db, "audit_logs", logId);
+        const auditRef = doc(collection(db, "audit_logs"));
 
         batch.set(auditRef, {
           timestamp: new Date().toISOString(),
@@ -445,7 +502,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
           qtyBad: finalBadQty,
           totalFinalSubmitted: totalSubmitted,
           edActual: skuItem.expDateActual || '-',
-          remarks: skuItem.badRemarks || '-'
+          remarks: remarksText
         }, { merge: true });
       });
 
@@ -559,7 +616,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             </div>
           </div>
 
-          {/* RENDER KARTU SKU MASTER WMS (TERURUT DI ATAS) & TEMUAN (DI BAWAH) */}
+          {/* RENDER KARTU SKU MASTER WMS & TEMUAN */}
           {skuList.map((currentSku, idx) => (
             <div key={currentSku.sku} className={`bg-white rounded-xl p-space-md shadow-xs border space-y-space-md relative overflow-hidden ${currentSku.isUnmappedFound ? 'border-amber-300' : 'border-slate-200'}`}>
               <div className={`absolute top-0 left-0 right-0 h-1.5 ${currentSku.isUnmappedFound ? 'bg-amber-500' : 'bg-blue-600'}`}></div>
@@ -578,7 +635,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                 <p className="font-body-sm text-slate-500">{currentSku.category}</p>
               </div>
 
-              {/* EXPIRED DATE FEFO */}
+              {/* EXPIRED DATE FEFO DENGAN FORMAT DD/MM/YYYY */}
               <div className="bg-blue-50/60 border border-blue-200 p-space-sm rounded-xl space-y-2">
                 <div className="flex justify-between items-center">
                   <span className="font-label-sm text-blue-900 font-bold flex items-center gap-1">
@@ -596,7 +653,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   <div>
                     <label className="text-[10px] text-slate-500 font-bold block uppercase mb-0.5">ED System Terdekat</label>
-                    <input type="text" readOnly value={currentSku.expDateSystem || '-'} className="w-full p-2 bg-white/80 border border-slate-200 rounded-lg text-slate-600 font-mono text-xs font-bold outline-none" />
+                    <input type="text" readOnly value={formatDateDisplay(currentSku.expDateSystem)} className="w-full p-2 bg-white/80 border border-slate-200 rounded-lg text-slate-600 font-mono text-xs font-bold outline-none" />
                   </div>
                   <div>
                     <label className="text-[10px] text-blue-700 font-bold block uppercase mb-0.5">ED Actual (Fisik)</label>
@@ -619,7 +676,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                       {currentSku.allSystemEds.map((edDate, edIdx) => (
                         <span key={edIdx} className="px-2 py-0.5 bg-white border border-blue-300 text-blue-900 font-mono text-[10px] font-bold rounded-md shadow-xs flex items-center gap-1">
                           <span>📅</span>
-                          <span>{edDate}</span>
+                          <span>{formatDateDisplay(edDate)}</span>
                         </span>
                       ))}
                     </div>
@@ -650,34 +707,46 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                 </div>
               </div>
 
-              {/* BAD STOCK DETECTED */}
+              {/* BAD STOCK DETECTED DENGAN TOMBOL CHIP KATEOGORI */}
               <div className="bg-amber-50/70 border border-amber-200 p-space-md rounded-xl space-y-space-sm">
                 <div className="flex items-center justify-between">
                   <span className="font-body-lg text-amber-900 font-bold">Bad Stock Detected?</span>
                   <button type="button" disabled={isSessionLocked} onClick={() => toggleBadStock(idx)} className={`min-h-11 min-w-11 px-3 py-1 rounded-full text-xs font-bold cursor-pointer ${isSessionLocked ? 'opacity-50 cursor-not-allowed' : ''} ${currentSku.isBadStock ? 'bg-amber-500 text-slate-950' : 'bg-slate-200 text-slate-600'}`}>{currentSku.isBadStock ? 'ON' : 'OFF'}</button>
                 </div>
                 {currentSku.isBadStock && (
-                  <div className="pt-2 space-y-2 border-t border-amber-200">
-                    <label className="text-xs font-bold text-amber-900">Jumlah Rusak (Qty Bad):</label>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      disabled={isSessionLocked}
-                      value={currentSku.qtyBad}
-                      onChange={(e) => handleInputText(idx, 'qtyBad', e.target.value)}
-                      placeholder="0"
-                      className={`w-full p-2 border border-amber-300 rounded-lg text-center font-bold text-lg ${isSessionLocked ? 'bg-slate-100 opacity-60' : 'bg-white'}`}
-                    />
+                  <div className="pt-2 space-y-3 border-t border-amber-200">
+                    <div>
+                      <label className="text-xs font-bold text-amber-900 block mb-1">Jumlah Rusak (Qty Bad):</label>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        disabled={isSessionLocked}
+                        value={currentSku.qtyBad}
+                        onChange={(e) => handleInputText(idx, 'qtyBad', e.target.value)}
+                        placeholder="0"
+                        className={`w-full p-2 border border-amber-300 rounded-lg text-center font-bold text-lg ${isSessionLocked ? 'bg-slate-100 opacity-60' : 'bg-white'}`}
+                      />
+                    </div>
 
-                    <label className="text-xs font-bold text-amber-900 block mt-2">Catatan Detail Kerusakan (Free Text):</label>
-                    <textarea
-                      rows={2}
-                      disabled={isSessionLocked}
-                      value={currentSku.badRemarks || ''}
-                      onChange={(e) => updateItemField(idx, 'badRemarks', e.target.value)}
-                      placeholder="Contoh: Dus penyok, kemasan bocor terkena benturan..."
-                      className={`w-full p-2 border border-amber-300 rounded-lg text-xs font-medium outline-none focus:ring-2 focus:ring-amber-500/20 ${isSessionLocked ? 'bg-slate-100 opacity-60' : 'bg-white'}`}
-                    />
+                    <div>
+                      <label className="text-xs font-bold text-amber-900 block mb-1.5">Pilih Kategori Kerusakan (Bisa lebih dari 1):</label>
+                      <div className="flex flex-wrap gap-1.5">
+                        {availableCategories.map((cat, cIdx) => {
+                          const isSelected = (currentSku.selectedCategories || []).includes(cat);
+                          return (
+                            <button
+                              key={cIdx}
+                              type="button"
+                              disabled={isSessionLocked}
+                              onClick={() => toggleCategoryChip(idx, cat)}
+                              className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${isSelected ? 'bg-amber-500 text-slate-950 border-amber-600 shadow-xs' : 'bg-white text-slate-700 border-amber-200 hover:bg-amber-100/50'}`}
+                            >
+                              {isSelected ? '✓ ' : ''}{cat}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
@@ -685,7 +754,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             </div>
           ))}
 
-          {/* FORM ITEM TAK TERDAFTAR / TEMUAN LAIN */}
+          {/* FORM ITEM TAK TERDAFTAR / TEMUAN LAIN (BATCH NO DIHAPUS) */}
           <div className="bg-white rounded-xl p-space-md shadow-xs border border-slate-200 space-y-space-md">
             <div className="flex items-center justify-between cursor-pointer" onClick={() => setUnmappedDrawerOpen(!unmappedDrawerOpen)}>
               <h3 className="font-headline-sm text-slate-900 font-bold">Item Tak Terdaftar / Temuan Lain</h3>
@@ -706,15 +775,9 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                   </div>
                 )}
 
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-600 block mb-0.5">Exp Date:</label>
-                    <input type="date" disabled={isSessionLocked} value={unmappedExpDate} onChange={(e) => setUnmappedExpDate(e.target.value)} className={`w-full h-10 border border-slate-300 px-2 rounded-lg text-xs ${isSessionLocked ? 'bg-slate-100 opacity-60' : 'bg-white'}`} />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-600 block mb-0.5">Batch No:</label>
-                    <input type="text" disabled={isSessionLocked} value={unmappedBatchNumber} onChange={(e) => setUnmappedBatchNumber(e.target.value)} placeholder="Batch..." className={`w-full h-10 border border-slate-300 px-2 rounded-lg text-xs ${isSessionLocked ? 'bg-slate-100 opacity-60' : 'bg-white'}`} />
-                  </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-600 block">Exp Date:</label>
+                  <input type="date" disabled={isSessionLocked} value={unmappedExpDate} onChange={(e) => setUnmappedExpDate(e.target.value)} className={`w-full h-10 border border-slate-300 px-3 rounded-lg text-xs font-mono font-bold ${isSessionLocked ? 'bg-slate-100 opacity-60' : 'bg-white'}`} />
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
@@ -731,7 +794,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                   </div>
                 </div>
 
-                {/* FORM BAD STOCK UNMAPPED */}
+                {/* FORM BAD STOCK UNMAPPED DENGAN CHIPS */}
                 <div className="p-3 bg-amber-50/80 border border-amber-200 rounded-xl space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold text-amber-900">Temuan Ini Memiliki Bad Stock?</span>
@@ -746,7 +809,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                   </div>
 
                   {unmappedIsBadStock && (
-                    <div className="space-y-2 pt-2 border-t border-amber-200">
+                    <div className="space-y-3 pt-2 border-t border-amber-200">
                       <div>
                         <label className="text-[10px] font-bold text-amber-900 block mb-0.5">Qty Bad (Jumlah Rusak):</label>
                         <input
@@ -760,15 +823,22 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                         />
                       </div>
                       <div>
-                        <label className="text-[10px] font-bold text-amber-900 block mb-0.5">Catatan Kerusakan:</label>
-                        <input
-                          type="text"
-                          disabled={isSessionLocked}
-                          value={unmappedBadRemarks}
-                          onChange={(e) => setUnmappedBadRemarks(e.target.value)}
-                          placeholder="Misal: Dus penyok / basah..."
-                          className="w-full h-9 border border-amber-300 rounded-lg text-xs px-2 bg-white"
-                        />
+                        <label className="text-[10px] font-bold text-amber-900 block mb-1">Pilih Kategori Kerusakan (Bisa lebih dari 1):</label>                        <div className="flex flex-wrap gap-1.5">
+                          {availableCategories.map((cat, cIdx) => {
+                            const isSelected = unmappedSelectedCategories.includes(cat);
+                            return (
+                              <button
+                                key={cIdx}
+                                type="button"
+                                disabled={isSessionLocked}
+                                onClick={() => toggleUnmappedCategoryChip(cat)}
+                                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-all cursor-pointer ${isSelected ? 'bg-amber-500 text-slate-950 border-amber-600 shadow-xs' : 'bg-white text-slate-700 border-amber-200 hover:bg-amber-100/50'}`}
+                              >
+                                {isSelected ? '✓ ' : ''}{cat}
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
                     </div>
                   )}
