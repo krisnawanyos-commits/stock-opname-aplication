@@ -1073,10 +1073,40 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
     };
 
     const handleConfirmDeleteProject = async () => {
-        if (projectToDelete) {
+        if (!projectToDelete) return;
+
+        try {
+            triggerNotification(`Menghapus project ${projectToDelete.sessionCode} & seluruh data task...`);
+
+            // 1. Hapus dokumen project dari koleksi "projects"
             await deleteDoc(doc(db, "projects", projectToDelete.id));
-            triggerNotification(`Project "${projectToDelete.sessionCode}" dihapus.`);
+
+            // 2. Hapus seluruh data master_tasks dari Firestore (menggunakan chunking batch)
+            const tasksSnap = await getDocs(collection(db, "master_tasks"));
+            const CHUNK = 400;
+            const taskDocs = tasksSnap.docs;
+
+            for (let i = 0; i < taskDocs.length; i += CHUNK) {
+                const chunk = taskDocs.slice(i, i + CHUNK);
+                const batch = writeBatch(db);
+                chunk.forEach(docSnap => batch.delete(docSnap.ref));
+                await batch.commit();
+            }
+
+            // 3. Hapus log audit trail terkait
+            const auditSnap = await getDocs(collection(db, "audit_logs"));
+            for (let i = 0; i < auditSnap.docs.length; i += CHUNK) {
+                const chunk = auditSnap.docs.slice(i, i + CHUNK);
+                const batch = writeBatch(db);
+                chunk.forEach(docSnap => batch.delete(docSnap.ref));
+                await batch.commit();
+            }
+
+            triggerNotification(`Project "${projectToDelete.sessionCode}" & seluruh task berhasil dihapus bersih!`);
             setProjectToDelete(null);
+        } catch (err: any) {
+            console.error("Delete project error:", err);
+            triggerNotification("Gagal menghapus data project.");
         }
     };
 
