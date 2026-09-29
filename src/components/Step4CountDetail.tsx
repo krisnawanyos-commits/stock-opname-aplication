@@ -970,6 +970,10 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
 
         </div>
       </main>
+
+      <footer className="text-center py-4 bg-slate-50 text-slate-400 text-[10px] font-medium border-t border-slate-200">
+        Noctus Count™ • Developed by <span className="font-bold text-indigo-600">Noctus</span>
+      </footer>
     </div>
   );
 }

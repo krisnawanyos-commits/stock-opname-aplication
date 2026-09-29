@@ -99,11 +99,11 @@ export default function Step1Login({ onSuccessLogin }: Step1LoginProps) {
   return (
     <div className="bg-slate-900 font-sans min-h-screen flex flex-col justify-center items-center p-4">
       <div className="w-full max-w-sm bg-white rounded-3xl p-6 shadow-2xl space-y-6">
-        <div className="text-center space-y-1">
-          <div className="w-12 h-12 bg-indigo-600 text-white font-black text-xl rounded-2xl flex items-center justify-center mx-auto shadow-lg shadow-indigo-500/30">
-            360
+        <div className="text-center space-y-2">
+          <div className="w-20 h-20 bg-white rounded-3xl flex items-center justify-center mx-auto shadow-xl shadow-indigo-500/10 border border-slate-100 p-2 overflow-hidden">
+            <img src="/logo.png" alt="Noctus Count Logo" className="w-full h-full object-contain" />
           </div>
-          <h1 className="text-xl font-black text-slate-900 pt-2">Stock Opname 360</h1>
+          <h1 className="text-2xl font-black text-slate-900 pt-1 tracking-tight">Noctus Count</h1>
           <p className="text-xs text-slate-500 font-medium">Masukan Username &amp; PIN Akses Kamu</p>
         </div>
 
@@ -147,6 +147,15 @@ export default function Step1Login({ onSuccessLogin }: Step1LoginProps) {
             {isLoading ? 'Memverifikasi...' : 'Masuk Aplikasi'}
           </button>
         </form>
+
+        <div className="pt-3 border-t border-slate-100 text-center space-y-0.5">
+          <p className="text-[11px] font-black text-slate-700 uppercase tracking-wider">
+            Noctus Count™
+          </p>
+          <p className="text-[10px] text-slate-400 font-medium">
+            Developed by <span className="font-bold text-indigo-600">Noctus</span>
+          </p>
+        </div>
       </div>
     </div>
   );

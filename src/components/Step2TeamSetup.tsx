@@ -89,6 +89,14 @@ export default function Step2TeamSetup({ sessionData, onSaveTeam, onLogout }: St
             <span className="material-symbols-outlined text-[18px]">arrow_forward</span>
           </button>
         </form>
+        <div className="pt-3 border-t border-slate-100 text-center space-y-0.5">
+          <p className="text-[11px] font-black text-slate-700 uppercase tracking-wider">
+            Noctus Count™
+          </p>
+          <p className="text-[10px] text-slate-400 font-medium">
+            Developed by <span className="font-bold text-indigo-600">Noctus</span>
+          </p>
+        </div>
       </div>
     </div>
   );

@@ -268,7 +268,10 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
               <div className="flex items-center gap-space-xs">
                 <h1 className="font-headline-sm text-headline-sm text-on-surface truncate leading-tight">Countsheet List</h1>
               </div>
-              <span className="font-label-md text-label-md text-on-surface-variant truncate">Stock Opname Ops</span>
+              <span className="font-label-md text-label-md text-on-surface-variant truncate flex items-center gap-1.5">
+                <img src="/logo.png" alt="Noctus Logo" className="w-3.5 h-3.5 object-contain inline" />
+                <span>Noctus Count™</span>
+              </span>
             </div>
           </div>
           <div className="flex items-center gap-space-xs shrink-0">
@@ -432,6 +435,10 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
 
         </div>
       </main>
+
+      <footer className="text-center py-4 bg-surface text-slate-400 text-[10px] font-medium border-t border-slate-100">
+        Noctus Count™ • Developed by <span className="font-bold text-indigo-600">Noctus</span>
+      </footer>
     </div>
   );
 }

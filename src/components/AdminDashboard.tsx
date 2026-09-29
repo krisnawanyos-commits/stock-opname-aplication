@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { db } from '../firebase';
 import {
     collection, onSnapshot, doc, setDoc, deleteDoc, writeBatch, getDocs, query, orderBy, limit
@@ -7,13 +7,13 @@ import * as XLSX from 'xlsx';
 import emailjs from '@emailjs/browser';
 import {
     Users, Database, Upload, ShieldCheck, Check, FileSpreadsheet,
-    PieChart, ChevronUp, Plus, Trash2, MapPin, Save,
-    UserPlus, Filter, TrendingDown, SlidersHorizontal,
+    ChevronUp, Plus, Trash2, MapPin, Save,
+    UserPlus, TrendingDown, SlidersHorizontal,
     CheckCircle2, XCircle, Search, Building2, DollarSign,
-    Download, Scale, PlayCircle, Archive, ArrowLeft, AlertTriangle,
-    LogOut, GripHorizontal, Contact, Eye, EyeOff, UserCheck, Clock, Store, Link2, KeyRound,
+    Download, Scale, PlayCircle, ArrowLeft, AlertTriangle,
+    LogOut, Contact, Eye, EyeOff, UserCheck, Clock, Store, Link2, KeyRound,
     Mail, Edit2, Smartphone, Lock, Unlock, Repeat, Copy, Tag, RefreshCw, HardDrive, Loader2, AlertCircle, X,
-    ChevronLeft, ChevronRight
+    ChevronLeft, ChevronRight, Bell, LayoutDashboard
 } from 'lucide-react';
 import type { UserRole } from '../types';
 
@@ -96,10 +96,10 @@ interface TabDefinition {
 }
 
 const ALL_AVAILABLE_TABS: TabDefinition[] = [
-    { id: 'progress', label: 'Progress & Analytics', icon: PieChart, roles: ['owner', 'spv'] },
+    { id: 'progress', label: 'Progress & Analytics', icon: LayoutDashboard, roles: ['owner', 'spv'] },
     { id: 'master', label: 'Master Task & Rak', icon: Database, roles: ['owner', 'spv'] },
     { id: 'sku_catalog', label: 'Master SKU Katalog', icon: Tag, roles: ['owner', 'spv'] },
-    { id: 'recon', label: 'Recon & Recovery', icon: Scale, roles: ['owner'] },
+    { id: 'recon', label: 'Recon & Recovery', icon: Scale, roles: ['owner', 'spv'] },
     { id: 'audit', label: 'Audit Trail Countsheet', icon: Clock, roles: ['owner', 'spv'] },
     { id: 'settings', label: 'Tim & Configurations', icon: SlidersHorizontal, roles: ['owner'] },
 ];
@@ -148,7 +148,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
     const [activeTab, setActiveTab] = useState<string>('progress');
     const [orderedTabs, setOrderedTabs] = useState<TabDefinition[]>([]);
-    const [draggedTabId, setDraggedTabId] = useState<string | null>(null);
 
     const [selectedCounterForDetail, setSelectedCounterForDetail] = useState<string | null>(null);
     const [ktpSearch, setKtpSearch] = useState<string>('');
@@ -187,20 +186,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
     useEffect(() => {
         setOrderedTabs(ALL_AVAILABLE_TABS.filter(tab => tab.roles.includes(effectiveRole)));
     }, [effectiveRole]);
-
-    const handleDragStart = (e: React.DragEvent, tabId: string) => {
-        setDraggedTabId(tabId); e.dataTransfer.effectAllowed = 'move';
-    };
-    const handleDrop = (e: React.DragEvent, targetTabId: string) => {
-        e.preventDefault();
-        if (!draggedTabId || draggedTabId === targetTabId) return;
-        const newTabs = [...orderedTabs];
-        const draggedIndex = newTabs.findIndex(t => t.id === draggedTabId);
-        const targetIndex = newTabs.findIndex(t => t.id === targetTabId);
-        const [removedTab] = newTabs.splice(draggedIndex, 1);
-        newTabs.splice(targetIndex, 0, removedTab);
-        setOrderedTabs(newTabs); setDraggedTabId(null);
-    };
 
     const [gsheetWebhookUrl, setGsheetWebhookUrl] = useState<string>('');
     const [newWhName, setNewWhName] = useState<string>('');
@@ -308,7 +293,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
         const downloadAnchor = document.createElement('a');
         downloadAnchor.href = url;
-        downloadAnchor.download = `EMERGENCY_BACKUP_SO360_${activeProject?.sessionCode || 'PROJECT'}_${Date.now()}.json`;
+        downloadAnchor.download = `EMERGENCY_BACKUP_NOCTUS_${activeProject?.sessionCode || 'PROJECT'}_${Date.now()}.json`;
         document.body.appendChild(downloadAnchor);
         downloadAnchor.click();
         downloadAnchor.remove();
@@ -453,7 +438,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             return;
         }
 
-        let text = "📋 *DAFTAR KREDENSIAL LOGIN STOCK OPNAME 360*\n\n";
+        let text = "📋 *DAFTAR KREDENSIAL LOGIN NOCTUS COUNT*\n\n";
         globalAccounts.forEach((acc, i) => {
             text += `${i + 1}. *${acc.name}*\n   Username: \`${acc.username}\`\n   PIN: \`${acc.pin}\`\n\n`;
         });
@@ -819,7 +804,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 to_name: name,
                 username: username,
                 pin: pin,
-                app_name: 'Stock Opname 360'
+                app_name: 'Noctus Count'
             };
 
             await emailjs.send('YOUR_SERVICE_ID', 'YOUR_TEMPLATE_ID', templateParams, 'YOUR_PUBLIC_KEY');
@@ -827,7 +812,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         } catch (err: any) {
             console.warn("EmailJS Key Not Configured, Fallback to Credentials Modal:", err);
 
-            let copyText = `📋 *KREDENSIAL LOGIN STOCK OPNAME 360*\nNama: ${name}\nUsername: ${username}\nPIN: ${pin}`;
+            let copyText = `📋 *KREDENSIAL LOGIN NOCTUS COUNT*\nNama: ${name}\nUsername: ${username}\nPIN: ${pin}`;
             navigator.clipboard.writeText(copyText);
             setCredentialsModalText(copyText);
             triggerNotification(`📋 Kredensial ${username} disalin ke Clipboard!`);
@@ -844,7 +829,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
     const handleSendIndividualEmail = (acc: GlobalAccount) => {
         if (!acc.email || !acc.email.trim()) {
-            let copyText = `📋 *KREDENSIAL LOGIN STOCK OPNAME 360*\nNama: ${acc.name}\nUsername: ${acc.username}\nPIN: ${acc.pin}`;
+            let copyText = `📋 *KREDENSIAL LOGIN NOCTUS COUNT*\nNama: ${acc.name}\nUsername: ${acc.username}\nPIN: ${acc.pin}`;
             navigator.clipboard.writeText(copyText);
             setCredentialsModalText(copyText);
             triggerNotification(`📋 Kredensial ${acc.username} disalin ke Clipboard!`);
@@ -1420,6 +1405,8 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
     const totalSKUs = masterDataList.length;
     const totalCounted = useMemo(() => masterDataList.filter(i => i.isCounted).length, [masterDataList]);
     const overallPercentage = totalSKUs > 0 ? Math.round((totalCounted / totalSKUs) * 100) : 0;
+    const totalSystemUnits = useMemo(() => masterDataList.reduce((acc, m) => acc + (m.Qty || 0), 0), [masterDataList]);
+    const totalCountedUnits = useMemo(() => masterDataList.reduce((acc, m) => acc + (m.isCounted ? (m.countedQty ?? m.Qty ?? 0) : 0), 0), [masterDataList]);
     const liveIssues = useMemo(() => masterDataList.filter(item => item.isCounted && (item.countedQty ?? item.Qty) !== item.Qty), [masterDataList]);
 
     // 5. LEVEL PROGRESS (Single-pass O(N))
@@ -1750,10 +1737,15 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 <div className="space-y-6 animate-in fade-in duration-500">
                     <div className="bg-white p-6 rounded-3xl shadow-xl shadow-slate-200/40 border border-slate-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-5 relative overflow-hidden">
                         <div className="flex items-center space-x-4 relative z-10">
-                            <div className="p-3.5 bg-linear-to-br from-indigo-500 to-purple-600 text-white rounded-2xl shadow-lg"><Archive className="w-8 h-8" /></div>
+                            <div className="w-14 h-14 bg-white rounded-2xl shadow-md border border-slate-100 p-1 flex items-center justify-center overflow-hidden shrink-0">
+                                <img src="/logo.png" alt="Noctus Count Logo" className="w-full h-full object-contain" />
+                            </div>
                             <div>
-                                <h1 className="text-2xl font-black text-slate-900">AnyMind Global Control Center</h1>
-                                <p className="text-sm text-slate-500 mt-0.5 font-medium">Enterprise Real-Time Firestore Database</p>
+                                <h1 className="text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2">
+                                    <span>Noctus Count</span>
+                                    <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-lg">Systems</span>
+                                </h1>
+                                <p className="text-xs text-slate-500 font-medium">Developed by Noctus • Enterprise Stock Opname</p>
                             </div>
                         </div>
                         <div className="flex items-center space-x-3 w-full md:w-auto relative z-10">
@@ -1997,249 +1989,510 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 </div>
             )}
 
-            {/* SCREEN 3: DASHBOARD MAIN */}
+            {/* SCREEN 3: DASHBOARD MAIN - EXECUTIVE TABLET LAYOUT */}
             {viewState === 'DASHBOARD' && activeProject && (
-                <div className="space-y-6 animate-in fade-in duration-500">
-                    <div className="bg-white p-5 rounded-3xl shadow-xl border border-slate-100 flex flex-col xl:flex-row justify-between xl:items-center gap-4">
-                        <div className="flex items-center space-x-4 shrink-0">
-                            <button onClick={() => setViewState('LANDING')} className="p-3 bg-slate-50 rounded-2xl"><ArrowLeft className="w-5 h-5 text-slate-700" /></button>
-                            <div>
-                                <div className="flex items-center space-x-3">
-                                    <h1 className="text-xl font-black text-slate-900">{activeProject.sessionCode}</h1>
-                                    {effectiveRole === 'owner' ? (
-                                        <span className="bg-indigo-100 text-indigo-800 text-[10px] font-black px-2.5 py-1 rounded-lg flex items-center space-x-1 border border-indigo-200">
-                                            <ShieldCheck className="w-3.5 h-3.5" />
-                                            <span>SUPER ADMIN ({ownerNewName})</span>
+                <div className="bg-[#0B0F17] p-2.5 sm:p-5 rounded-[28px] sm:rounded-[36px] shadow-2xl border border-slate-800/80 animate-in fade-in duration-500">
+                    {/* INNER CONTAINER / CANVAS */}
+                    <div className="bg-[#F8FAFC] rounded-[20px] sm:rounded-[28px] overflow-hidden flex flex-col min-h-[850px] shadow-inner border border-slate-700/30">
+                        {/* EXECUTIVE TABLET TOP BAR */}
+                        <div className="bg-white px-4 py-3.5 sm:px-6 sm:py-4 border-b border-slate-200/80 flex flex-col xl:flex-row justify-between xl:items-center gap-4 shrink-0 shadow-xs">
+                            {/* LEFT: Back, Logo, Project Code & Warehouse */}
+                            <div className="flex items-center space-x-3.5 shrink-0">
+                                <button
+                                    onClick={() => setViewState('LANDING')}
+                                    title="Kembali ke Daftar Project"
+                                    className="p-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl cursor-pointer transition-colors text-slate-700 shrink-0"
+                                >
+                                    <ArrowLeft className="w-4 h-4" />
+                                </button>
+                                <div className="w-10 h-10 bg-white rounded-xl shadow-xs border border-slate-200/70 p-1 flex items-center justify-center overflow-hidden shrink-0">
+                                    <img src="/logo.png" alt="Noctus Count Logo" className="w-full h-full object-contain" />
+                                </div>
+                                <div>
+                                    <div className="flex items-center space-x-2">
+                                        <span className="text-sm font-black tracking-tight text-slate-900 font-mono">
+                                            {activeProject.sessionCode}
                                         </span>
-                                    ) : (
-                                        <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2.5 py-1 rounded-lg flex items-center space-x-1 border border-emerald-200">
-                                            <UserCheck className="w-3.5 h-3.5" />
-                                            <span>SUPERVISOR (MONITORING)</span>
+                                        <span className="text-[10px] text-slate-400 font-medium">•</span>
+                                        <span className="text-xs font-bold text-slate-600 flex items-center gap-1">
+                                            <MapPin className="w-3 h-3 text-slate-400" />
+                                            <span>{activeProject.locationName}</span>
                                         </span>
-                                    )}
-                                    {effectiveRole === 'owner' && (
-                                        <button
-                                            onClick={handleToggleGlobalLock}
-                                            className={`ml-2 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 shadow-sm border transition-colors cursor-pointer ${isProjectLocked ? 'bg-red-50 text-red-700 border-red-200 hover:bg-red-100' : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'}`}
-                                        >
-                                            {isProjectLocked ? <><Unlock className="w-3.5 h-3.5" />Buka Sesi Global</> : <><Lock className="w-3.5 h-3.5" />Kunci Sesi Global</>}
-                                        </button>
-                                    )}
-                                </div>
-                                <p className="text-sm text-slate-500 font-medium flex items-center space-x-2 mt-1"><MapPin className="w-3.5 h-3.5" /><span>{activeProject.locationName}</span></p>
-                            </div>
-                        </div>
-
-                        {/* TAB NAVIGASI UTAMA SCROLLABLE */}
-                        <div className="flex bg-slate-50 p-1.5 rounded-2xl border border-slate-200 overflow-x-auto max-w-full scrollbar-thin">
-                            <div className="flex space-x-2 flex-nowrap whitespace-nowrap">
-                                {orderedTabs.map(t => (
-                                    <button key={t.id} draggable onDragStart={(e) => handleDragStart(e, t.id)} onDragOver={(e) => e.preventDefault()} onDrop={(e) => handleDrop(e, t.id)} onClick={() => setActiveTab(t.id)} className={`px-5 py-2.5 text-sm font-bold rounded-xl flex items-center space-x-2 cursor-pointer transition-all ${activeTab === t.id ? 'bg-white shadow-md text-indigo-700' : 'text-slate-500 hover:text-slate-800'}`}>
-                                        <GripHorizontal className="w-3.5 h-3.5 opacity-30 cursor-grab shrink-0" />
-                                        <t.icon className="w-4 h-4 shrink-0" /><span>{t.label}</span>
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* TAB 1: PROGRESS & ANALYTICS */}
-                    {activeTab === 'progress' && (
-                        <div className="space-y-6">
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-                                <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-xl space-y-2">
-                                    <h3 className="text-sm font-extrabold text-slate-500 uppercase flex items-center"><PieChart className="w-4 h-4 mr-1.5 text-indigo-500" />Completion</h3>
-                                    <div className="text-4xl font-black text-slate-900">{overallPercentage}%</div>
-                                    <p className="text-xs font-bold text-slate-500">{totalCounted} / {totalSKUs} SKU Terhitung</p>
-                                </div>
-                                <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-xl space-y-4">
-                                    <h3 className="text-sm font-extrabold text-slate-500 uppercase flex items-center"><Filter className="w-4 h-4 mr-1.5 text-indigo-500" />Tampilan Ronde</h3>
-                                    <select value={viewRoundFilter} onChange={(e) => setViewRoundFilter(e.target.value === 'overall' ? 'overall' : parseInt(e.target.value, 10) as 1 | 2 | 3 | 4)} className="w-full p-3.5 bg-slate-50 border rounded-2xl text-sm font-black text-indigo-700 outline-none">
-                                        <option value="overall">📊 Overall Keseluruhan</option>
-                                        <option value={1}>1️⃣ Ronde 1</option>
-                                        <option value={2}>2️⃣ Ronde 2</option>
-                                        <option value={3}>3️⃣ Ronde 3</option>
-                                    </select>
-                                </div>
-                                <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-xl space-y-3">
-                                    <h3 className="text-sm font-extrabold text-slate-500 uppercase flex items-center"><AlertTriangle className="w-4 h-4 mr-1.5 text-red-500" />Live Dispute</h3>
-                                    <div className="text-4xl font-black text-red-600">{liveIssues.length}</div>
+                                    </div>
+                                    <p className="text-[10px] text-slate-400 font-semibold tracking-wider">
+                                        NOCTUS COUNT™ <span className="text-slate-300">|</span> Stock Opname Systems
+                                    </p>
                                 </div>
                             </div>
 
-                            <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-xl space-y-4">
-                                <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b pb-3 gap-3">
-                                    <h3 className="text-base font-black text-slate-900 flex items-center"><UserCheck className="w-5 h-5 mr-2 text-indigo-600" />Real-Time Monitoring Progress Per Counter PIC</h3>
-
-                                    <div className="relative w-full md:w-64">
-                                        <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-2.5" />
-                                        <input
-                                            type="text"
-                                            placeholder="Cari PIC Counter..."
-                                            value={counterSearch}
-                                            onChange={(e) => setCounterSearch(e.target.value)}
-                                            className="w-full pl-9 pr-4 py-1.5 bg-slate-50 border rounded-xl text-xs font-bold outline-none"
-                                        />
+                            {/* CENTER: CONNECTED 4-PILL KPI CAPSULE (MOCKUP ACCURATE) */}
+                            <div className="flex justify-center">
+                                <div className="inline-flex items-center bg-[#0F172A] text-white p-1 rounded-2xl border border-slate-800 shadow-md divide-x divide-slate-800 text-xs">
+                                    <div className="px-3.5 py-1 text-center">
+                                        <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-widest block">TOTAL ITEMS</span>
+                                        <span className="text-xs sm:text-sm font-black text-white">{totalSKUs.toLocaleString('id-ID')}</span>
+                                    </div>
+                                    <div className="px-3.5 py-1 text-center">
+                                        <span className="text-[9px] text-amber-400 font-extrabold uppercase tracking-widest block">COUNTED</span>
+                                        <span className="text-xs sm:text-sm font-black text-amber-400">{totalCounted.toLocaleString('id-ID')}</span>
+                                    </div>
+                                    <div className="px-3.5 py-1 text-center">
+                                        <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-widest block">REMAINING</span>
+                                        <span className="text-xs sm:text-sm font-black text-slate-300">{Math.max(0, totalSKUs - totalCounted).toLocaleString('id-ID')}</span>
+                                    </div>
+                                    <div className="px-3.5 py-1 text-center">
+                                        <span className="text-[9px] text-emerald-400 font-extrabold uppercase tracking-widest block">ACCURACY</span>
+                                        <span className="text-xs sm:text-sm font-black text-emerald-400">{overallPercentage}%</span>
                                     </div>
                                 </div>
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                    {filteredCounterNames.map((cName, idx) => {
-                                        const cData = counterGroups[cName];
-                                        const pct = cData.total > 0 ? Math.round((cData.counted / cData.total) * 100) : 0;
+                            </div>
 
-                                        const cleanCounterKey = cName.toLowerCase().trim();
-                                        const isLocked = !!lockedCounters[cleanCounterKey];
+                            {/* RIGHT: Round Filter, Role Badge & Session Lock Status */}
+                            <div className="flex items-center space-x-2.5 justify-end shrink-0">
+                                <select
+                                    value={viewRoundFilter}
+                                    onChange={(e) => setViewRoundFilter(e.target.value === 'overall' ? 'overall' : parseInt(e.target.value, 10) as 1 | 2 | 3 | 4)}
+                                    className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 outline-none cursor-pointer"
+                                >
+                                    <option value="overall">All Rounds</option>
+                                    <option value={1}>Round 1</option>
+                                    <option value={2}>Round 2</option>
+                                    <option value={3}>Round 3</option>
+                                </select>
 
-                                        const cTasks = masterDataList.filter(m => m.counter === cleanCounterKey);
-                                        const cMaxRound = cTasks.length > 0 ? Math.max(...cTasks.map(t => t.currentRound || 1)) : 1;
+                                {effectiveRole === 'owner' ? (
+                                    <div className="flex items-center space-x-2">
+                                        <span className="bg-slate-900 text-white text-[10px] font-black px-2.5 py-1.5 rounded-xl flex items-center space-x-1 border border-slate-800 shadow-xs">
+                                            <ShieldCheck className="w-3.5 h-3.5 text-indigo-400" />
+                                            <span>SUPER ADMIN</span>
+                                        </span>
+                                        <button
+                                            onClick={handleToggleGlobalLock}
+                                            className={`px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 shadow-xs border transition-colors cursor-pointer ${isProjectLocked ? 'bg-red-50 text-red-700 border-red-200 hover:bg-red-100' : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'}`}
+                                        >
+                                            {isProjectLocked ? <><Unlock className="w-3.5 h-3.5" />Buka Sesi</> : <><Lock className="w-3.5 h-3.5" />Kunci Sesi</>}
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <div className="flex items-center space-x-2">
+                                        <span className="bg-emerald-50 text-emerald-700 text-[10px] font-black px-3 py-1.5 rounded-xl flex items-center space-x-1.5 border border-emerald-300 shadow-xs">
+                                            <UserCheck className="w-3.5 h-3.5 text-emerald-600" />
+                                            <span>SUPERVISOR (MONITORING)</span>
+                                        </span>
+                                        <span className={`px-2.5 py-1 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1 border ${isProjectLocked ? 'bg-red-50 text-red-600 border-red-200' : 'bg-emerald-50 text-emerald-600 border-emerald-200'}`}>
+                                            {isProjectLocked ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
+                                            <span>{isProjectLocked ? 'Terkunci' : 'Aktif'}</span>
+                                        </span>
+                                    </div>
+                                )}
 
+                                {onSwitchToCounterView && (
+                                    <button
+                                        onClick={onSwitchToCounterView}
+                                        title="Beralih ke Layar Counter"
+                                        className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl cursor-pointer transition-colors"
+                                    >
+                                        <Smartphone className="w-4 h-4" />
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* MAIN BODY: SLIM ICON SIDEBAR + CONTENT AREA */}
+                        <div className="flex flex-1 flex-col md:flex-row overflow-hidden">
+                            {/* SLIM ICON SIDEBAR (EXECUTIVE DARK) */}
+                            <div className="w-full md:w-16 bg-[#0F172A] flex md:flex-col items-center justify-between p-2 md:py-5 border-r border-slate-800/80 shrink-0">
+                                {/* NAV ICONS */}
+                                <div className="flex md:flex-col items-center space-x-2 md:space-x-0 md:space-y-3 overflow-x-auto md:overflow-x-visible w-full md:w-auto px-2 md:px-0">
+                                    {orderedTabs.map(t => {
+                                        const isActive = activeTab === t.id;
+                                        const IconComponent = t.icon;
                                         return (
-                                            <div key={idx} className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3 hover:border-indigo-400">
-                                                <div className="flex justify-between items-start">
-                                                    <div className="flex flex-col">
-                                                        <span className="text-sm font-black text-slate-900 capitalize">{cName}</span>
-                                                        <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200 w-fit mt-0.5">
-                                                            Ronde {cMaxRound}
-                                                        </span>
-                                                    </div>
-                                                    <div className="flex items-center space-x-1.5">
-                                                        <span className="text-[10px] font-black px-2.5 py-1 rounded-lg bg-indigo-100 text-indigo-800">{pct}% Done</span>
-                                                        {effectiveRole === 'owner' && (
-                                                            <>
-                                                                <button
-                                                                    onClick={(e) => { e.stopPropagation(); handleDeployNextRoundForCounter(cName); }}
-                                                                    title={cMaxRound >= 3 ? 'Sudah mencapai Ronde 3 Maksimal' : `Deploy Ronde ${cMaxRound + 1} Khusus ${cName}`}
-                                                                    disabled={cMaxRound >= 3}
-                                                                    className={`p-1.5 rounded-md cursor-pointer transition-colors ${cMaxRound >= 3 ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-red-50 text-red-600 hover:bg-red-100'}`}
-                                                                >
-                                                                    <Repeat className="w-3.5 h-3.5" />
-                                                                </button>
-                                                                <button
-                                                                    onClick={(e) => { e.stopPropagation(); setTransferSourceCounter(cName); }}
-                                                                    title="Transfer Seluruh Tugas Counter Ini (Jika Absen)"
-                                                                    className="p-1.5 rounded-md cursor-pointer bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors"
-                                                                >
-                                                                    <UserPlus className="w-3.5 h-3.5" />
-                                                                </button>
-                                                                <button
-                                                                    onClick={(e) => { e.stopPropagation(); handleToggleCounterLock(cName, isLocked); }}
-                                                                    title={isLocked ? "Buka Akses Input Counter" : "Kunci Akses Input Counter"}
-                                                                    className={`p-1.5 rounded-md cursor-pointer transition-colors ${isLocked ? 'bg-red-100 text-red-600 hover:bg-red-200' : 'bg-slate-200 text-slate-500 hover:bg-slate-300'}`}
-                                                                >
-                                                                    {isLocked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
-                                                                </button>
-                                                            </>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                                {cData.errorCount > 0 && <div className="text-[10px] font-bold text-red-600 bg-red-50 px-2.5 py-1 rounded-md">⚠️ {cData.errorCount} SKU Selisih Ditemukan</div>}
-
-                                                <button
-                                                    onClick={() => setSelectedCounterForDetail(cName)}
-                                                    className="w-full mt-2 px-3 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs flex items-center justify-center space-x-1.5 shadow-sm transition-all cursor-pointer"
-                                                >
-                                                    <Eye className="w-3.5 h-3.5" />
-                                                    <span>Lihat Detail</span>
-                                                </button>
-                                            </div>
+                                            <button
+                                                key={t.id}
+                                                onClick={() => setActiveTab(t.id)}
+                                                title={t.label}
+                                                className={`w-10 h-10 rounded-xl flex items-center justify-center cursor-pointer transition-all ${
+                                                    isActive
+                                                        ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 ring-2 ring-indigo-400/40'
+                                                        : 'text-slate-400 hover:text-white hover:bg-slate-800/70'
+                                                }`}
+                                            >
+                                                <IconComponent className="w-4 h-4" />
+                                            </button>
                                         );
                                     })}
                                 </div>
+
+                                {/* BOTTOM ICON ACTIONS */}
+                                <div className="hidden md:flex flex-col items-center space-y-3 pt-4 border-t border-slate-800/60">
+                                    {onSwitchToCounterView && (
+                                        <button
+                                            onClick={onSwitchToCounterView}
+                                            title="Buka Mode Counter"
+                                            className="w-10 h-10 rounded-xl flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800/70 transition-all cursor-pointer"
+                                        >
+                                            <Smartphone className="w-4 h-4" />
+                                        </button>
+                                    )}
+                                    <button
+                                        onClick={() => setViewState('LANDING')}
+                                        title="Keluar ke Daftar Project"
+                                        className="w-10 h-10 rounded-xl flex items-center justify-center text-slate-400 hover:text-red-400 hover:bg-slate-800/70 transition-all cursor-pointer"
+                                    >
+                                        <LogOut className="w-4 h-4" />
+                                    </button>
+                                </div>
                             </div>
 
-                            {/* LEVEL PROGRESS & BRAND ACCURACY */}
-                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                                <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-xl space-y-5">
-                                    <div className="flex justify-between items-center">
-                                        <h3 className="text-base font-black text-slate-900">Progress per Level Rak</h3>
-                                        <button onClick={() => setShowLevelProgress(!showLevelProgress)} className="p-1.5 bg-slate-50 rounded-lg hover:bg-slate-100">
-                                            <ChevronUp className={`w-4 h-4 text-slate-500 transition-transform ${showLevelProgress ? 'rotate-180' : ''}`} />
-                                        </button>
-                                    </div>
-                                    {!showLevelProgress && (
-                                        <div className="space-y-4">
-                                            {levelProgress.map((lvl, idx) => (
-                                                <div key={idx} className="space-y-2">
-                                                    <div className="flex justify-between text-xs font-bold">
-                                                        <span className="text-slate-700">Level {lvl.name}</span>
-                                                        <span className="text-indigo-600">{lvl.counted}/{lvl.total} ({lvl.percentage}%)</span>
-                                                    </div>
-                                                    <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
-                                                        <div className="bg-indigo-600 h-2.5 rounded-full" style={{ width: `${lvl.percentage}%` }}></div>
-                                                    </div>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-
-                                <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-xl space-y-5">
-                                    <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 border-b pb-4">
-                                        <h3 className="text-base font-black text-slate-900 flex items-center">
-                                            <TrendingDown className="w-5 h-5 mr-2 text-indigo-500" />
-                                            Akurasi Hitung per Brand
-                                        </h3>
-                                        <div className="flex items-center space-x-2">
-                                            <div className="relative">
-                                                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-                                                <input type="text" placeholder="Cari Brand..." value={brandSearch} onChange={(e) => setBrandSearch(e.target.value)} className="pl-9 pr-4 py-2 bg-slate-50 border rounded-xl text-sm font-bold outline-none" />
-                                            </div>
-                                            <select value={brandStatusFilter} onChange={(e) => setBrandStatusFilter(e.target.value as any)} className="px-3 py-2 bg-slate-50 border rounded-xl text-sm font-bold outline-none">
-                                                <option value="all">All</option>
-                                                <option value="selisih">Selisih</option>
-                                                <option value="match">Match</option>
-                                                <option value="uncounted">Belum Dihitung</option>
-                                            </select>
-                                        </div>
-                                    </div>
-                                    <div className="space-y-3 max-h-60 overflow-y-auto pr-2 scrollbar-thin">
-                                        {brandAccuracyList.map((bAcc, idx) => (
-                                            <div key={idx} className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
-                                                <div className="flex justify-between items-center">
-                                                    <div>
-                                                        <span className="text-sm font-black text-slate-900">{bAcc.brand}</span>
-                                                        <div className="text-xs text-slate-500 font-medium mt-0.5">
-                                                            {bAcc.totalSKUs} SKU Total ({bAcc.countedCount} Dihitung) • <span className="text-red-500 font-bold">{bAcc.diffSKUs} Selisih</span>
+                            {/* CONTENT AREA */}
+                            <div className="flex-1 p-4 sm:p-6 overflow-y-auto max-h-[calc(100vh-140px)] space-y-6">
+                                {/* TAB 1: PROGRESS & ANALYTICS (EXECUTIVE 12-COL GRID) */}
+                                {activeTab === 'progress' && (
+                                    <div className="space-y-6">
+                                        {/* 12-COL GRID */}
+                                        <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
+                                            {/* LEFT COLUMN: PENDING STOCK COUNTS & LEVEL PROGRESS (7 OF 12) */}
+                                            <div className="xl:col-span-7 space-y-6">
+                                                {/* PENDING STOCK COUNTS TABLE */}
+                                                <div className="bg-white p-5 sm:p-6 rounded-3xl border border-slate-200/80 shadow-md space-y-4">
+                                                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-100 pb-3 gap-3">
+                                                        <div className="flex items-center space-x-2">
+                                                            <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
+                                                                <Users className="w-4 h-4" />
+                                                            </div>
+                                                            <div>
+                                                                <h3 className="text-sm font-black text-slate-900 tracking-tight">PENDING STOCK COUNTS</h3>
+                                                                <p className="text-[11px] text-slate-400 font-medium">Monitoring Real-Time PIC Counter Lapangan</p>
+                                                            </div>
+                                                        </div>
+                                                        <div className="relative w-full sm:w-56">
+                                                            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+                                                            <input
+                                                                type="text"
+                                                                placeholder="Cari PIC Counter..."
+                                                                value={counterSearch}
+                                                                onChange={(e) => setCounterSearch(e.target.value)}
+                                                                className="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none"
+                                                            />
                                                         </div>
                                                     </div>
-                                                    <div className="flex flex-col items-end space-y-2">
-                                                        {bAcc.isFullyUncounted ? (
-                                                            <span className="text-[10px] font-black px-2.5 py-1 rounded-lg bg-slate-200 text-slate-600 border border-slate-300">
-                                                                Belum Dihitung
-                                                            </span>
-                                                        ) : (
-                                                            <span className={`text-[10px] font-black px-2.5 py-1 rounded-lg ${bAcc.accuracyPct === 100 ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}`}>
-                                                                {bAcc.accuracyPct}% Akurat
-                                                            </span>
+
+                                                    {/* COUNTER PIC LIST */}
+                                                    <div className="space-y-3 max-h-110 overflow-y-auto pr-1 scrollbar-thin">
+                                                        {filteredCounterNames.map((cName, idx) => {
+                                                            const cData = counterGroups[cName];
+                                                            const pct = cData.total > 0 ? Math.round((cData.counted / cData.total) * 100) : 0;
+                                                            const cleanCounterKey = cName.toLowerCase().trim();
+                                                            const isLocked = !!lockedCounters[cleanCounterKey];
+                                                            const cTasks = masterDataList.filter(m => m.counter === cleanCounterKey);
+                                                            const cMaxRound = cTasks.length > 0 ? Math.max(...cTasks.map(t => t.currentRound || 1)) : 1;
+
+                                                            return (
+                                                                <div key={idx} className="p-3.5 bg-slate-50/80 hover:bg-slate-50 border border-slate-200/80 rounded-2xl transition-all space-y-2.5">
+                                                                    <div className="flex items-center justify-between">
+                                                                        <div className="flex items-center space-x-3">
+                                                                            <div className="w-8 h-8 rounded-xl bg-slate-900 text-white text-xs font-black flex items-center justify-center uppercase shrink-0">
+                                                                                {cName.slice(0, 2)}
+                                                                            </div>
+                                                                            <div>
+                                                                                <div className="flex items-center space-x-2">
+                                                                                    <span className="text-xs font-black text-slate-900 capitalize">{cName}</span>
+                                                                                    <span className="text-[9px] font-extrabold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
+                                                                                        Ronde {cMaxRound}
+                                                                                    </span>
+                                                                                </div>
+                                                                                <p className="text-[10px] text-slate-400 font-medium">
+                                                                                    {cData.counted} / {cData.total} SKU ({pct}%)
+                                                                                </p>
+                                                                            </div>
+                                                                        </div>
+
+                                                                        <div className="flex items-center space-x-1.5">
+                                                                            {cData.errorCount > 0 && (
+                                                                                <span className="text-[9px] font-black text-red-600 bg-red-50 px-2 py-1 rounded-md border border-red-200">
+                                                                                    ⚠️ {cData.errorCount} Selisih
+                                                                                </span>
+                                                                            )}
+                                                                            {effectiveRole === 'owner' && (
+                                                                                <>
+                                                                                    <button
+                                                                                        onClick={(e) => { e.stopPropagation(); handleDeployNextRoundForCounter(cName); }}
+                                                                                        title={cMaxRound >= 3 ? 'Sudah mencapai Ronde 3 Maksimal' : `Deploy Ronde ${cMaxRound + 1} Khusus ${cName}`}
+                                                                                        disabled={cMaxRound >= 3}
+                                                                                        className={`p-1.5 rounded-lg cursor-pointer transition-colors ${cMaxRound >= 3 ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-red-50 text-red-600 hover:bg-red-100 border border-red-200'}`}
+                                                                                    >
+                                                                                        <Repeat className="w-3.5 h-3.5" />
+                                                                                    </button>
+                                                                                    <button
+                                                                                        onClick={(e) => { e.stopPropagation(); setTransferSourceCounter(cName); }}
+                                                                                        title="Transfer Seluruh Tugas Counter Ini"
+                                                                                        className="p-1.5 rounded-lg cursor-pointer bg-indigo-50 text-indigo-600 hover:bg-indigo-100 border border-indigo-200 transition-colors"
+                                                                                    >
+                                                                                        <UserPlus className="w-3.5 h-3.5" />
+                                                                                    </button>
+                                                                                    <button
+                                                                                        onClick={(e) => { e.stopPropagation(); handleToggleCounterLock(cName, isLocked); }}
+                                                                                        title={isLocked ? "Buka Akses Input Counter" : "Kunci Akses Input Counter"}
+                                                                                        className={`p-1.5 rounded-lg cursor-pointer transition-colors ${isLocked ? 'bg-red-100 text-red-600 hover:bg-red-200 border border-red-300' : 'bg-slate-200 text-slate-500 hover:bg-slate-300'}`}
+                                                                                    >
+                                                                                        {isLocked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
+                                                                                    </button>
+                                                                                </>
+                                                                            )}
+                                                                            <button
+                                                                                onClick={() => setSelectedCounterForDetail(cName)}
+                                                                                className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-[10px] font-bold inline-flex items-center space-x-1 cursor-pointer transition-all"
+                                                                            >
+                                                                                <Eye className="w-3 h-3" />
+                                                                                <span>Detail</span>
+                                                                            </button>
+                                                                        </div>
+                                                                    </div>
+
+                                                                    {/* PROGRESS BAR */}
+                                                                    <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
+                                                                        <div
+                                                                            className="bg-indigo-600 h-1.5 rounded-full transition-all duration-300"
+                                                                            style={{ width: `${pct}%` }}
+                                                                        />
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })}
+
+                                                        {filteredCounterNames.length === 0 && (
+                                                            <div className="p-8 text-center text-xs text-slate-400 font-medium">
+                                                                Tidak ada counter PIC yang sesuai pencarian.
+                                                            </div>
                                                         )}
-                                                        <button onClick={() => setExpandedBrandDetail(prev => ({ ...prev, [bAcc.brand]: !prev[bAcc.brand] }))} className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded-md hover:bg-indigo-100">
-                                                            {expandedBrandDetail[bAcc.brand] ? 'Tutup Detail' : 'Lihat SKU'}
-                                                        </button>
                                                     </div>
                                                 </div>
-                                                {expandedBrandDetail[bAcc.brand] && (
-                                                    <div className="mt-3 bg-white border rounded-xl overflow-x-auto text-[10px]">
-                                                        <table className="w-full text-left">
-                                                            <thead className="bg-slate-50"><tr><th className="p-2">SKU</th><th className="p-2 text-center">WMS</th><th className="p-2 text-center">ACT</th></tr></thead>
-                                                            <tbody>
-                                                                {bAcc.skuList.map((s, i) => (
-                                                                    <tr key={i} className="border-t">
-                                                                        <td className="p-2 font-mono font-bold text-indigo-600">{s.SKU}</td>
-                                                                        <td className="p-2 text-center">{s.Qty}</td>
-                                                                        <td className="p-2 text-center font-bold">{s.countedQty ?? '-'}</td>
-                                                                    </tr>
-                                                                ))}
-                                                            </tbody>
-                                                        </table>
+
+                                                {/* RACK LEVEL PROGRESSION */}
+                                                <div className="bg-white p-5 sm:p-6 rounded-3xl border border-slate-200/80 shadow-md space-y-4">
+                                                    <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+                                                        <div>
+                                                            <h3 className="text-sm font-black text-slate-900 tracking-tight">RACK LEVEL PROGRESSION</h3>
+                                                            <p className="text-[11px] text-slate-400 font-medium">Tingkat capaian fisik berdasarkan level vertikal rak</p>
+                                                        </div>
+                                                        <button
+                                                            onClick={() => setShowLevelProgress(!showLevelProgress)}
+                                                            className="p-1.5 bg-slate-50 hover:bg-slate-100 rounded-lg text-slate-500 cursor-pointer"
+                                                        >
+                                                            <ChevronUp className={`w-4 h-4 transition-transform ${showLevelProgress ? 'rotate-180' : ''}`} />
+                                                        </button>
                                                     </div>
-                                                )}
+                                                    {!showLevelProgress && (
+                                                        <div className="space-y-3">
+                                                            {levelProgress.map((lvl, idx) => (
+                                                                <div key={idx} className="space-y-1.5">
+                                                                    <div className="flex justify-between text-xs font-bold">
+                                                                        <span className="text-slate-700">Level {lvl.name}</span>
+                                                                        <span className="text-indigo-600 font-mono">{lvl.counted}/{lvl.total} ({lvl.percentage}%)</span>
+                                                                    </div>
+                                                                    <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+                                                                        <div className="bg-indigo-600 h-2 rounded-full transition-all duration-300" style={{ width: `${lvl.percentage}%` }} />
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                            {levelProgress.length === 0 && (
+                                                                <p className="text-xs text-slate-400 text-center py-3">Belum ada data level rak.</p>
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                </div>
                                             </div>
-                                        ))}
+
+                                            {/* RIGHT COLUMN: CHART, LIVE ALERTS, BRAND ACCURACY (5 OF 12) */}
+                                            <div className="xl:col-span-5 space-y-6">
+                                                {/* COUNT PROGRESS DUAL-BAR CHART (PURE CSS 60FPS) */}
+                                                <div className="bg-white p-5 sm:p-6 rounded-3xl border border-slate-200/80 shadow-md space-y-4">
+                                                    <div className="border-b border-slate-100 pb-3">
+                                                        <h3 className="text-sm font-black text-slate-900 tracking-tight">COUNT PROGRESS CHART</h3>
+                                                        <p className="text-[11px] text-slate-400 font-medium">Perbandingan Volume Unit Sistem (WMS) vs Fisik Terhitung</p>
+                                                    </div>
+
+                                                    {/* DUAL-BAR DISPLAY */}
+                                                    <div className="space-y-3.5 pt-1">
+                                                        {/* SYSTEM QTY BAR */}
+                                                        <div className="space-y-1">
+                                                            <div className="flex justify-between text-xs font-bold">
+                                                                <span className="text-slate-600 flex items-center gap-1.5">
+                                                                    <span className="w-2.5 h-2.5 rounded-full bg-slate-400 inline-block" />
+                                                                    <span>Target System (WMS)</span>
+                                                                </span>
+                                                                <span className="font-mono text-slate-800">{totalSystemUnits.toLocaleString('id-ID')} Pcs</span>
+                                                            </div>
+                                                            <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
+                                                                <div className="bg-slate-400 h-3 rounded-full w-full" />
+                                                            </div>
+                                                        </div>
+
+                                                        {/* COUNTED QTY BAR */}
+                                                        <div className="space-y-1">
+                                                            <div className="flex justify-between text-xs font-bold">
+                                                                <span className="text-slate-600 flex items-center gap-1.5">
+                                                                    <span className="w-2.5 h-2.5 rounded-full bg-amber-500 inline-block" />
+                                                                    <span>Actual Counted</span>
+                                                                </span>
+                                                                <span className="font-mono text-amber-700 font-black">{totalCountedUnits.toLocaleString('id-ID')} Pcs</span>
+                                                            </div>
+                                                            <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
+                                                                <div
+                                                                    className="bg-amber-500 h-3 rounded-full transition-all duration-500"
+                                                                    style={{ width: `${totalSystemUnits > 0 ? Math.min(100, Math.round((totalCountedUnits / totalSystemUnits) * 100)) : 0}%` }}
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                    {/* SUMMARY PILL ROW */}
+                                                    <div className="grid grid-cols-2 gap-3 pt-2">
+                                                        <div className="p-3 bg-slate-50 border border-slate-100 rounded-2xl text-center">
+                                                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">SKU Completion</span>
+                                                            <span className="text-lg font-black text-slate-900">{overallPercentage}%</span>
+                                                        </div>
+                                                        <div className="p-3 bg-red-50/70 border border-red-100 rounded-2xl text-center">
+                                                            <span className="text-[10px] font-bold text-red-500 uppercase tracking-wider block">Dispute Selisih</span>
+                                                            <span className="text-lg font-black text-red-600">{liveIssues.length}</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                {/* RECENT COUNT ALERTS (LIVE STREAM FROM AUDIT LOGS) */}
+                                                <div className="bg-white p-5 sm:p-6 rounded-3xl border border-slate-200/80 shadow-md space-y-4">
+                                                    <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+                                                        <div>
+                                                            <h3 className="text-sm font-black text-slate-900 tracking-tight flex items-center gap-1.5">
+                                                                <Bell className="w-4 h-4 text-amber-500" />
+                                                                <span>RECENT COUNT ALERTS</span>
+                                                            </h3>
+                                                            <p className="text-[11px] text-slate-400 font-medium">Aktivitas submit counter terkini di lapangan</p>
+                                                        </div>
+                                                        <span className="text-[10px] font-black bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-md border border-emerald-200">
+                                                            LIVE
+                                                        </span>
+                                                    </div>
+
+                                                    <div className="space-y-2.5 max-h-56 overflow-y-auto pr-1 scrollbar-thin">
+                                                        {auditLogs.slice(0, 4).map((log, idx) => {
+                                                            const timeStr = log.timestamp ? new Date(log.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-';
+                                                            const isDiff = log.remarks && log.remarks.toLowerCase().includes('selisih');
+
+                                                            return (
+                                                                <div key={idx} className={`p-3 rounded-2xl border text-xs flex items-center justify-between transition-colors ${isDiff ? 'bg-red-50/60 border-red-200 text-red-900' : 'bg-slate-50 border-slate-200/70 text-slate-800'}`}>
+                                                                    <div className="flex items-center space-x-2.5 truncate">
+                                                                        <div className={`w-2 h-2 rounded-full shrink-0 ${isDiff ? 'bg-red-500 animate-pulse' : 'bg-emerald-500'}`} />
+                                                                        <div className="truncate">
+                                                                            <div className="flex items-center space-x-1.5">
+                                                                                <span className="font-black capitalize">{log.counterPic || 'Counter'}</span>
+                                                                                <span className="text-[10px] text-slate-400 font-mono">[{log.rackLocation || 'Rak'}]</span>
+                                                                            </div>
+                                                                            <p className="text-[10px] text-slate-500 truncate font-mono">{log.sku} • {log.totalFinalSubmitted ?? 0} Pcs</p>
+                                                                        </div>
+                                                                    </div>
+                                                                    <span className="text-[9px] font-mono font-bold text-slate-400 shrink-0 ml-2">{timeStr}</span>
+                                                                </div>
+                                                            );
+                                                        })}
+
+                                                        {auditLogs.length === 0 && (
+                                                            <p className="text-xs text-slate-400 text-center py-4">Belum ada aktivitas countsheet masuk.</p>
+                                                        )}
+                                                    </div>
+                                                </div>
+
+                                                {/* BRAND ACCURACY */}
+                                                <div className="bg-white p-5 sm:p-6 rounded-3xl border border-slate-200/80 shadow-md space-y-4">
+                                                    <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 border-b border-slate-100 pb-3">
+                                                        <div>
+                                                            <h3 className="text-sm font-black text-slate-900 tracking-tight flex items-center">
+                                                                <TrendingDown className="w-4 h-4 mr-1.5 text-indigo-500" />
+                                                                <span>Akurasi Hitung per Brand</span>
+                                                            </h3>
+                                                            <p className="text-[11px] text-slate-400 font-medium">Audit persentase kesesuaian brand</p>
+                                                        </div>
+                                                        <div className="flex items-center space-x-1.5">
+                                                            <div className="relative">
+                                                                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+                                                                <input
+                                                                    type="text"
+                                                                    placeholder="Brand..."
+                                                                    value={brandSearch}
+                                                                    onChange={(e) => setBrandSearch(e.target.value)}
+                                                                    className="w-28 pl-7 pr-2 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none"
+                                                                />
+                                                            </div>
+                                                            <select
+                                                                value={brandStatusFilter}
+                                                                onChange={(e) => setBrandStatusFilter(e.target.value as any)}
+                                                                className="px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none"
+                                                            >
+                                                                <option value="all">All</option>
+                                                                <option value="selisih">Selisih</option>
+                                                                <option value="match">Match</option>
+                                                                <option value="uncounted">Uncounted</option>
+                                                            </select>
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="space-y-2.5 max-h-60 overflow-y-auto pr-1 scrollbar-thin">
+                                                        {brandAccuracyList.map((bAcc, idx) => (
+                                                            <div key={idx} className="p-3 bg-slate-50 border border-slate-200/80 rounded-2xl space-y-2">
+                                                                <div className="flex justify-between items-center">
+                                                                    <div>
+                                                                        <span className="text-xs font-black text-slate-900">{bAcc.brand}</span>
+                                                                        <div className="text-[10px] text-slate-500 font-medium mt-0.5">
+                                                                            {bAcc.totalSKUs} SKU ({bAcc.countedCount} Dihitung) • <span className="text-red-500 font-bold">{bAcc.diffSKUs} Selisih</span>
+                                                                        </div>
+                                                                    </div>
+                                                                    <div className="flex items-center space-x-2">
+                                                                        {bAcc.isFullyUncounted ? (
+                                                                            <span className="text-[9px] font-black px-2 py-0.5 rounded-md bg-slate-200 text-slate-600">
+                                                                                Uncounted
+                                                                            </span>
+                                                                        ) : (
+                                                                            <span className={`text-[9px] font-black px-2 py-0.5 rounded-md ${bAcc.accuracyPct === 100 ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}`}>
+                                                                                {bAcc.accuracyPct}% Akurat
+                                                                            </span>
+                                                                        )}
+                                                                        <button
+                                                                            onClick={() => setExpandedBrandDetail(prev => ({ ...prev, [bAcc.brand]: !prev[bAcc.brand] }))}
+                                                                            className="text-[9px] font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded-md hover:bg-indigo-100 cursor-pointer"
+                                                                        >
+                                                                            {expandedBrandDetail[bAcc.brand] ? 'Tutup' : 'SKU'}
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                                {expandedBrandDetail[bAcc.brand] && (
+                                                                    <div className="mt-2 bg-white border border-slate-200 rounded-xl overflow-x-auto text-[10px]">
+                                                                        <table className="w-full text-left">
+                                                                            <thead className="bg-slate-50"><tr><th className="p-2">SKU</th><th className="p-2 text-center">WMS</th><th className="p-2 text-center">ACT</th></tr></thead>
+                                                                            <tbody>
+                                                                                {bAcc.skuList.map((s, i) => (
+                                                                                    <tr key={i} className="border-t">
+                                                                                        <td className="p-2 font-mono font-bold text-indigo-600">{s.SKU}</td>
+                                                                                        <td className="p-2 text-center">{s.Qty}</td>
+                                                                                        <td className="p-2 text-center font-bold">{s.countedQty ?? '-'}</td>
+                                                                                    </tr>
+                                                                                ))}
+                                                                            </tbody>
+                                                                        </table>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        ))}
+
+                                                        {brandAccuracyList.length === 0 && (
+                                                            <p className="text-xs text-slate-400 text-center py-3">Tidak ada brand ditemukan.</p>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
-                                </div>
-                            </div>
-                        </div>
-                    )}
+                                )}
 
                     {/* TAB 2: MASTER TASK (WITH PAGINATION) */}
                     {activeTab === 'master' && (
@@ -2421,8 +2674,8 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                         </div>
                     )}
 
-                    {/* TAB 3: RECON (KHUSUS OWNER) */}
-                    {activeTab === 'recon' && effectiveRole === 'owner' && (
+                    {/* TAB 3: RECON & RECOVERY */}
+                    {activeTab === 'recon' && (
                         <div className="space-y-6">
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
                                 <div className="bg-white p-6 rounded-3xl border border-emerald-100 shadow-xl flex items-center justify-between"><div><div className="text-xs font-black text-emerald-600 uppercase mb-1">Match Valid</div><div className="text-3xl font-black text-emerald-900">{matchRecoveryCount}</div></div><CheckCircle2 className="w-8 h-8 text-emerald-500" /></div>
@@ -2432,7 +2685,10 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
                             <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl space-y-4">
                                 <div className="flex justify-between items-center border-b pb-3">
-                                    <h3 className="text-base font-black text-slate-900 flex items-center"><Scale className="w-5 h-5 mr-2 text-indigo-600" />Laporan Selisih & Override Recovery</h3>
+                                    <div>
+                                        <h3 className="text-base font-black text-slate-900 flex items-center"><Scale className="w-5 h-5 mr-2 text-indigo-600" />Laporan Selisih & Override Recovery</h3>
+                                        <p className="text-xs text-slate-500 font-medium mt-0.5">Monitoring variansi stok fisik vs sistem WMS untuk SPV & Owner</p>
+                                    </div>
 
                                     <button onClick={handleExportReconXLSX} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center space-x-2 shadow-md cursor-pointer">
                                         <FileSpreadsheet className="w-4 h-4" />
@@ -2462,10 +2718,14 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                             <td className="p-4 text-center text-red-600 font-black">{diff > 0 ? `+${diff}` : diff}</td>
                                                             <td className="p-4 text-right font-mono text-amber-700 font-bold bg-amber-50/20">Rp {val.toLocaleString('id-ID')}</td>
                                                             <td className="p-4 text-right bg-indigo-50/10">
-                                                                <div className="flex items-center justify-end space-x-2">
-                                                                    <input type="number" placeholder="Qty Final" className="w-24 px-3 py-1.5 bg-white border border-slate-300 rounded-xl text-xs font-bold font-mono outline-none" onKeyDown={(e) => { if (e.key === 'Enter') handleSaveRecoveryOverride(item.SKU, parseInt((e.target as HTMLInputElement).value, 10)); }} />
-                                                                    <button onClick={(e) => handleSaveRecoveryOverride(item.SKU, parseInt(((e.currentTarget.previousElementSibling as HTMLInputElement).value), 10))} className="p-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-md"><Save className="w-4 h-4" /></button>
-                                                                </div>
+                                                                {effectiveRole === 'owner' ? (
+                                                                    <div className="flex items-center justify-end space-x-2">
+                                                                        <input type="number" placeholder="Qty Final" className="w-24 px-3 py-1.5 bg-white border border-slate-300 rounded-xl text-xs font-bold font-mono outline-none" onKeyDown={(e) => { if (e.key === 'Enter') handleSaveRecoveryOverride(item.SKU, parseInt((e.target as HTMLInputElement).value, 10)); }} />
+                                                                        <button onClick={(e) => handleSaveRecoveryOverride(item.SKU, parseInt(((e.currentTarget.previousElementSibling as HTMLInputElement).value), 10))} className="p-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-md"><Save className="w-4 h-4" /></button>
+                                                                    </div>
+                                                                ) : (
+                                                                    <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2.5 py-1 rounded-lg border border-slate-200">Owner Only</span>
+                                                                )}
                                                             </td>
                                                         </tr>
                                                     );
@@ -2698,8 +2958,22 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                             </div>
                         </div>
                     )}
+                            </div>
+                        </div>
+                    </div>
                 </div>
             )}
+
+            {/* TRADEMARK FOOTER */}
+            <div className="pt-8 pb-4 text-center border-t border-slate-200/60 mt-12">
+                <div className="flex items-center justify-center gap-2 mb-1">
+                    <img src="/logo.png" alt="Noctus Count Logo" className="w-5 h-5 object-contain" />
+                    <span className="text-xs font-black text-slate-800 tracking-wider">NOCTUS COUNT™</span>
+                </div>
+                <p className="text-[11px] text-slate-400 font-medium">
+                    Stock Opname Systems • Developed by <span className="font-bold text-indigo-600">Noctus</span>
+                </p>
+            </div>
         </div>
     );
 }
