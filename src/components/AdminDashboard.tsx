@@ -175,7 +175,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
     const [auditLogs, setAuditLogs] = useState<any[]>([]);
 
     // UPLOAD PROGRESS & CANCEL REF
-    const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number } | null>(null);
+    const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number; stepMessage?: string } | null>(null);
     const isUploadCancelledRef = useRef<boolean>(false);
     const isUploadingRef = useRef<boolean>(false);
 
@@ -892,14 +892,14 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     }
 
                     isUploadCancelledRef.current = false;
+                    isUploadCancelledRef.current = false;
                     isUploadingRef.current = true; // Kunci onSnapshot listener agar tidak membekukan UI React
-                    triggerNotification("Mempersiapkan data dan akun counter...");
-                    setUploadProgress({ current: 0, total: json.length });
-
                     const totalRows = json.length;
+                    setUploadProgress({ current: 0, total: totalRows, stepMessage: "Membaca & memvalidasi file Excel..." });
+
                     const pId = currentProjId || activeProject?.id;
 
-                    // 1. Ekstrak & Buat Akun Counter Unik Terlebih Dahulu (batch terpisah agar hemat operasi & aman dari limit 500)
+                    // 1. Ekstrak & Buat Akun Counter Unik Hanya Jika Belum Terdaftar
                     const uniqueCounters = new Set<string>();
                     json.forEach((row: any) => {
                         const rawCounter = (row['counter'] || row['Counter'] || row['COUNTER'] || 'Unassigned').toString().toLowerCase().trim();
@@ -910,31 +910,36 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     });
 
                     if (uniqueCounters.size > 0 && !isUploadCancelledRef.current) {
-                        const counterList = Array.from(uniqueCounters);
-                        for (let c = 0; c < counterList.length; c += 100) {
-                            if (isUploadCancelledRef.current) break;
-                            const cBatch = writeBatch(db);
-                            const slice = counterList.slice(c, c + 100);
-                            slice.forEach(cleanCounter => {
-                                const accRef = doc(db, "global_accounts", cleanCounter);
-                                cBatch.set(accRef, {
-                                    username: cleanCounter,
-                                    name: cleanCounter.toUpperCase(),
-                                    pin: '1234',
-                                    email: `${cleanCounter}@anymindgroup.com`,
-                                    role: 'counter'
-                                }, { merge: true });
-
-                                if (pId) {
-                                    const teamRef = doc(db, "project_teams", `${pId}_${cleanCounter}`);
-                                    cBatch.set(teamRef, {
-                                        projectId: pId,
+                        const existingUsernames = new Set(globalAccounts.map(a => a.username.toLowerCase()));
+                        const counterList = Array.from(uniqueCounters).filter(c => !existingUsernames.has(c.toLowerCase()));
+                        
+                        if (counterList.length > 0) {
+                            setUploadProgress({ current: 0, total: totalRows, stepMessage: `Menyiapkan ${counterList.length} akun counter baru...` });
+                            for (let c = 0; c < counterList.length; c += 100) {
+                                if (isUploadCancelledRef.current) break;
+                                const cBatch = writeBatch(db);
+                                const slice = counterList.slice(c, c + 100);
+                                slice.forEach(cleanCounter => {
+                                    const accRef = doc(db, "global_accounts", cleanCounter);
+                                    cBatch.set(accRef, {
                                         username: cleanCounter,
+                                        name: cleanCounter.toUpperCase(),
+                                        pin: '1234',
+                                        email: `${cleanCounter}@anymindgroup.com`,
                                         role: 'counter'
                                     }, { merge: true });
-                                }
-                            });
-                            await cBatch.commit();
+
+                                    if (pId) {
+                                        const teamRef = doc(db, "project_teams", `${pId}_${cleanCounter}`);
+                                        cBatch.set(teamRef, {
+                                            projectId: pId,
+                                            username: cleanCounter,
+                                            role: 'counter'
+                                        }, { merge: true });
+                                    }
+                                });
+                                await cBatch.commit();
+                            }
                         }
                     }
 
@@ -945,8 +950,8 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                         return;
                     }
 
-                    // 2. Persiapkan Chunks Task dengan ukuran aman (150 docs per batch)
-                    const CHUNK_SIZE = 150;
+                    // 2. Persiapkan Chunks Task dengan ukuran ultra-cepat (100 docs per batch)
+                    const CHUNK_SIZE = 100;
                     const chunks: { startIndex: number; rows: any[] }[] = [];
                     for (let i = 0; i < totalRows; i += CHUNK_SIZE) {
                         chunks.push({
@@ -958,6 +963,8 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     const newMasterList: MasterSKUItem[] = new Array(totalRows);
                     let chunkCursor = 0;
                     let completedRows = 0;
+
+                    setUploadProgress({ current: 0, total: totalRows, stepMessage: "Mengunggah data batch ke Cloud..." });
 
                     // Fungsi proses satu chunk dengan membuat WriteBatch BARU di setiap percobaan
                     const processChunk = async (currentChunk: { startIndex: number; rows: any[] }) => {
@@ -998,7 +1005,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                         expiredDateSystem: row['expired date by system'] || '',
                                         expiredDateActual: row['expired date by actual'] || '',
                                         Qty: parseInt(row['Qty System'] || row['QTY SYSTEM']) || 0,
-                                        unitPrice: parseInt(row['Unit Price'] || '0'),
+                                        unitPrice: parseInt(row['Unit Price'] || '0') || 0,
                                         isCounted,
                                         QTY_ACTUAL: isCounted ? numActQty : null,
                                         updatedAt: new Date().toISOString()
@@ -1026,7 +1033,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                         }
                     };
 
-                    // 3. Worker Pool Paralel (CONCURRENCY = 2) untuk kestabilan WebChannel & kecepatan tinggi
+                    // 3. Worker Pool Paralel (CONCURRENCY = 3) untuk kecepatan tinggi & responsivitas
                     const worker = async () => {
                         while (chunkCursor < chunks.length) {
                             if (isUploadCancelledRef.current) {
@@ -1040,12 +1047,13 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                             completedRows += currentChunk.rows.length;
                             setUploadProgress({
                                 current: Math.min(completedRows, totalRows),
-                                total: totalRows
+                                total: totalRows,
+                                stepMessage: `Mengunggah task (${Math.min(completedRows, totalRows).toLocaleString('id-ID')} / ${totalRows.toLocaleString('id-ID')})...`
                             });
                         }
                     };
 
-                    const CONCURRENCY = 2;
+                    const CONCURRENCY = 3;
                     const workerCount = Math.min(CONCURRENCY, chunks.length);
                     const workers = Array.from({ length: workerCount }, () => worker());
 
@@ -1441,9 +1449,10 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                         <div>
                             <h3 className="font-black text-slate-900 text-base">Mengunggah Task ke Cloud</h3>
                             <p className="text-xs text-slate-500 font-medium mt-1">
-                                {uploadProgress.current === 0
-                                    ? "Mempersiapkan akun & mengoptimalkan antrean..."
-                                    : "Mengunggah data multi-batch secara cepat..."}
+                                {uploadProgress.stepMessage ||
+                                    (uploadProgress.current === 0
+                                        ? "Mempersiapkan data dan antrean..."
+                                        : "Mengunggah data multi-batch secara cepat...")}
                             </p>
                         </div>
                         <div className="space-y-1.5">
