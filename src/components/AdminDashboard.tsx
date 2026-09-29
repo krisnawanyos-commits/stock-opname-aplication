@@ -327,7 +327,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
                 triggerNotification("Memulihkan data dari JSON...");
 
-                const CHUNK = 150;
+                const CHUNK = 400;
                 const tasks = backup.masterTasks;
                 for (let i = 0; i < tasks.length; i += CHUNK) {
                     const chunk = tasks.slice(i, i + CHUNK);
@@ -397,7 +397,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     return;
                 }
 
-                const CHUNK = 150;
+                const CHUNK = 400;
                 let count = 0;
                 for (let i = 0; i < json.length; i += CHUNK) {
                     const chunk = json.slice(i, i + CHUNK);
@@ -776,7 +776,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             return;
         }
 
-        const CHUNK = 150;
+        const CHUNK = 400;
         for (let i = 0; i < tasksToMove.length; i += CHUNK) {
             const chunk = tasksToMove.slice(i, i + CHUNK);
             const batch = writeBatch(db);
@@ -871,7 +871,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         acc.email.toLowerCase().includes(ktpSearch.toLowerCase())
     );
 
-    // PROSES UPLOAD STABIL CHUNKING (CHUNK = 150 DATA PER BATCH)
+    // KODINGAN UPLOAD TERBARU (ANTI CONTENTION LOCK & BISA DIBATALKAN)
     const parseXLSXFile = (file: File, currentProjId?: string): Promise<MasterSKUItem[]> => {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
@@ -892,10 +892,13 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     triggerNotification("Mempersiapkan upload data ke Cloud...");
                     setUploadProgress({ current: 0, total: json.length });
 
-                    const CHUNK_SIZE = 150; // MAX 150 DATA * 3 OPS = 450 OPS (PASTI DITERIMA FIRESTORE)
+                    const CHUNK_SIZE = 400; // DIKEMBALIKAN KE 400 KARENA SUDAH DIOPTIMASI
                     const totalRows = json.length;
                     const newMasterList: MasterSKUItem[] = [];
                     const pId = currentProjId || activeProject?.id;
+
+                    // SET UNTUK MENCEGAH UPDATE AKUN KTP BERKALI-KALI DI SETIAP BARIS (SOLUSI STUCK)
+                    const processedCounters = new Set<string>();
 
                     for (let i = 0; i < totalRows; i += CHUNK_SIZE) {
                         if (isUploadCancelledRef.current) {
@@ -916,13 +919,18 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
                             const taskId = `${locStr}_${skuStr}_${globalIdx + 1}`.replace(/\//g, '-');
 
-                            if (rawCounter !== 'unassigned') {
+                            // OPTIMASI: Cek apakah akun counter ini udah diproses sebelumnya?
+                            // Jika belum, daftarkan 1x saja, lalu catat di "processedCounters"
+                            if (rawCounter !== 'unassigned' && !processedCounters.has(rawCounter)) {
+                                processedCounters.add(rawCounter); // Tandai sudah diproses
+
                                 const accRef = doc(db, "global_accounts", rawCounter);
                                 batch.set(accRef, {
                                     username: rawCounter,
                                     name: rawCounter.toUpperCase(),
                                     pin: '1234',
-                                    email: `${rawCounter}@anymindgroup.com`
+                                    email: `${rawCounter}@anymindgroup.com`,
+                                    role: 'counter'
                                 }, { merge: true });
 
                                 if (pId) {
@@ -982,7 +990,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     if (!isUploadCancelledRef.current) {
                         setMasterDataList(newMasterList);
                         setUploadProgress(null);
-                        triggerNotification(`🚀 Upload Berhasil! ${totalRows} data sukses diunggah ke Cloud.`);
+                        triggerNotification(`🚀 Upload Selesai Ngebut! ${totalRows} data berhasil diproses.`);
                         resolve(newMasterList);
                     }
                 } catch (err: any) {
@@ -1097,7 +1105,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             await deleteDoc(doc(db, "projects", projectToDelete.id));
 
             const tasksSnap = await getDocs(collection(db, "master_tasks"));
-            const CHUNK = 150;
+            const CHUNK = 400;
             const taskDocs = tasksSnap.docs;
 
             for (let i = 0; i < taskDocs.length; i += CHUNK) {
