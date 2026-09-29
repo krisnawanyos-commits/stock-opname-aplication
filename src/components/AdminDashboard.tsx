@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../firebase';
 import {
-    collection, onSnapshot, doc, setDoc, deleteDoc, writeBatch, getDocs, query, orderBy, limit, type WriteBatch
+    collection, onSnapshot, doc, setDoc, deleteDoc, writeBatch, getDocs, query, orderBy, limit
 } from 'firebase/firestore';
 import * as XLSX from 'xlsx';
 import emailjs from '@emailjs/browser';
@@ -873,26 +873,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         acc.email.toLowerCase().includes(ktpSearch.toLowerCase())
     );
 
-    const commitBatchWithRetry = async (batch: WriteBatch, maxRetries = 2): Promise<void> => {
-        for (let attempt = 0; attempt <= maxRetries; attempt++) {
-            if (isUploadCancelledRef.current) throw new Error("Upload dibatalkan oleh pengguna.");
-            try {
-                // Timeout 25 detik per batch agar tidak pernah stuck indefinitely di browser
-                await Promise.race([
-                    batch.commit(),
-                    new Promise((_, reject) =>
-                        setTimeout(() => reject(new Error("Timeout koneksi Firestore (25s)")), 25000)
-                    )
-                ]);
-                return;
-            } catch (err: any) {
-                if (isUploadCancelledRef.current) throw new Error("Upload dibatalkan oleh pengguna.");
-                if (attempt === maxRetries) throw err;
-                console.warn(`Retry commit batch (percobaan ke-${attempt + 1}):`, err);
-                await new Promise(r => setTimeout(r, 800 * (attempt + 1)));
-            }
-        }
-    };
+    const sanitizeDocId = (str: string) => str.replace(/[\/\\#$\[\].]/g, '-').trim();
 
     const parseXLSXFile = (file: File, currentProjId?: string): Promise<MasterSKUItem[]> => {
         return new Promise((resolve, reject) => {
@@ -922,37 +903,38 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     const uniqueCounters = new Set<string>();
                     json.forEach((row: any) => {
                         const rawCounter = (row['counter'] || row['Counter'] || row['COUNTER'] || 'Unassigned').toString().toLowerCase().trim();
-                        if (rawCounter !== 'unassigned') {
-                            uniqueCounters.add(rawCounter);
+                        const clean = sanitizeDocId(rawCounter);
+                        if (clean && clean !== 'unassigned') {
+                            uniqueCounters.add(clean);
                         }
                     });
 
                     if (uniqueCounters.size > 0 && !isUploadCancelledRef.current) {
                         const counterList = Array.from(uniqueCounters);
-                        for (let c = 0; c < counterList.length; c += 200) {
+                        for (let c = 0; c < counterList.length; c += 100) {
                             if (isUploadCancelledRef.current) break;
                             const cBatch = writeBatch(db);
-                            const slice = counterList.slice(c, c + 200);
-                            slice.forEach(rawCounter => {
-                                const accRef = doc(db, "global_accounts", rawCounter);
+                            const slice = counterList.slice(c, c + 100);
+                            slice.forEach(cleanCounter => {
+                                const accRef = doc(db, "global_accounts", cleanCounter);
                                 cBatch.set(accRef, {
-                                    username: rawCounter,
-                                    name: rawCounter.toUpperCase(),
+                                    username: cleanCounter,
+                                    name: cleanCounter.toUpperCase(),
                                     pin: '1234',
-                                    email: `${rawCounter}@anymindgroup.com`,
+                                    email: `${cleanCounter}@anymindgroup.com`,
                                     role: 'counter'
                                 }, { merge: true });
 
                                 if (pId) {
-                                    const teamRef = doc(db, "project_teams", `${pId}_${rawCounter}`);
+                                    const teamRef = doc(db, "project_teams", `${pId}_${cleanCounter}`);
                                     cBatch.set(teamRef, {
                                         projectId: pId,
-                                        username: rawCounter,
+                                        username: cleanCounter,
                                         role: 'counter'
                                     }, { merge: true });
                                 }
                             });
-                            await commitBatchWithRetry(cBatch);
+                            await cBatch.commit();
                         }
                     }
 
@@ -963,8 +945,8 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                         return;
                     }
 
-                    // 2. Persiapkan Chunks Task dengan ukuran aman (250 docs per batch)
-                    const CHUNK_SIZE = 250;
+                    // 2. Persiapkan Chunks Task dengan ukuran aman (150 docs per batch)
+                    const CHUNK_SIZE = 150;
                     const chunks: { startIndex: number; rows: any[] }[] = [];
                     for (let i = 0; i < totalRows; i += CHUNK_SIZE) {
                         chunks.push({
@@ -977,7 +959,74 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     let chunkCursor = 0;
                     let completedRows = 0;
 
-                    // 3. Worker Pool Paralel (CONCURRENCY = 4) untuk upload super cepat & lancar
+                    // Fungsi proses satu chunk dengan membuat WriteBatch BARU di setiap percobaan
+                    const processChunk = async (currentChunk: { startIndex: number; rows: any[] }) => {
+                        for (let attempt = 0; attempt < 2; attempt++) {
+                            if (isUploadCancelledRef.current) throw new Error("Upload dibatalkan oleh pengguna.");
+                            try {
+                                const batch = writeBatch(db);
+
+                                currentChunk.rows.forEach((row: any, idxInChunk: number) => {
+                                    const globalIdx = currentChunk.startIndex + idxInChunk;
+                                    const rawCounter = (row['counter'] || row['Counter'] || row['COUNTER'] || 'Unassigned').toString().toLowerCase().trim();
+                                    const cleanCounter = sanitizeDocId(rawCounter || 'unassigned');
+                                    const locStr = (row['Location'] || row['LOCATION'] || `LOC-${globalIdx + 1}`).toString().trim();
+                                    const skuStr = (row['SKU'] || `SKU-${globalIdx + 1}`).toString().trim();
+
+                                    const taskId = sanitizeDocId(`${locStr}_${skuStr}_${globalIdx + 1}`);
+
+                                    const rawActQty = row['QTY ACTUAL'] ?? row['Qty Actual'] ?? row['ACTUAL QTY'];
+                                    const numActQty = parseInt(rawActQty, 10);
+                                    const isCounted = rawActQty !== undefined && rawActQty !== null && rawActQty !== '' && !isNaN(numActQty);
+
+                                    const taskDoc = {
+                                        Owner: row['Owner'] || 'DDI',
+                                        SKU: skuStr,
+                                        Description: row['Description'] || '',
+                                        UPC1: row['UPC 1']?.toString() || '',
+                                        UPC2: row['UPC 2']?.toString() || '',
+                                        SKUBrand: row['SKU Brand'] || '',
+                                        satuanHitung: row['satuan hitung'] || 'PCS',
+                                        Location: locStr,
+                                        level: row['level']?.toString() || '1',
+                                        ailee: row['ailee']?.toString() || '',
+                                        Zone: row['Zone']?.toString() || 'RACKING',
+                                        LocationType: row['Location Type'] || 'RACK',
+                                        counter: cleanCounter,
+                                        Status: row['Status'] || 'Active',
+                                        currentRound: parseInt(row['current round']) || 1,
+                                        expiredDateSystem: row['expired date by system'] || '',
+                                        expiredDateActual: row['expired date by actual'] || '',
+                                        Qty: parseInt(row['Qty System'] || row['QTY SYSTEM']) || 0,
+                                        unitPrice: parseInt(row['Unit Price'] || '0'),
+                                        isCounted,
+                                        QTY_ACTUAL: isCounted ? numActQty : null,
+                                        updatedAt: new Date().toISOString()
+                                    };
+
+                                    const taskRef = doc(db, "master_tasks", taskId);
+                                    batch.set(taskRef, taskDoc, { merge: true });
+
+                                    newMasterList[globalIdx] = {
+                                        id: taskId,
+                                        ...taskDoc,
+                                        countedQty: isCounted ? numActQty : undefined,
+                                        Remarks: row['REMARKS'] || ''
+                                    };
+                                });
+
+                                await batch.commit();
+                                return; // Berhasil
+                            } catch (err: any) {
+                                if (isUploadCancelledRef.current) throw new Error("Upload dibatalkan oleh pengguna.");
+                                if (attempt === 1) throw err;
+                                console.warn(`Retry chunk (percobaan ke-${attempt + 1}):`, err);
+                                await new Promise(r => setTimeout(r, 1000));
+                            }
+                        }
+                    };
+
+                    // 3. Worker Pool Paralel (CONCURRENCY = 2) untuk kestabilan WebChannel & kecepatan tinggi
                     const worker = async () => {
                         while (chunkCursor < chunks.length) {
                             if (isUploadCancelledRef.current) {
@@ -985,57 +1034,8 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                             }
                             const chunkIndex = chunkCursor++;
                             const currentChunk = chunks[chunkIndex];
-                            const batch = writeBatch(db);
 
-                            currentChunk.rows.forEach((row: any, idxInChunk: number) => {
-                                const globalIdx = currentChunk.startIndex + idxInChunk;
-                                const rawCounter = (row['counter'] || row['Counter'] || row['COUNTER'] || 'Unassigned').toString().toLowerCase().trim();
-                                const locStr = (row['Location'] || row['LOCATION'] || `LOC-${globalIdx + 1}`).toString().trim();
-                                const skuStr = (row['SKU'] || `SKU-${globalIdx + 1}`).toString().trim();
-
-                                const taskId = `${locStr}_${skuStr}_${globalIdx + 1}`.replace(/\//g, '-');
-
-                                const rawActQty = row['QTY ACTUAL'] ?? row['Qty Actual'] ?? row['ACTUAL QTY'];
-                                const numActQty = parseInt(rawActQty, 10);
-                                const isCounted = rawActQty !== undefined && rawActQty !== null && rawActQty !== '' && !isNaN(numActQty);
-
-                                const taskDoc = {
-                                    Owner: row['Owner'] || 'DDI',
-                                    SKU: skuStr,
-                                    Description: row['Description'] || '',
-                                    UPC1: row['UPC 1']?.toString() || '',
-                                    UPC2: row['UPC 2']?.toString() || '',
-                                    SKUBrand: row['SKU Brand'] || '',
-                                    satuanHitung: row['satuan hitung'] || 'PCS',
-                                    Location: locStr,
-                                    level: row['level']?.toString() || '1',
-                                    ailee: row['ailee']?.toString() || '',
-                                    Zone: row['Zone']?.toString() || 'RACKING',
-                                    LocationType: row['Location Type'] || 'RACK',
-                                    counter: rawCounter,
-                                    Status: row['Status'] || 'Active',
-                                    currentRound: parseInt(row['current round']) || 1,
-                                    expiredDateSystem: row['expired date by system'] || '',
-                                    expiredDateActual: row['expired date by actual'] || '',
-                                    Qty: parseInt(row['Qty System'] || row['QTY SYSTEM']) || 0,
-                                    unitPrice: parseInt(row['Unit Price'] || '0'),
-                                    isCounted,
-                                    QTY_ACTUAL: isCounted ? numActQty : null,
-                                    updatedAt: new Date().toISOString()
-                                };
-
-                                const taskRef = doc(db, "master_tasks", taskId);
-                                batch.set(taskRef, taskDoc, { merge: true });
-
-                                newMasterList[globalIdx] = {
-                                    id: taskId,
-                                    ...taskDoc,
-                                    countedQty: isCounted ? numActQty : undefined,
-                                    Remarks: row['REMARKS'] || ''
-                                };
-                            });
-
-                            await commitBatchWithRetry(batch);
+                            await processChunk(currentChunk);
 
                             completedRows += currentChunk.rows.length;
                             setUploadProgress({
@@ -1045,7 +1045,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                         }
                     };
 
-                    const CONCURRENCY = 4;
+                    const CONCURRENCY = 2;
                     const workerCount = Math.min(CONCURRENCY, chunks.length);
                     const workers = Array.from({ length: workerCount }, () => worker());
 
@@ -1204,27 +1204,31 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
     };
 
     const handleStartNewProjectSession = async () => {
-        const allLocs = [...warehouseList, ...consignmentStoreList];
-        const matched = allLocs.find(l => l.id === wizLocationId);
-        const locName = matched ? matched.name : (wizLocationId || 'Gudang Utama');
-        const projId = `PROJ-${Date.now().toString().slice(-4)}`;
-        const newSession: ProjectSession = {
-            id: projId,
-            sessionCode: wizSessionCode.trim() || `SO-${wizLocationId}-${wizOpnameDate}`,
-            locationId: wizLocationId || 'WH-01', locationName: locName, opnameDate: wizOpnameDate,
-            method: wizMethod, status: 'LIVE_ACTIVE', createdAt: new Date().toLocaleString(),
-            currentRound: 1
-        };
-        await setDoc(doc(db, "projects", projId), newSession);
-        setActiveProject(newSession);
+        try {
+            const allLocs = [...warehouseList, ...consignmentStoreList];
+            const matched = allLocs.find(l => l.id === wizLocationId);
+            const locName = matched ? matched.name : (wizLocationId || 'Gudang Utama');
+            const projId = `PROJ-${Date.now().toString().slice(-4)}`;
+            const newSession: ProjectSession = {
+                id: projId,
+                sessionCode: wizSessionCode.trim() || `SO-${wizLocationId}-${wizOpnameDate}`,
+                locationId: wizLocationId || 'WH-01', locationName: locName, opnameDate: wizOpnameDate,
+                method: wizMethod, status: 'LIVE_ACTIVE', createdAt: new Date().toLocaleString(),
+                currentRound: 1
+            };
+            await setDoc(doc(db, "projects", projId), newSession);
+            setActiveProject(newSession);
 
-        if (initialFileToUpload) {
-            await parseXLSXFile(initialFileToUpload, projId);
+            if (initialFileToUpload) {
+                await parseXLSXFile(initialFileToUpload, projId);
+            }
+            setRecoveryAdjustments({});
+            setViewState('DASHBOARD');
+            setActiveTab('progress');
+            triggerNotification(`Project Baru Diluncurkan: ${newSession.sessionCode}`);
+        } catch (err: any) {
+            console.error("Gagal meluncurkan project session:", err);
         }
-        setRecoveryAdjustments({});
-        setViewState('DASHBOARD');
-        setActiveTab('progress');
-        triggerNotification(`Project Baru Diluncurkan: ${newSession.sessionCode}`);
     };
 
     const handleAddWarehouseCloud = async () => {
