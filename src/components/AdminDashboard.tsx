@@ -12,7 +12,8 @@ import {
     CheckCircle2, XCircle, Search, Building2, DollarSign,
     Download, Scale, PlayCircle, Archive, ArrowLeft, AlertTriangle,
     LogOut, GripHorizontal, Contact, Eye, EyeOff, UserCheck, Clock, Store, Link2, KeyRound,
-    Mail, Edit2, Smartphone, Lock, Unlock, Repeat, Copy, Tag, RefreshCw, HardDrive, Loader2, AlertCircle, X
+    Mail, Edit2, Smartphone, Lock, Unlock, Repeat, Copy, Tag, RefreshCw, HardDrive, Loader2, AlertCircle, X,
+    ChevronLeft, ChevronRight
 } from 'lucide-react';
 import type { UserRole } from '../types';
 
@@ -153,6 +154,12 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
     const [ktpSearch, setKtpSearch] = useState<string>('');
     const [counterSearch, setCounterSearch] = useState<string>('');
     const [catalogSearch, setCatalogSearch] = useState<string>('');
+    const [masterTaskSearch, setMasterTaskSearch] = useState<string>('');
+
+    // PAGINATION STATES (Pencegah Lag Memory)
+    const [masterCurrentPage, setMasterCurrentPage] = useState<number>(1);
+    const [catalogCurrentPage, setCatalogCurrentPage] = useState<number>(1);
+    const ITEMS_PER_PAGE = 50;
 
     const [editingAccount, setEditingAccount] = useState<GlobalAccount | null>(null);
     const [assignUsername, setAssignUsername] = useState<string>('');
@@ -995,7 +1002,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             triggerNotification('Hanya Owner yang berwenang menugaskan counter.');
             return;
         }
-        const targetItem = masterDataList[taskIndex];
+        const targetItem = filteredMasterTask[taskIndex];
         const cleanCounter = newCounter.toLowerCase().trim();
         const rawTaskId = targetItem.id || `${targetItem.Location}_${targetItem.SKU}_${taskIndex + 1}`;
         const taskId = rawTaskId.replace(/\//g, '-');
@@ -1005,10 +1012,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             updatedAt: new Date().toISOString()
         }, { merge: true });
 
-        const updatedList = [...masterDataList];
-        updatedList[taskIndex].counter = cleanCounter;
-        setMasterDataList(updatedList);
-
+        setMasterDataList(prev => prev.map(m => m.id === taskId ? { ...m, counter: cleanCounter } : m));
         triggerNotification(`Lokasi ${targetItem.Location} (${targetItem.SKU}) ditugaskan ke: ${cleanCounter}`);
     };
 
@@ -1236,7 +1240,8 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         ? masterDataList.filter(m => m.counter === selectedCounterForDetail && m.isCounted && (m.countedQty ?? m.Qty) !== m.Qty)
         : [];
 
-    const uniqueSKUCatalog = Array.from(new Set(masterDataList.map(m => m.SKU))).map(sku => {
+    // FILTERED SKU CATALOG WITH PAGINATION
+    const filteredSKUCatalog = Array.from(new Set(masterDataList.map(m => m.SKU))).map(sku => {
         const matched = masterDataList.find(m => m.SKU === sku);
         return {
             SKU: sku,
@@ -1252,6 +1257,26 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         c.SKU.toLowerCase().includes(catalogSearch.toLowerCase()) ||
         c.Description.toLowerCase().includes(catalogSearch.toLowerCase()) ||
         c.UPC1.toLowerCase().includes(catalogSearch.toLowerCase())
+    );
+
+    const totalCatalogPages = Math.ceil(filteredSKUCatalog.length / ITEMS_PER_PAGE) || 1;
+    const paginatedSKUCatalog = filteredSKUCatalog.slice(
+        (catalogCurrentPage - 1) * ITEMS_PER_PAGE,
+        catalogCurrentPage * ITEMS_PER_PAGE
+    );
+
+    // FILTERED MASTER TASK WITH PAGINATION
+    const filteredMasterTask = masterDataList.filter(m =>
+        m.SKU.toLowerCase().includes(masterTaskSearch.toLowerCase()) ||
+        m.Location.toLowerCase().includes(masterTaskSearch.toLowerCase()) ||
+        m.Description.toLowerCase().includes(masterTaskSearch.toLowerCase()) ||
+        m.counter.toLowerCase().includes(masterTaskSearch.toLowerCase())
+    );
+
+    const totalMasterPages = Math.ceil(filteredMasterTask.length / ITEMS_PER_PAGE) || 1;
+    const paginatedMasterTask = filteredMasterTask.slice(
+        (masterCurrentPage - 1) * ITEMS_PER_PAGE,
+        masterCurrentPage * ITEMS_PER_PAGE
     );
 
     const totalSKUs = masterDataList.length;
@@ -2027,15 +2052,40 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                         </div>
                     )}
 
-                    {/* TAB 2: MASTER TASK */}
+                    {/* TAB 2: MASTER TASK (WITH PAGINATION) */}
                     {activeTab === 'master' && (
                         <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl space-y-5">
-                            <div className="flex justify-between items-center border-b pb-4">
-                                <h3 className="text-base font-black text-slate-900">Database Master Task & Lokasi Rak</h3>
+                            <div className="flex flex-col sm:flex-row justify-between sm:items-center border-b pb-4 gap-4">
+                                <div>
+                                    <h3 className="text-base font-black text-slate-900">Database Master Task & Lokasi Rak</h3>
+                                    <p className="text-xs text-slate-500 font-medium mt-0.5">
+                                        Total {masterDataList.length.toLocaleString('id-ID')} Task Terdaftar di Database
+                                    </p>
+                                </div>
                                 <div className="flex items-center space-x-3">
-                                    <button onClick={handleExportCurrentMasterXLSX} className="px-4 py-2.5 bg-slate-50 border rounded-xl text-sm font-bold flex items-center space-x-2"><FileSpreadsheet className="w-4 h-4 text-emerald-600" /><span>Export Data saat Ini (.xlsx)</span></button>
+                                    <div className="relative w-full sm:w-64">
+                                        <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-2.5" />
+                                        <input
+                                            type="text"
+                                            placeholder="Cari SKU, Rak, PIC..."
+                                            value={masterTaskSearch}
+                                            onChange={(e) => {
+                                                setMasterTaskSearch(e.target.value);
+                                                setMasterCurrentPage(1);
+                                            }}
+                                            className="w-full pl-9 pr-4 py-2 bg-slate-50 border rounded-xl text-xs font-bold outline-none"
+                                        />
+                                    </div>
+                                    <button onClick={handleExportCurrentMasterXLSX} className="px-4 py-2.5 bg-slate-50 border rounded-xl text-xs font-bold flex items-center space-x-2 shrink-0 cursor-pointer">
+                                        <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                                        <span>Export (.xlsx)</span>
+                                    </button>
                                     {effectiveRole === 'owner' && (
-                                        <label className="px-4 py-2.5 bg-slate-900 text-white rounded-xl text-sm font-bold cursor-pointer flex items-center space-x-2"><Upload className="w-4 h-4" /><span>Upload Master</span><input type="file" accept=".xlsx, .xls" className="hidden" onChange={(e) => { if (e.target.files?.[0]) parseXLSXFile(e.target.files[0]); }} /></label>
+                                        <label className="px-4 py-2.5 bg-slate-900 text-white rounded-xl text-xs font-bold cursor-pointer flex items-center space-x-2 shrink-0">
+                                            <Upload className="w-4 h-4" />
+                                            <span>Upload Master</span>
+                                            <input type="file" accept=".xlsx, .xls" className="hidden" onChange={(e) => { if (e.target.files?.[0]) parseXLSXFile(e.target.files[0]); }} />
+                                        </label>
                                     )}
                                 </div>
                             </div>
@@ -2043,7 +2093,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                             <div className="overflow-x-auto overflow-y-auto border rounded-2xl max-h-125 scrollbar-thin">
                                 <table className="w-full text-left text-[11px] min-w-max"><thead className="bg-slate-50 font-black text-slate-600 border-b sticky top-0 z-10"><tr><th className="p-3 bg-slate-50">OWNER SKU</th><th className="p-3 bg-slate-50">SKU</th><th className="p-3 bg-slate-50">DESKRIPSI</th><th className="p-3 bg-slate-50">UPC 1</th><th className="p-3 bg-slate-50">UPC 2</th><th className="p-3 bg-slate-50">LOKASI RAK</th><th className="p-3 bg-slate-50">COUNTER PIC</th><th className="p-3 text-center bg-slate-50">WMS QTY</th><th className="p-3 text-center bg-slate-50">ACTUAL QTY</th></tr></thead>
                                     <tbody className="divide-y divide-slate-100 font-medium">
-                                        {masterDataList.map((row, idx) => (
+                                        {paginatedMasterTask.map((row, idx) => (
                                             <tr key={idx} className="hover:bg-slate-50">
                                                 <td className="p-3 font-bold text-slate-800">{row.Owner || 'DDI'}</td>
                                                 <td className="p-3 font-mono font-black text-indigo-600">{row.SKU}</td>
@@ -2056,7 +2106,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                         <SearchableSelect
                                                             options={globalAccounts.map(acc => ({ value: acc.username, label: acc.username }))}
                                                             value={row.counter === 'unassigned' ? '' : row.counter}
-                                                            onChange={(val: string) => handleReassignCounter(idx, val)}
+                                                            onChange={(val: string) => handleReassignCounter((masterCurrentPage - 1) * ITEMS_PER_PAGE + idx, val)}
                                                             placeholder="Assign..."
                                                             className="w-32"
                                                         />
@@ -2068,13 +2118,44 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                 <td className="p-3 text-center font-black text-sm">{(row.isCounted && row.countedQty !== undefined && !isNaN(row.countedQty)) ? row.countedQty : '-'}</td>
                                             </tr>
                                         ))}
+                                        {filteredMasterTask.length === 0 && (
+                                            <tr><td colSpan={9} className="p-8 text-center text-slate-400 font-medium">Data Task tidak ditemukan.</td></tr>
+                                        )}
                                     </tbody>
                                 </table>
+                            </div>
+
+                            {/* CONTROLLER PAGINATION MASTER TASK */}
+                            <div className="flex flex-col sm:flex-row justify-between items-center gap-3 pt-2 text-xs font-bold text-slate-600">
+                                <span>
+                                    Menampilkan {filteredMasterTask.length > 0 ? (masterCurrentPage - 1) * ITEMS_PER_PAGE + 1 : 0} - {Math.min(masterCurrentPage * ITEMS_PER_PAGE, filteredMasterTask.length)} dari {filteredMasterTask.length.toLocaleString('id-ID')} Task
+                                </span>
+                                <div className="flex items-center space-x-2">
+                                    <button
+                                        disabled={masterCurrentPage === 1}
+                                        onClick={() => setMasterCurrentPage(p => Math.max(1, p - 1))}
+                                        className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 rounded-xl flex items-center space-x-1 cursor-pointer"
+                                    >
+                                        <ChevronLeft className="w-4 h-4" />
+                                        <span>Prev</span>
+                                    </button>
+                                    <span className="px-3 py-1 bg-indigo-50 text-indigo-700 rounded-lg font-black">
+                                        Halaman {masterCurrentPage} / {totalMasterPages}
+                                    </span>
+                                    <button
+                                        disabled={masterCurrentPage >= totalMasterPages}
+                                        onClick={() => setMasterCurrentPage(p => p + 1)}
+                                        className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 rounded-xl flex items-center space-x-1 cursor-pointer"
+                                    >
+                                        <span>Next</span>
+                                        <ChevronRight className="w-4 h-4" />
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     )}
 
-                    {/* TAB MASTER SKU KATALOG */}
+                    {/* TAB MASTER SKU KATALOG (WITH PAGINATION) */}
                     {activeTab === 'sku_catalog' && (
                         <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl space-y-5">
                             <div className="flex flex-col sm:flex-row justify-between sm:items-center border-b pb-4 gap-4">
@@ -2091,7 +2172,10 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                         type="text"
                                         placeholder="Cari SKU, Barcode, Deskripsi..."
                                         value={catalogSearch}
-                                        onChange={(e) => setCatalogSearch(e.target.value)}
+                                        onChange={(e) => {
+                                            setCatalogSearch(e.target.value);
+                                            setCatalogCurrentPage(1);
+                                        }}
                                         className="w-full pl-9 pr-4 py-2 bg-slate-50 border rounded-xl text-xs font-bold outline-none"
                                     />
                                 </div>
@@ -2100,7 +2184,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                             <div className="overflow-x-auto overflow-y-auto border rounded-2xl max-h-125 scrollbar-thin">
                                 <table className="w-full text-left text-xs"><thead className="bg-slate-50 font-bold text-slate-600 border-b sticky top-0 z-10"><tr><th className="p-3 bg-slate-50">OWNER</th><th className="p-3 bg-slate-50">SKU BARANG</th><th className="p-3 bg-slate-50">DESKRIPSI PRODUK</th><th className="p-3 bg-slate-50">UPC 1 (ECERAN)</th><th className="p-3 bg-slate-50">UPC 2 (KARDUS)</th><th className="p-3 bg-slate-50">BRAND</th><th className="p-3 text-right bg-slate-50">HARGA SATUAN (RP)</th></tr></thead>
                                     <tbody className="divide-y divide-slate-100 font-medium">
-                                        {uniqueSKUCatalog.map((item, idx) => (
+                                        {paginatedSKUCatalog.map((item, idx) => (
                                             <tr key={idx} className="hover:bg-slate-50">
                                                 <td className="p-3 font-bold text-slate-800">{item.Owner}</td>
                                                 <td className="p-3 font-mono font-black text-indigo-600">{item.SKU}</td>
@@ -2111,11 +2195,39 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                 <td className="p-3 text-right font-mono font-bold text-amber-700">Rp {item.unitPrice.toLocaleString('id-ID')}</td>
                                             </tr>
                                         ))}
-                                        {uniqueSKUCatalog.length === 0 && (
+                                        {filteredSKUCatalog.length === 0 && (
                                             <tr><td colSpan={7} className="p-8 text-center text-slate-400">Tidak ada Katalog SKU ditemukan.</td></tr>
                                         )}
                                     </tbody>
                                 </table>
+                            </div>
+
+                            {/* CONTROLLER PAGINATION KATALOG SKU */}
+                            <div className="flex flex-col sm:flex-row justify-between items-center gap-3 pt-2 text-xs font-bold text-slate-600">
+                                <span>
+                                    Menampilkan {filteredSKUCatalog.length > 0 ? (catalogCurrentPage - 1) * ITEMS_PER_PAGE + 1 : 0} - {Math.min(catalogCurrentPage * ITEMS_PER_PAGE, filteredSKUCatalog.length)} dari {filteredSKUCatalog.length.toLocaleString('id-ID')} SKU Unik
+                                </span>
+                                <div className="flex items-center space-x-2">
+                                    <button
+                                        disabled={catalogCurrentPage === 1}
+                                        onClick={() => setCatalogCurrentPage(p => Math.max(1, p - 1))}
+                                        className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 rounded-xl flex items-center space-x-1 cursor-pointer"
+                                    >
+                                        <ChevronLeft className="w-4 h-4" />
+                                        <span>Prev</span>
+                                    </button>
+                                    <span className="px-3 py-1 bg-indigo-50 text-indigo-700 rounded-lg font-black">
+                                        Halaman {catalogCurrentPage} / {totalCatalogPages}
+                                    </span>
+                                    <button
+                                        disabled={catalogCurrentPage >= totalCatalogPages}
+                                        onClick={() => setCatalogCurrentPage(p => p + 1)}
+                                        className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 rounded-xl flex items-center space-x-1 cursor-pointer"
+                                    >
+                                        <span>Next</span>
+                                        <ChevronRight className="w-4 h-4" />
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     )}
