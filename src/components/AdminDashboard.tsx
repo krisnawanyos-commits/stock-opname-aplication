@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../firebase';
 import {
-    collection, onSnapshot, doc, setDoc, deleteDoc, writeBatch, getDocs, query, orderBy, limit
+    collection, onSnapshot, doc, setDoc, deleteDoc, writeBatch, getDocs, query, orderBy, limit, type WriteBatch
 } from 'firebase/firestore';
 import * as XLSX from 'xlsx';
 import emailjs from '@emailjs/browser';
@@ -177,6 +177,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
     // UPLOAD PROGRESS & CANCEL REF
     const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number } | null>(null);
     const isUploadCancelledRef = useRef<boolean>(false);
+    const isUploadingRef = useRef<boolean>(false);
 
     // STATE KATEGORI BAD STOCK (CONFIGURABLE BY OWNER)
     const [badStockCategories, setBadStockCategories] = useState<string[]>(['Dus Penyok', 'Kemasan Bocor', 'Segel Rusak', 'Basah / Lembab', 'Barang Expired']);
@@ -464,6 +465,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
         const qTasks = collection(db, "master_tasks");
         const unsubscribe = onSnapshot(qTasks, (snapshot) => {
+            if (isUploadingRef.current) return; // Cegah UI freeze & re-render berlebihan saat upload massal berlangsung
             const taskList: MasterSKUItem[] = snapshot.docs.map(docSnap => {
                 const data = docSnap.data();
 
@@ -871,6 +873,27 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         acc.email.toLowerCase().includes(ktpSearch.toLowerCase())
     );
 
+    const commitBatchWithRetry = async (batch: WriteBatch, maxRetries = 2): Promise<void> => {
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+            if (isUploadCancelledRef.current) throw new Error("Upload dibatalkan oleh pengguna.");
+            try {
+                // Timeout 25 detik per batch agar tidak pernah stuck indefinitely di browser
+                await Promise.race([
+                    batch.commit(),
+                    new Promise((_, reject) =>
+                        setTimeout(() => reject(new Error("Timeout koneksi Firestore (25s)")), 25000)
+                    )
+                ]);
+                return;
+            } catch (err: any) {
+                if (isUploadCancelledRef.current) throw new Error("Upload dibatalkan oleh pengguna.");
+                if (attempt === maxRetries) throw err;
+                console.warn(`Retry commit batch (percobaan ke-${attempt + 1}):`, err);
+                await new Promise(r => setTimeout(r, 800 * (attempt + 1)));
+            }
+        }
+    };
+
     const parseXLSXFile = (file: File, currentProjId?: string): Promise<MasterSKUItem[]> => {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
@@ -888,42 +911,31 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     }
 
                     isUploadCancelledRef.current = false;
-                    triggerNotification("Mempersiapkan upload data ke Cloud...");
+                    isUploadingRef.current = true; // Kunci onSnapshot listener agar tidak membekukan UI React
+                    triggerNotification("Mempersiapkan data dan akun counter...");
                     setUploadProgress({ current: 0, total: json.length });
 
-                    // MAX 400 DATA (Sangat aman untuk batasan Firestore 500 ops)
-                    const CHUNK_SIZE = 400;
                     const totalRows = json.length;
-                    const newMasterList: MasterSKUItem[] = [];
                     const pId = currentProjId || activeProject?.id;
 
-                    const processedCounters = new Set<string>();
-
-                    // MENGGUNAKAN LOOP SEKUENSIAL YANG STABIL (TIDAK PARALEL)
-                    for (let i = 0; i < totalRows; i += CHUNK_SIZE) {
-                        if (isUploadCancelledRef.current) {
-                            triggerNotification("Upload dibatalkan oleh pengguna.");
-                            setUploadProgress(null);
-                            reject("Upload dibatalkan");
-                            return;
+                    // 1. Ekstrak & Buat Akun Counter Unik Terlebih Dahulu (batch terpisah agar hemat operasi & aman dari limit 500)
+                    const uniqueCounters = new Set<string>();
+                    json.forEach((row: any) => {
+                        const rawCounter = (row['counter'] || row['Counter'] || row['COUNTER'] || 'Unassigned').toString().toLowerCase().trim();
+                        if (rawCounter !== 'unassigned') {
+                            uniqueCounters.add(rawCounter);
                         }
+                    });
 
-                        const chunk = json.slice(i, i + CHUNK_SIZE);
-                        const batch = writeBatch(db);
-
-                        chunk.forEach((row: any, idxInChunk: number) => {
-                            const globalIdx = i + idxInChunk;
-                            const rawCounter = (row['counter'] || row['Counter'] || row['COUNTER'] || 'Unassigned').toString().toLowerCase().trim();
-                            const locStr = (row['Location'] || row['LOCATION'] || `LOC-${globalIdx + 1}`).toString().trim();
-                            const skuStr = (row['SKU'] || `SKU-${globalIdx + 1}`).toString().trim();
-
-                            const taskId = `${locStr}_${skuStr}_${globalIdx + 1}`.replace(/\//g, '-');
-
-                            if (rawCounter !== 'unassigned' && !processedCounters.has(rawCounter)) {
-                                processedCounters.add(rawCounter);
-
+                    if (uniqueCounters.size > 0 && !isUploadCancelledRef.current) {
+                        const counterList = Array.from(uniqueCounters);
+                        for (let c = 0; c < counterList.length; c += 200) {
+                            if (isUploadCancelledRef.current) break;
+                            const cBatch = writeBatch(db);
+                            const slice = counterList.slice(c, c + 200);
+                            slice.forEach(rawCounter => {
                                 const accRef = doc(db, "global_accounts", rawCounter);
-                                batch.set(accRef, {
+                                cBatch.set(accRef, {
                                     username: rawCounter,
                                     name: rawCounter.toUpperCase(),
                                     pin: '1234',
@@ -933,73 +945,134 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
                                 if (pId) {
                                     const teamRef = doc(db, "project_teams", `${pId}_${rawCounter}`);
-                                    batch.set(teamRef, {
+                                    cBatch.set(teamRef, {
                                         projectId: pId,
                                         username: rawCounter,
                                         role: 'counter'
                                     }, { merge: true });
                                 }
-                            }
-
-                            const rawActQty = row['QTY ACTUAL'] ?? row['Qty Actual'] ?? row['ACTUAL QTY'];
-                            const numActQty = parseInt(rawActQty, 10);
-                            const isCounted = rawActQty !== undefined && rawActQty !== null && rawActQty !== '' && !isNaN(numActQty);
-
-                            const taskDoc = {
-                                Owner: row['Owner'] || 'DDI',
-                                SKU: skuStr,
-                                Description: row['Description'] || '',
-                                UPC1: row['UPC 1']?.toString() || '',
-                                UPC2: row['UPC 2']?.toString() || '',
-                                SKUBrand: row['SKU Brand'] || '',
-                                satuanHitung: row['satuan hitung'] || 'PCS',
-                                Location: locStr,
-                                level: row['level']?.toString() || '1',
-                                ailee: row['ailee']?.toString() || '',
-                                Zone: row['Zone']?.toString() || 'RACKING',
-                                LocationType: row['Location Type'] || 'RACK',
-                                counter: rawCounter,
-                                Status: row['Status'] || 'Active',
-                                currentRound: parseInt(row['current round']) || 1,
-                                expiredDateSystem: row['expired date by system'] || '',
-                                expiredDateActual: row['expired date by actual'] || '',
-                                Qty: parseInt(row['Qty System'] || row['QTY SYSTEM']) || 0,
-                                unitPrice: parseInt(row['Unit Price'] || '0'),
-                                isCounted,
-                                QTY_ACTUAL: isCounted ? numActQty : null,
-                                updatedAt: new Date().toISOString()
-                            };
-
-                            const taskRef = doc(db, "master_tasks", taskId);
-                            batch.set(taskRef, taskDoc, { merge: true });
-
-                            newMasterList.push({
-                                id: taskId,
-                                ...taskDoc,
-                                countedQty: isCounted ? numActQty : undefined,
-                                Remarks: row['REMARKS'] || ''
                             });
-                        });
-
-                        // TUNGGU BATCH INI SELESAI DULU, BARU LANJUT LOOP BERIKUTNYA
-                        await batch.commit();
-                        setUploadProgress({ current: Math.min(i + CHUNK_SIZE, totalRows), total: totalRows });
+                            await commitBatchWithRetry(cBatch);
+                        }
                     }
 
+                    if (isUploadCancelledRef.current) {
+                        isUploadingRef.current = false;
+                        setUploadProgress(null);
+                        reject("Upload dibatalkan");
+                        return;
+                    }
+
+                    // 2. Persiapkan Chunks Task dengan ukuran aman (250 docs per batch)
+                    const CHUNK_SIZE = 250;
+                    const chunks: { startIndex: number; rows: any[] }[] = [];
+                    for (let i = 0; i < totalRows; i += CHUNK_SIZE) {
+                        chunks.push({
+                            startIndex: i,
+                            rows: json.slice(i, i + CHUNK_SIZE)
+                        });
+                    }
+
+                    const newMasterList: MasterSKUItem[] = new Array(totalRows);
+                    let chunkCursor = 0;
+                    let completedRows = 0;
+
+                    // 3. Worker Pool Paralel (CONCURRENCY = 4) untuk upload super cepat & lancar
+                    const worker = async () => {
+                        while (chunkCursor < chunks.length) {
+                            if (isUploadCancelledRef.current) {
+                                throw new Error("Upload dibatalkan oleh pengguna.");
+                            }
+                            const chunkIndex = chunkCursor++;
+                            const currentChunk = chunks[chunkIndex];
+                            const batch = writeBatch(db);
+
+                            currentChunk.rows.forEach((row: any, idxInChunk: number) => {
+                                const globalIdx = currentChunk.startIndex + idxInChunk;
+                                const rawCounter = (row['counter'] || row['Counter'] || row['COUNTER'] || 'Unassigned').toString().toLowerCase().trim();
+                                const locStr = (row['Location'] || row['LOCATION'] || `LOC-${globalIdx + 1}`).toString().trim();
+                                const skuStr = (row['SKU'] || `SKU-${globalIdx + 1}`).toString().trim();
+
+                                const taskId = `${locStr}_${skuStr}_${globalIdx + 1}`.replace(/\//g, '-');
+
+                                const rawActQty = row['QTY ACTUAL'] ?? row['Qty Actual'] ?? row['ACTUAL QTY'];
+                                const numActQty = parseInt(rawActQty, 10);
+                                const isCounted = rawActQty !== undefined && rawActQty !== null && rawActQty !== '' && !isNaN(numActQty);
+
+                                const taskDoc = {
+                                    Owner: row['Owner'] || 'DDI',
+                                    SKU: skuStr,
+                                    Description: row['Description'] || '',
+                                    UPC1: row['UPC 1']?.toString() || '',
+                                    UPC2: row['UPC 2']?.toString() || '',
+                                    SKUBrand: row['SKU Brand'] || '',
+                                    satuanHitung: row['satuan hitung'] || 'PCS',
+                                    Location: locStr,
+                                    level: row['level']?.toString() || '1',
+                                    ailee: row['ailee']?.toString() || '',
+                                    Zone: row['Zone']?.toString() || 'RACKING',
+                                    LocationType: row['Location Type'] || 'RACK',
+                                    counter: rawCounter,
+                                    Status: row['Status'] || 'Active',
+                                    currentRound: parseInt(row['current round']) || 1,
+                                    expiredDateSystem: row['expired date by system'] || '',
+                                    expiredDateActual: row['expired date by actual'] || '',
+                                    Qty: parseInt(row['Qty System'] || row['QTY SYSTEM']) || 0,
+                                    unitPrice: parseInt(row['Unit Price'] || '0'),
+                                    isCounted,
+                                    QTY_ACTUAL: isCounted ? numActQty : null,
+                                    updatedAt: new Date().toISOString()
+                                };
+
+                                const taskRef = doc(db, "master_tasks", taskId);
+                                batch.set(taskRef, taskDoc, { merge: true });
+
+                                newMasterList[globalIdx] = {
+                                    id: taskId,
+                                    ...taskDoc,
+                                    countedQty: isCounted ? numActQty : undefined,
+                                    Remarks: row['REMARKS'] || ''
+                                };
+                            });
+
+                            await commitBatchWithRetry(batch);
+
+                            completedRows += currentChunk.rows.length;
+                            setUploadProgress({
+                                current: Math.min(completedRows, totalRows),
+                                total: totalRows
+                            });
+                        }
+                    };
+
+                    const CONCURRENCY = 4;
+                    const workerCount = Math.min(CONCURRENCY, chunks.length);
+                    const workers = Array.from({ length: workerCount }, () => worker());
+
+                    await Promise.all(workers);
+
                     if (!isUploadCancelledRef.current) {
+                        isUploadingRef.current = false;
                         setMasterDataList(newMasterList);
                         setUploadProgress(null);
-                        triggerNotification(`🚀 Upload Berhasil! ${totalRows} data sukses diunggah ke Cloud.`);
+                        triggerNotification(`🚀 Upload Berhasil! ${totalRows.toLocaleString('id-ID')} data sukses diunggah ke Cloud.`);
                         resolve(newMasterList);
                     }
                 } catch (err: any) {
-                    console.error("Batch upload error:", err);
+                    isUploadingRef.current = false;
                     setUploadProgress(null);
-                    triggerNotification(`⚠️ Upload terputus / koneksi terganggu: ${err?.message || String(err)}`);
+                    if (!isUploadCancelledRef.current) {
+                        console.error("Batch upload error:", err);
+                        triggerNotification(`⚠️ Upload terputus / koneksi terganggu: ${err?.message || String(err)}`);
+                    }
                     reject(err);
                 }
             };
-            reader.onerror = (err) => reject(err);
+            reader.onerror = (err) => {
+                isUploadingRef.current = false;
+                setUploadProgress(null);
+                reject(err);
+            };
             reader.readAsArrayBuffer(file);
         });
     };
@@ -1363,7 +1436,11 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                         <Loader2 className="w-10 h-10 text-indigo-600 animate-spin mx-auto" />
                         <div>
                             <h3 className="font-black text-slate-900 text-base">Mengunggah Task ke Cloud</h3>
-                            <p className="text-xs text-slate-500 font-medium mt-1">Memproses batch data secara stabil & berurutan...</p>
+                            <p className="text-xs text-slate-500 font-medium mt-1">
+                                {uploadProgress.current === 0
+                                    ? "Mempersiapkan akun & mengoptimalkan antrean..."
+                                    : "Mengunggah data multi-batch secara cepat..."}
+                            </p>
                         </div>
                         <div className="space-y-1.5">
                             <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
@@ -1379,7 +1456,9 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                         <button
                             onClick={() => {
                                 isUploadCancelledRef.current = true;
-                                triggerNotification("Membatalkan proses upload...");
+                                isUploadingRef.current = false;
+                                setUploadProgress(null);
+                                triggerNotification("Upload dibatalkan oleh pengguna.");
                             }}
                             className="w-full py-2 bg-slate-100 hover:bg-red-50 text-slate-600 hover:text-red-600 rounded-xl text-xs font-bold transition-colors cursor-pointer"
                         >
@@ -2091,7 +2170,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                         <label className="px-4 py-2.5 bg-slate-900 text-white rounded-xl text-xs font-bold cursor-pointer flex items-center space-x-2 shrink-0">
                                             <Upload className="w-4 h-4" />
                                             <span>Upload Master</span>
-                                            <input type="file" accept=".xlsx, .xls" className="hidden" onChange={(e) => { if (e.target.files?.[0]) parseXLSXFile(e.target.files[0]); }} />
+                                            <input type="file" accept=".xlsx, .xls" className="hidden" onChange={(e) => { if (e.target.files?.[0]) { const f = e.target.files[0]; e.target.value = ''; parseXLSXFile(f); } }} />
                                         </label>
                                     )}
                                 </div>
