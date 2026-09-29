@@ -167,7 +167,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
     const [credentialsModalText, setCredentialsModalText] = useState<string | null>(null);
     const [auditLogs, setAuditLogs] = useState<any[]>([]);
 
-    // UPLOAD PROGRESS & CANCELLATION REF
+    // UPLOAD PROGRESS & CANCEL REF
     const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number } | null>(null);
     const isUploadCancelledRef = useRef<boolean>(false);
 
@@ -320,7 +320,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
                 triggerNotification("Memulihkan data dari JSON...");
 
-                const CHUNK = 400;
+                const CHUNK = 150;
                 const tasks = backup.masterTasks;
                 for (let i = 0; i < tasks.length; i += CHUNK) {
                     const chunk = tasks.slice(i, i + CHUNK);
@@ -390,7 +390,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     return;
                 }
 
-                const CHUNK = 400;
+                const CHUNK = 150;
                 let count = 0;
                 for (let i = 0; i < json.length; i += CHUNK) {
                     const chunk = json.slice(i, i + CHUNK);
@@ -769,7 +769,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             return;
         }
 
-        const CHUNK = 400;
+        const CHUNK = 150;
         for (let i = 0; i < tasksToMove.length; i += CHUNK) {
             const chunk = tasksToMove.slice(i, i + CHUNK);
             const batch = writeBatch(db);
@@ -864,7 +864,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         acc.email.toLowerCase().includes(ktpSearch.toLowerCase())
     );
 
-    // OPTIMASI PARALEL NGEBUT (CONCURRENCY POOL) DENGAN FITUR CANCEL & ERROR CATCH
+    // PROSES UPLOAD STABIL CHUNKING (CHUNK = 150 DATA PER BATCH)
     const parseXLSXFile = (file: File, currentProjId?: string): Promise<MasterSKUItem[]> => {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
@@ -882,30 +882,27 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     }
 
                     isUploadCancelledRef.current = false;
-                    triggerNotification("Mempersiapkan upload data paralel ke Cloud...");
+                    triggerNotification("Mempersiapkan upload data ke Cloud...");
                     setUploadProgress({ current: 0, total: json.length });
 
-                    const CHUNK_SIZE = 400;
-                    const CONCURRENCY_LIMIT = 6; // Kirim 6 batch sekaligus bersamaan
+                    const CHUNK_SIZE = 150; // MAX 150 DATA * 3 OPS = 450 OPS (PASTI DITERIMA FIRESTORE)
                     const totalRows = json.length;
-                    let completedRows = 0;
-
-                    const pId = currentProjId || activeProject?.id;
                     const newMasterList: MasterSKUItem[] = [];
+                    const pId = currentProjId || activeProject?.id;
 
-                    // Bagi JSON menjadi array of chunks
-                    const chunks: any[][] = [];
                     for (let i = 0; i < totalRows; i += CHUNK_SIZE) {
-                        chunks.push(json.slice(i, i + CHUNK_SIZE));
-                    }
+                        if (isUploadCancelledRef.current) {
+                            triggerNotification("Upload dibatalkan oleh pengguna.");
+                            setUploadProgress(null);
+                            reject("Upload dibatalkan");
+                            return;
+                        }
 
-                    const processChunk = async (chunk: any[], chunkIndex: number) => {
-                        if (isUploadCancelledRef.current) return;
+                        const chunk = json.slice(i, i + CHUNK_SIZE);
                         const batch = writeBatch(db);
-                        const startIndex = chunkIndex * CHUNK_SIZE;
 
                         chunk.forEach((row: any, idxInChunk: number) => {
-                            const globalIdx = startIndex + idxInChunk;
+                            const globalIdx = i + idxInChunk;
                             const rawCounter = (row['counter'] || row['Counter'] || row['COUNTER'] || 'Unassigned').toString().toLowerCase().trim();
                             const locStr = (row['Location'] || row['LOCATION'] || `LOC-${globalIdx + 1}`).toString().trim();
                             const skuStr = (row['SKU'] || `SKU-${globalIdx + 1}`).toString().trim();
@@ -972,26 +969,13 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                         });
 
                         await batch.commit();
-                        completedRows = Math.min(completedRows + chunk.length, totalRows);
-                        setUploadProgress({ current: completedRows, total: totalRows });
-                    };
-
-                    // Eksekusi Pool Concurrency
-                    for (let i = 0; i < chunks.length; i += CONCURRENCY_LIMIT) {
-                        if (isUploadCancelledRef.current) {
-                            triggerNotification("Upload dibatalkan oleh pengguna.");
-                            setUploadProgress(null);
-                            reject("Upload dibatalkan");
-                            return;
-                        }
-                        const batchGroup = chunks.slice(i, i + CONCURRENCY_LIMIT);
-                        await Promise.all(batchGroup.map((chunk, idxInGroup) => processChunk(chunk, i + idxInGroup)));
+                        setUploadProgress({ current: Math.min(i + CHUNK_SIZE, totalRows), total: totalRows });
                     }
 
                     if (!isUploadCancelledRef.current) {
                         setMasterDataList(newMasterList);
                         setUploadProgress(null);
-                        triggerNotification(`🚀 Upload Selesai Ngebut! ${totalRows} data berhasil diproses.`);
+                        triggerNotification(`🚀 Upload Berhasil! ${totalRows} data sukses diunggah ke Cloud.`);
                         resolve(newMasterList);
                     }
                 } catch (err: any) {
@@ -1100,7 +1084,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         triggerNotification(`Membuka Dashboard Project "${proj.sessionCode}"`);
     };
 
-    // PROSES HAPUS PROJECT BERSIH TOTAL SECARA PARALEL CHUNK
     const handleConfirmDeleteProject = async () => {
         if (!projectToDelete) return;
 
@@ -1110,7 +1093,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             await deleteDoc(doc(db, "projects", projectToDelete.id));
 
             const tasksSnap = await getDocs(collection(db, "master_tasks"));
-            const CHUNK = 400;
+            const CHUNK = 150;
             const taskDocs = tasksSnap.docs;
 
             for (let i = 0; i < taskDocs.length; i += CHUNK) {
@@ -1347,8 +1330,8 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     <div className="bg-white rounded-3xl p-6 max-w-sm w-full text-center space-y-4 shadow-2xl border border-slate-100">
                         <Loader2 className="w-10 h-10 text-indigo-600 animate-spin mx-auto" />
                         <div>
-                            <h3 className="font-black text-slate-900 text-base">Mengunggah Task ke Cloud (Ngebut)</h3>
-                            <p className="text-xs text-slate-500 font-medium mt-1">Memproses beberapa batch secara paralel...</p>
+                            <h3 className="font-black text-slate-900 text-base">Mengunggah Task ke Cloud</h3>
+                            <p className="text-xs text-slate-500 font-medium mt-1">Memproses batch data secara stabil & berurutan...</p>
                         </div>
                         <div className="space-y-1.5">
                             <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
