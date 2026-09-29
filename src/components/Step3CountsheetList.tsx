@@ -13,6 +13,7 @@ interface Step3CountsheetListProps {
 
 export default function Step3CountsheetList({ sessionData, onSelectRack, onLogout, onEditTeam }: Step3CountsheetListProps) {
   const [racks, setRacks] = useState<RackItem[]>([]);
+  const [activeProject, setActiveProject] = useState<any>(null);
   const [activeFilter, setActiveFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
@@ -27,8 +28,27 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
     isOpen: false, title: '', message: '',
   });
 
+  // 1. LISTEN PROJECT AKTIF BERSTATU "LIVE_ACTIVE" DARI FIRESTORE
   useEffect(() => {
-    const lockDocId = sessionData.sessionCode || sessionData.sessionId || "SO-WRG-2026-09";
+    const qProjects = query(collection(db, "projects"), where("status", "==", "LIVE_ACTIVE"));
+    const unsubProjects = onSnapshot(qProjects, (snap) => {
+      if (!snap.empty) {
+        // Ambil project aktif terbaru
+        const projData = snap.docs[0].data();
+        setActiveProject({ id: snap.docs[0].id, ...projData });
+      } else {
+        // JIKA ADMIN MENGHAPUS PROJECT, DETEKSI OTOMATIS & BERSIHKAN DATA
+        setActiveProject(null);
+        setRacks([]);
+      }
+    });
+
+    return () => unsubProjects();
+  }, []);
+
+  // 2. LISTEN GEMBOK LOCK SESI
+  useEffect(() => {
+    const lockDocId = activeProject?.sessionCode || sessionData.sessionCode || sessionData.sessionId || "SO-WRG-2026-09";
     const lockRef = doc(db, "round_locks", lockDocId);
 
     const unsub = onSnapshot(lockRef, (docSnap) => {
@@ -44,9 +64,16 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
       }
     });
     return () => unsub();
-  }, [sessionData.sessionCode, sessionData.sessionId, sessionData.primaryCounter]);
+  }, [activeProject, sessionData.sessionCode, sessionData.sessionId, sessionData.primaryCounter]);
 
+  // 3. LISTEN MASTER TASKS HANYA JIKA ADA PROJECT AKTIF
   useEffect(() => {
+    // JIKA TIDAK ADA PROJECT AKTIF DI CLOUD, KOSONGKAN LIST RAK
+    if (!activeProject) {
+      setRacks([]);
+      return;
+    }
+
     const primaryCounter = (sessionData.primaryCounter || "Unassigned").toLowerCase().trim();
     const qTasks = query(
       collection(db, "master_tasks"),
@@ -105,7 +132,7 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
     });
 
     return () => unsubscribe();
-  }, [sessionData]);
+  }, [activeProject, sessionData]);
 
   // PROSES TAMBAH RAK/BIN BARU KE FIRESTORE
   const handleCreateNewRack = async () => {
@@ -172,7 +199,7 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
         title: 'Konfirmasi Selesai Perhitungan Rak',
         message: 'Seluruh hasil perhitungan fisik kamu telah tersimpan dan ter-sync ke server WMS pusat.',
         details: [
-          { label: 'Sesi Aktif', value: sessionData.sessionName || 'SO Sesi Utama 2026' },
+          { label: 'Sesi Aktif', value: activeProject?.sessionCode || sessionData.sessionName },
           { label: 'Counter Active', value: sessionData.primaryCounter || 'bambang' },
           { label: 'Total Rak Selesai', value: `${completedCount} / ${totalRacks} Rak` },
           { label: 'Rak Berjalan/Pending', value: `${inProgressCount + pendingCount} Rak` },
@@ -259,133 +286,150 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
 
       <main className="flex-1 flex flex-col relative w-full pt-20 pb-28 px-gutter-sm bg-surface max-w-md mx-auto">
         <div className="flex flex-col w-full pb-8 gap-space-md">
-          {isSessionLocked && (
+
+          {/* PERINGATAN JIKA TIDAK ADA PROJECT AKTIF DI CLOUD */}
+          {!activeProject && (
+            <div className="bg-amber-50 border border-amber-200 text-amber-900 p-5 rounded-2xl flex flex-col items-center text-center space-y-2 shadow-xs my-4">
+              <span className="material-symbols-outlined text-amber-600 text-3xl">info</span>
+              <h3 className="font-bold text-sm">Tidak Ada Sesi Opname Aktif</h3>
+              <p className="text-xs text-amber-800/80 leading-relaxed">
+                Project sebelumnya telah dihapus/ditutup oleh Owner. Silakan tunggu Owner meluncurkan project sesi baru.
+              </p>
+            </div>
+          )}
+
+          {isSessionLocked && activeProject && (
             <div className="bg-red-50 border border-red-200 text-red-700 p-3 rounded-xl flex items-center gap-2 text-xs font-bold shadow-xs">
               <span className="material-symbols-outlined text-red-600 text-[18px]">lock</span>
               <span>Sesi Terkunci oleh Admin Pusat. Input/edit hitungan fisik dinonaktifkan.</span>
             </div>
           )}
 
-          <div className="bg-surface-container-lowest rounded-xl p-space-md shadow-sm border border-outline-variant/30 flex flex-col gap-space-sm">
-            <div className="flex items-center justify-between gap-space-xs">
-              <div className="flex items-center gap-space-xs min-w-0">
-                <span className="material-symbols-outlined text-secondary text-[20px] shrink-0">warehouse</span>
-                <h2 className="font-headline-sm text-headline-sm text-on-surface truncate">
-                  {sessionData.sessionName || "SO Sesi Utama 2026"}
-                </h2>
-              </div>
-            </div>
-            <div className="flex items-center justify-between flex-wrap gap-2 pt-space-xs border-t border-surface-container-low">
-              <div className="inline-flex items-center gap-1.5 bg-surface-container-low px-2.5 py-1 rounded-full">
-                <span className="text-xs">👥</span>
-                <span className="font-label-sm text-label-sm text-on-surface-variant font-medium truncate">
-                  Counter: <b className="text-slate-900">{sessionData.primaryCounter}</b>
-                  {partnerName ? <span className="text-slate-500"> • Pendamping: <b className="text-slate-800">{partnerName}</b></span> : null}
-                </span>
-                <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>
-              </div>
-
-              {onEditTeam && (
-                <button
-                  type="button"
-                  onClick={onEditTeam}
-                  className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-bold flex items-center gap-1 border border-slate-300 transition-colors cursor-pointer"
-                >
-                  <span className="material-symbols-outlined text-[12px]">edit</span>
-                  <span>Edit Tim</span>
-                </button>
-              )}
-            </div>
-          </div>
-
-          <div className="bg-surface-container-lowest rounded-xl p-space-md shadow-sm border border-outline-variant/30 flex flex-col gap-space-sm">
-            <div className="flex items-start justify-between">
-              <div>
-                <span className="font-label-md text-label-md text-on-surface-variant block uppercase tracking-wide">Ringkasan Tugas Kamu</span>
-                <h3 className="font-headline-sm text-headline-sm text-on-surface font-bold">Progress Perhitungan</h3>
-              </div>
-              <div className="flex flex-col items-end">
-                <span className="font-headline-lg-mobile text-headline-lg-mobile text-secondary font-bold leading-none">{progressPercent}%</span>
-                <span className="font-label-sm text-label-sm text-on-surface-variant">{completedCount} / {totalRacks} Rak</span>
-              </div>
-            </div>
-            <div className="w-full bg-surface-container-high h-2.5 rounded-full overflow-hidden flex">
-              <div className="bg-secondary h-full rounded-full transition-all duration-500" style={{ width: `${progressPercent}%` }}></div>
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-space-sm">
-            <div className="flex gap-2">
-              <div className="relative flex-1">
-                <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline text-[20px] pointer-events-none">search</span>
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Cari nomor rak atau zona..."
-                  className="w-full h-11 pl-10 pr-4 bg-surface-container-lowest rounded-xl font-body-md text-body-md shadow-sm border border-outline-variant/30 outline-none"
-                />
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowAddRackModal(true)}
-                className="px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-1 shadow-md cursor-pointer shrink-0"
-              >
-                <span>+ Rak Baru</span>
-              </button>
-            </div>
-
-            <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none">
-              <button type="button" onClick={() => setActiveFilter('all')} className={`flex items-center gap-1 px-3.5 py-1.5 rounded-full font-label-md text-label-md shadow-sm shrink-0 transition-colors cursor-pointer ${activeFilter === 'all' ? 'bg-secondary text-on-secondary' : 'bg-surface-container-lowest text-on-surface-variant border border-outline-variant/30'}`}>Semua ({totalRacks})</button>
-              <button type="button" onClick={() => setActiveFilter('completed')} className={`flex items-center gap-1 px-3.5 py-1.5 rounded-full font-label-md text-label-md shadow-sm shrink-0 transition-colors cursor-pointer ${activeFilter === 'completed' ? 'bg-secondary text-on-secondary' : 'bg-surface-container-lowest text-on-surface-variant border border-outline-variant/30'}`}>Selesai ({completedCount})</button>
-              <button type="button" onClick={() => setActiveFilter('in_progress')} className={`flex items-center gap-1 px-3.5 py-1.5 rounded-full font-label-md text-label-md shadow-sm shrink-0 transition-colors cursor-pointer ${activeFilter === 'in_progress' ? 'bg-secondary text-on-secondary' : 'bg-surface-container-lowest text-on-surface-variant border border-outline-variant/30'}`}>Berjalan ({inProgressCount})</button>
-              <button type="button" onClick={() => setActiveFilter('pending')} className={`flex items-center gap-1 px-3.5 py-1.5 rounded-full font-label-md text-label-md shadow-sm shrink-0 transition-colors cursor-pointer ${activeFilter === 'pending' ? 'bg-secondary text-on-secondary' : 'bg-surface-container-lowest text-on-surface-variant border border-outline-variant/30'}`}>Pending ({pendingCount})</button>
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-space-sm">
-            {filteredRacks.map((rack) => (
-              <div key={rack.id} onClick={() => onSelectRack(rack)} className="bg-surface-container-lowest rounded-xl p-space-md shadow-sm border border-outline-variant/30 flex flex-col gap-3 cursor-pointer hover:border-secondary/50 transition-all relative overflow-hidden">
-                {rack.status === 'in-progress' && <div className="absolute left-0 top-0 bottom-0 w-1 bg-amber-500"></div>}
-                <div className={`flex items-start justify-between gap-space-xs ${rack.status === 'in-progress' ? 'pl-1' : ''}`}>
-                  <div className="flex flex-col min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <span className="material-symbols-outlined text-[18px] text-indigo-600">shelves</span>
-                      <h4 className="font-headline-sm text-headline-sm text-on-surface truncate">Rak {rack.rackNumber}</h4>
-                    </div>
-                    <p className="font-body-sm text-body-sm text-on-surface-variant mt-0.5">{rack.countedSKU} / {rack.totalSKU} SKU Dihitung • Zone: {rack.zone}</p>
+          {activeProject && (
+            <>
+              <div className="bg-surface-container-lowest rounded-xl p-space-md shadow-sm border border-outline-variant/30 flex flex-col gap-space-sm">
+                <div className="flex items-center justify-between gap-space-xs">
+                  <div className="flex items-center gap-space-xs min-w-0">
+                    <span className="material-symbols-outlined text-secondary text-[20px] shrink-0">warehouse</span>
+                    <h2 className="font-headline-sm text-headline-sm text-on-surface truncate">
+                      {activeProject.sessionCode} — {activeProject.locationName}
+                    </h2>
                   </div>
-                  {rack.status === 'completed' && <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-800 font-label-sm text-label-sm px-2.5 py-1 rounded-full shrink-0 border border-emerald-200"><span className="material-symbols-outlined text-[14px] text-emerald-700 font-bold">check</span> Selesai</span>}
-                  {rack.status === 'in-progress' && <span className="inline-flex items-center gap-1.5 bg-amber-50 text-amber-900 font-label-sm text-label-sm px-2.5 py-1 rounded-full shrink-0 border border-amber-200"><span className="w-1.5 h-1.5 rounded-full bg-amber-600 animate-pulse"></span> Sedang Dihitung</span>}
-                  {rack.status === 'pending' && <span className="inline-flex items-center gap-1 bg-surface-container-high text-on-surface-variant font-label-sm text-label-sm px-2.5 py-1 rounded-full shrink-0"><span className="w-1.5 h-1.5 rounded-full bg-outline"></span> Belum Mulai</span>}
+                </div>
+                <div className="flex items-center justify-between flex-wrap gap-2 pt-space-xs border-t border-surface-container-low">
+                  <div className="inline-flex items-center gap-1.5 bg-surface-container-low px-2.5 py-1 rounded-full">
+                    <span className="text-xs">👥</span>
+                    <span className="font-label-sm text-label-sm text-on-surface-variant font-medium truncate">
+                      Counter: <b className="text-slate-900">{sessionData.primaryCounter}</b>
+                      {partnerName ? <span className="text-slate-500"> • Pendamping: <b className="text-slate-800">{partnerName}</b></span> : null}
+                    </span>
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>
+                  </div>
+
+                  {onEditTeam && (
+                    <button
+                      type="button"
+                      onClick={onEditTeam}
+                      className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-bold flex items-center gap-1 border border-slate-300 transition-colors cursor-pointer"
+                    >
+                      <span className="material-symbols-outlined text-[12px]">edit</span>
+                      <span>Edit Tim</span>
+                    </button>
+                  )}
                 </div>
               </div>
-            ))}
-            {filteredRacks.length === 0 && (
-              <div className="p-8 text-center text-slate-400 font-medium">Belum ada tugas rak untuk akun kamu ({sessionData.primaryCounter}).</div>
-            )}
-          </div>
 
-          <div className="flex flex-col gap-2 pt-2">
-            <button
-              type="button"
-              disabled={isSubmitting}
-              onClick={handleConfirmCompletion}
-              className="w-full h-12 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-lg cursor-pointer transition-colors"
-            >
-              {isSubmitting ? (
-                <>
-                  <span className="material-symbols-outlined text-[18px] animate-spin">progress_activity</span>
-                  <span>Memverifikasi Rak...</span>
-                </>
-              ) : (
-                <>
-                  <span className="material-symbols-outlined text-[18px] text-emerald-400">check_circle</span>
-                  <span>Konfirmasi Selesai Perhitungan Rak</span>
-                </>
-              )}
-            </button>
-          </div>
+              <div className="bg-surface-container-lowest rounded-xl p-space-md shadow-sm border border-outline-variant/30 flex flex-col gap-space-sm">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <span className="font-label-md text-label-md text-on-surface-variant block uppercase tracking-wide">Ringkasan Tugas Kamu</span>
+                    <h3 className="font-headline-sm text-headline-sm text-on-surface font-bold">Progress Perhitungan</h3>
+                  </div>
+                  <div className="flex flex-col items-end">
+                    <span className="font-headline-lg-mobile text-headline-lg-mobile text-secondary font-bold leading-none">{progressPercent}%</span>
+                    <span className="font-label-sm text-label-sm text-on-surface-variant">{completedCount} / {racks.length} Rak</span>
+                  </div>
+                </div>
+                <div className="w-full bg-surface-container-high h-2.5 rounded-full overflow-hidden flex">
+                  <div className="bg-secondary h-full rounded-full transition-all duration-500" style={{ width: `${progressPercent}%` }}></div>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-space-sm">
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline text-[20px] pointer-events-none">search</span>
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="Cari nomor rak atau zona..."
+                      className="w-full h-11 pl-10 pr-4 bg-surface-container-lowest rounded-xl font-body-md text-body-md shadow-sm border border-outline-variant/30 outline-none"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowAddRackModal(true)}
+                    className="px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-1 shadow-md cursor-pointer shrink-0"
+                  >
+                    <span>+ Rak Baru</span>
+                  </button>
+                </div>
+
+                <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none">
+                  <button type="button" onClick={() => setActiveFilter('all')} className={`flex items-center gap-1 px-3.5 py-1.5 rounded-full font-label-md text-label-md shadow-sm shrink-0 transition-colors cursor-pointer ${activeFilter === 'all' ? 'bg-secondary text-on-secondary' : 'bg-surface-container-lowest text-on-surface-variant border border-outline-variant/30'}`}>Semua ({racks.length})</button>
+                  <button type="button" onClick={() => setActiveFilter('completed')} className={`flex items-center gap-1 px-3.5 py-1.5 rounded-full font-label-md text-label-md shadow-sm shrink-0 transition-colors cursor-pointer ${activeFilter === 'completed' ? 'bg-secondary text-on-secondary' : 'bg-surface-container-lowest text-on-surface-variant border border-outline-variant/30'}`}>Selesai ({completedCount})</button>
+                  <button type="button" onClick={() => setActiveFilter('in_progress')} className={`flex items-center gap-1 px-3.5 py-1.5 rounded-full font-label-md text-label-md shadow-sm shrink-0 transition-colors cursor-pointer ${activeFilter === 'in_progress' ? 'bg-secondary text-on-secondary' : 'bg-surface-container-lowest text-on-surface-variant border border-outline-variant/30'}`}>Berjalan ({inProgressCount})</button>
+                  <button type="button" onClick={() => setActiveFilter('pending')} className={`flex items-center gap-1 px-3.5 py-1.5 rounded-full font-label-md text-label-md shadow-sm shrink-0 transition-colors cursor-pointer ${activeFilter === 'pending' ? 'bg-secondary text-on-secondary' : 'bg-surface-container-lowest text-on-surface-variant border border-outline-variant/30'}`}>Pending ({pendingCount})</button>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-space-sm">
+                {filteredRacks.map((rack) => (
+                  <div key={rack.id} onClick={() => onSelectRack(rack)} className="bg-surface-container-lowest rounded-xl p-space-md shadow-sm border border-outline-variant/30 flex flex-col gap-3 cursor-pointer hover:border-secondary/50 transition-all relative overflow-hidden">
+                    {rack.status === 'in-progress' && <div className="absolute left-0 top-0 bottom-0 w-1 bg-amber-500"></div>}
+                    <div className={`flex items-start justify-between gap-space-xs ${rack.status === 'in-progress' ? 'pl-1' : ''}`}>
+                      <div className="flex flex-col min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="material-symbols-outlined text-[18px] text-indigo-600">shelves</span>
+                          <h4 className="font-headline-sm text-headline-sm text-on-surface truncate">Rak {rack.rackNumber}</h4>
+                        </div>
+                        <p className="font-body-sm text-body-sm text-on-surface-variant mt-0.5">{rack.countedSKU} / {rack.totalSKU} SKU Dihitung • Zone: {rack.zone}</p>
+                      </div>
+                      {rack.status === 'completed' && <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-800 font-label-sm text-label-sm px-2.5 py-1 rounded-full shrink-0 border border-emerald-200"><span className="material-symbols-outlined text-[14px] text-emerald-700 font-bold">check</span> Selesai</span>}
+                      {rack.status === 'in-progress' && <span className="inline-flex items-center gap-1.5 bg-amber-50 text-amber-900 font-label-sm text-label-sm px-2.5 py-1 rounded-full shrink-0 border border-amber-200"><span className="w-1.5 h-1.5 rounded-full bg-amber-600 animate-pulse"></span> Sedang Dihitung</span>}
+                      {rack.status === 'pending' && <span className="inline-flex items-center gap-1 bg-surface-container-high text-on-surface-variant font-label-sm text-label-sm px-2.5 py-1 rounded-full shrink-0"><span className="w-1.5 h-1.5 rounded-full bg-outline"></span> Belum Mulai</span>}
+                    </div>
+                  </div>
+                ))}
+                {filteredRacks.length === 0 && (
+                  <div className="p-8 text-center text-slate-400 font-medium">Belum ada tugas rak untuk akun kamu ({sessionData.primaryCounter}).</div>
+                )}
+              </div>
+
+              <div className="flex flex-col gap-2 pt-2">
+                <button
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={handleConfirmCompletion}
+                  className="w-full h-12 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-lg cursor-pointer transition-colors"
+                >
+                  {isSubmitting ? (
+                    <>
+                      <span className="material-symbols-outlined text-[18px] animate-spin">progress_activity</span>
+                      <span>Memverifikasi Rak...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="material-symbols-outlined text-[18px] text-emerald-400">check_circle</span>
+                      <span>Konfirmasi Selesai Perhitungan Rak</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </>
+          )}
+
         </div>
       </main>
     </div>
