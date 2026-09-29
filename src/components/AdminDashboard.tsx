@@ -1517,7 +1517,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
     }, [filteredDiscrepancies, reconCurrentPage]);
 
     return (
-        <div className="min-h-screen bg-slate-50 text-slate-800 p-4 lg:p-8 max-w-7xl mx-auto font-sans relative">
+        <div className={`min-h-screen bg-slate-50 text-slate-800 font-sans relative ${viewState === 'DASHBOARD' ? 'w-full p-0 max-w-none' : 'p-4 lg:p-8 max-w-7xl mx-auto'}`}>
             {/* OVERLAY MODAL UPLOAD PROGRESS DENGAN TOMBOL CANCEL */}
             {uploadProgress && (
                 <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-md z-50 flex items-center justify-center p-4">
@@ -1737,8 +1737,8 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 <div className="space-y-6 animate-in fade-in duration-500">
                     <div className="bg-white p-6 rounded-3xl shadow-xl shadow-slate-200/40 border border-slate-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-5 relative overflow-hidden">
                         <div className="flex items-center space-x-4 relative z-10">
-                            <div className="w-14 h-14 bg-white rounded-2xl shadow-md border border-slate-100 p-1 flex items-center justify-center overflow-hidden shrink-0">
-                                <img src="/logo.png" alt="Noctus Count Logo" className="w-full h-full object-contain" />
+                            <div className="w-14 h-14 rounded-full bg-slate-950 p-2.5 flex items-center justify-center shadow-lg border border-slate-800 shrink-0">
+                                <img src="/logo.png" alt="Noctus Count Logo" className="w-full h-full object-contain filter drop-shadow-sm" />
                             </div>
                             <div>
                                 <h1 className="text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2">
@@ -1989,25 +1989,23 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 </div>
             )}
 
-            {/* SCREEN 3: DASHBOARD MAIN - EXECUTIVE TABLET LAYOUT */}
+            {/* SCREEN 3: DASHBOARD MAIN - FULL SCREEN EDGE-TO-EDGE */}
             {viewState === 'DASHBOARD' && activeProject && (
-                <div className="bg-[#0B0F17] p-2.5 sm:p-5 rounded-[28px] sm:rounded-[36px] shadow-2xl border border-slate-800/80 animate-in fade-in duration-500">
-                    {/* INNER CONTAINER / CANVAS */}
-                    <div className="bg-[#F8FAFC] rounded-[20px] sm:rounded-[28px] overflow-hidden flex flex-col min-h-[850px] shadow-inner border border-slate-700/30">
-                        {/* EXECUTIVE TABLET TOP BAR */}
-                        <div className="bg-white px-4 py-3.5 sm:px-6 sm:py-4 border-b border-slate-200/80 flex flex-col xl:flex-row justify-between xl:items-center gap-4 shrink-0 shadow-xs">
-                            {/* LEFT: Back, Logo, Project Code & Warehouse */}
-                            <div className="flex items-center space-x-3.5 shrink-0">
-                                <button
-                                    onClick={() => setViewState('LANDING')}
-                                    title="Kembali ke Daftar Project"
-                                    className="p-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl cursor-pointer transition-colors text-slate-700 shrink-0"
-                                >
-                                    <ArrowLeft className="w-4 h-4" />
-                                </button>
-                                <div className="w-10 h-10 bg-white rounded-xl shadow-xs border border-slate-200/70 p-1 flex items-center justify-center overflow-hidden shrink-0">
-                                    <img src="/logo.png" alt="Noctus Count Logo" className="w-full h-full object-contain" />
-                                </div>
+                <div className="w-full min-h-screen bg-slate-100 flex flex-col animate-in fade-in duration-300">
+                    {/* EXECUTIVE TOP BAR (FULL WIDTH) */}
+                    <div className="bg-white px-4 py-3 sm:px-6 sm:py-3.5 border-b border-slate-200/90 flex flex-col xl:flex-row justify-between xl:items-center gap-4 shrink-0 shadow-xs sticky top-0 z-30">
+                        {/* LEFT: Back, Logo, Project Code & Warehouse */}
+                        <div className="flex items-center space-x-3.5 shrink-0">
+                            <button
+                                onClick={() => setViewState('LANDING')}
+                                title="Kembali ke Daftar Project"
+                                className="p-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl cursor-pointer transition-colors text-slate-700 shrink-0"
+                            >
+                                <ArrowLeft className="w-4 h-4" />
+                            </button>
+                            <div className="w-11 h-11 rounded-full bg-slate-950 p-2 flex items-center justify-center shadow-md border border-slate-800 shrink-0">
+                                <img src="/logo.png" alt="Noctus Count Logo" className="w-full h-full object-contain filter drop-shadow-sm" />
+                            </div>
                                 <div>
                                     <div className="flex items-center space-x-2">
                                         <span className="text-sm font-black tracking-tight text-slate-900 font-mono">
@@ -2098,55 +2096,55 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                             </div>
                         </div>
 
-                        {/* MAIN BODY: SLIM ICON SIDEBAR + CONTENT AREA */}
-                        <div className="flex flex-1 flex-col md:flex-row overflow-hidden">
-                            {/* SLIM ICON SIDEBAR (EXECUTIVE DARK) */}
-                            <div className="w-full md:w-16 bg-[#0F172A] flex md:flex-col items-center justify-between p-2 md:py-5 border-r border-slate-800/80 shrink-0">
-                                {/* NAV ICONS */}
-                                <div className="flex md:flex-col items-center space-x-2 md:space-x-0 md:space-y-3 overflow-x-auto md:overflow-x-visible w-full md:w-auto px-2 md:px-0">
-                                    {orderedTabs.map(t => {
-                                        const isActive = activeTab === t.id;
-                                        const IconComponent = t.icon;
-                                        return (
-                                            <button
-                                                key={t.id}
-                                                onClick={() => setActiveTab(t.id)}
-                                                title={t.label}
-                                                className={`w-10 h-10 rounded-xl flex items-center justify-center cursor-pointer transition-all ${
-                                                    isActive
-                                                        ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 ring-2 ring-indigo-400/40'
-                                                        : 'text-slate-400 hover:text-white hover:bg-slate-800/70'
-                                                }`}
-                                            >
-                                                <IconComponent className="w-4 h-4" />
-                                            </button>
-                                        );
-                                    })}
-                                </div>
-
-                                {/* BOTTOM ICON ACTIONS */}
-                                <div className="hidden md:flex flex-col items-center space-y-3 pt-4 border-t border-slate-800/60">
-                                    {onSwitchToCounterView && (
+                    {/* MAIN BODY: SLIM ICON SIDEBAR + FULL WIDTH EXPANSIVE CONTENT */}
+                    <div className="flex flex-1 flex-col md:flex-row min-h-[calc(100vh-65px)]">
+                        {/* SLIM ICON SIDEBAR (EXECUTIVE DARK) */}
+                        <div className="w-full md:w-16 bg-[#0F172A] flex md:flex-col items-center justify-between p-2 md:py-6 border-r border-slate-800 shrink-0">
+                            {/* NAV ICONS */}
+                            <div className="flex md:flex-col items-center space-x-2 md:space-x-0 md:space-y-3 overflow-x-auto md:overflow-x-visible w-full md:w-auto px-2 md:px-0">
+                                {orderedTabs.map(t => {
+                                    const isActive = activeTab === t.id;
+                                    const IconComponent = t.icon;
+                                    return (
                                         <button
-                                            onClick={onSwitchToCounterView}
-                                            title="Buka Mode Counter"
-                                            className="w-10 h-10 rounded-xl flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800/70 transition-all cursor-pointer"
+                                            key={t.id}
+                                            onClick={() => setActiveTab(t.id)}
+                                            title={t.label}
+                                            className={`w-10 h-10 rounded-xl flex items-center justify-center cursor-pointer transition-all ${
+                                                isActive
+                                                    ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 ring-2 ring-indigo-400/40'
+                                                    : 'text-slate-400 hover:text-white hover:bg-slate-800/70'
+                                            }`}
                                         >
-                                            <Smartphone className="w-4 h-4" />
+                                            <IconComponent className="w-4 h-4" />
                                         </button>
-                                    )}
-                                    <button
-                                        onClick={() => setViewState('LANDING')}
-                                        title="Keluar ke Daftar Project"
-                                        className="w-10 h-10 rounded-xl flex items-center justify-center text-slate-400 hover:text-red-400 hover:bg-slate-800/70 transition-all cursor-pointer"
-                                    >
-                                        <LogOut className="w-4 h-4" />
-                                    </button>
-                                </div>
+                                    );
+                                })}
                             </div>
 
-                            {/* CONTENT AREA */}
-                            <div className="flex-1 p-4 sm:p-6 overflow-y-auto max-h-[calc(100vh-140px)] space-y-6">
+                            {/* BOTTOM ICON ACTIONS */}
+                            <div className="hidden md:flex flex-col items-center space-y-3 pt-4 border-t border-slate-800/60">
+                                {onSwitchToCounterView && (
+                                    <button
+                                        onClick={onSwitchToCounterView}
+                                        title="Buka Mode Counter"
+                                        className="w-10 h-10 rounded-xl flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800/70 transition-all cursor-pointer"
+                                    >
+                                        <Smartphone className="w-4 h-4" />
+                                    </button>
+                                )}
+                                <button
+                                    onClick={() => setViewState('LANDING')}
+                                    title="Keluar ke Daftar Project"
+                                    className="w-10 h-10 rounded-xl flex items-center justify-center text-slate-400 hover:text-red-400 hover:bg-slate-800/70 transition-all cursor-pointer"
+                                >
+                                    <LogOut className="w-4 h-4" />
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* CONTENT AREA (EXPANSIVE FULL WIDTH LAPTOP VIEW) */}
+                        <div className="flex-1 p-4 sm:p-6 lg:p-8 space-y-6 overflow-x-hidden min-w-0 bg-slate-50">
                                 {/* TAB 1: PROGRESS & ANALYTICS (EXECUTIVE 12-COL GRID) */}
                                 {activeTab === 'progress' && (
                                     <div className="space-y-6">
@@ -2958,16 +2956,17 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                             </div>
                         </div>
                     )}
-                            </div>
                         </div>
                     </div>
                 </div>
             )}
 
             {/* TRADEMARK FOOTER */}
-            <div className="pt-8 pb-4 text-center border-t border-slate-200/60 mt-12">
+            <div className={`pt-8 pb-4 text-center border-t border-slate-200/60 ${viewState === 'DASHBOARD' ? 'mt-8 px-6 bg-slate-100' : 'mt-12'}`}>
                 <div className="flex items-center justify-center gap-2 mb-1">
-                    <img src="/logo.png" alt="Noctus Count Logo" className="w-5 h-5 object-contain" />
+                    <div className="w-6 h-6 rounded-full bg-slate-950 p-1 flex items-center justify-center shadow-xs border border-slate-800">
+                        <img src="/logo.png" alt="Noctus Count Logo" className="w-full h-full object-contain" />
+                    </div>
                     <span className="text-xs font-black text-slate-800 tracking-wider">NOCTUS COUNT™</span>
                 </div>
                 <p className="text-[11px] text-slate-400 font-medium">

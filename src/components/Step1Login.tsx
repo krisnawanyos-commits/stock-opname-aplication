@@ -100,8 +100,8 @@ export default function Step1Login({ onSuccessLogin }: Step1LoginProps) {
     <div className="bg-slate-900 font-sans min-h-screen flex flex-col justify-center items-center p-4">
       <div className="w-full max-w-sm bg-white rounded-3xl p-6 shadow-2xl space-y-6">
         <div className="text-center space-y-2">
-          <div className="w-20 h-20 bg-white rounded-3xl flex items-center justify-center mx-auto shadow-xl shadow-indigo-500/10 border border-slate-100 p-2 overflow-hidden">
-            <img src="/logo.png" alt="Noctus Count Logo" className="w-full h-full object-contain" />
+          <div className="w-20 h-20 bg-slate-950 rounded-full flex items-center justify-center mx-auto shadow-2xl shadow-black/30 border-2 border-slate-800 p-3.5">
+            <img src="/logo.png" alt="Noctus Count Logo" className="w-full h-full object-contain filter drop-shadow-md" />
           </div>
           <h1 className="text-2xl font-black text-slate-900 pt-1 tracking-tight">Noctus Count</h1>
           <p className="text-xs text-slate-500 font-medium">Masukan Username &amp; PIN Akses Kamu</p>

@@ -269,7 +269,9 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
                 <h1 className="font-headline-sm text-headline-sm text-on-surface truncate leading-tight">Countsheet List</h1>
               </div>
               <span className="font-label-md text-label-md text-on-surface-variant truncate flex items-center gap-1.5">
-                <img src="/logo.png" alt="Noctus Logo" className="w-3.5 h-3.5 object-contain inline" />
+                <span className="w-4 h-4 rounded-full bg-slate-950 p-0.5 inline-flex items-center justify-center shrink-0 border border-slate-800">
+                  <img src="/logo.png" alt="Noctus Logo" className="w-full h-full object-contain" />
+                </span>
                 <span>Noctus Count™</span>
               </span>
             </div>
