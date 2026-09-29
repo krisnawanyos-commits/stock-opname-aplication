@@ -7,6 +7,7 @@ import Step3CountsheetList from './components/Step3CountsheetList';
 import Step4CountDetail from './components/Step4CountDetail';
 import AdminDashboard from './components/AdminDashboard';
 import type { SessionData, RackItem, UserRole } from './types';
+import { AlertTriangle, LogOut } from 'lucide-react';
 
 const STORAGE_KEYS = {
   STEP: 'stock_opname_step',
@@ -70,6 +71,9 @@ export default function App() {
     return null;
   });
 
+  // STATE UNTUK POP-UP MODAL LOGOUT APLIKASI
+  const [showLogoutModal, setShowLogoutModal] = useState<boolean>(false);
+
   // LISTEN ROLE REAL-TIME DARI FIRESTORE UNTUK USER AKTIF
   useEffect(() => {
     if (!currentUser?.username) return;
@@ -128,15 +132,14 @@ export default function App() {
     }
   }, [currentStep, sessionData, selectedRack, currentUser]);
 
-  // LOGOUT DENGAN DIALOG PROTEKSI KONFIRMASI
-  const handleLogout = (force = false) => {
-    if (!force) {
-      const confirmed = window.confirm(
-        "⚠️ YAKIN INGIN KELUAR?\n\nPastikan kamu sudah menekan tombol 'Simpan' pada rak yang sedang dihitung agar data ketikan kamu tidak hilang."
-      );
-      if (!confirmed) return;
-    }
+  // FUNGSI TRIGGER LOGOUT MEMBUKA MODAL CUSTOM APLIKASI
+  const handleRequestLogout = () => {
+    setShowLogoutModal(true);
+  };
 
+  // EXECUTE LOGOUT BERSIH
+  const confirmLogout = () => {
+    setShowLogoutModal(false);
     localStorage.clear();
     setCurrentUser(null);
     setSessionData({
@@ -155,7 +158,45 @@ export default function App() {
   const isDemoMode = currentStep === 'admin_demo';
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
+    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans relative">
+
+      {/* CUSTOM IN-APP MODAL KONFIRMASI LOGOUT */}
+      {showLogoutModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl max-w-sm w-full p-6 space-y-5 shadow-2xl border border-slate-200">
+            <div className="flex items-center space-x-3.5 border-b border-slate-100 pb-3.5">
+              <div className="p-3 bg-amber-50 text-amber-600 rounded-2xl shrink-0">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-black text-slate-900 leading-snug">Yakin Ingin Keluar?</h3>
+                <p className="text-xs text-slate-500 font-medium mt-0.5">Konfirmasi Sesi Akses</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 font-medium leading-relaxed">
+              Pastikan kamu sudah menekan tombol <b className="text-slate-900">'Simpan'</b> pada rak yang sedang dihitung agar data ketikan kamu tidak hilang.
+            </p>
+
+            <div className="flex justify-end space-x-2.5 pt-2">
+              <button
+                onClick={() => setShowLogoutModal(false)}
+                className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                onClick={confirmLogout}
+                className="px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-black shadow-md flex items-center space-x-1.5 transition-colors cursor-pointer"
+              >
+                <LogOut className="w-4 h-4" />
+                <span>Ya, Keluar</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* STEP 1: LOGIN */}
       {currentStep === 1 && (
         <Step1Login
@@ -181,7 +222,7 @@ export default function App() {
       {/* DASHBOARD ADMIN / SUPERVISOR / OWNER */}
       {currentStep === 'admin' && (
         <AdminDashboard
-          onBackToApp={() => handleLogout(false)}
+          onBackToApp={handleRequestLogout}
           onSwitchToCounterView={() => {
             setSessionData(prev => ({
               ...prev,
@@ -198,7 +239,7 @@ export default function App() {
       {currentStep === 2 && (
         <Step2TeamSetup
           sessionData={sessionData}
-          onLogout={() => handleLogout(false)}
+          onLogout={handleRequestLogout}
           onSaveTeam={(updatedData) => {
             setSessionData(updatedData);
             setCurrentStep(3);
@@ -223,7 +264,7 @@ export default function App() {
           <div className={isDemoMode ? "pt-8" : ""}>
             <Step3CountsheetList
               sessionData={sessionData}
-              onLogout={() => handleLogout(false)}
+              onLogout={handleRequestLogout}
               onEditTeam={() => setCurrentStep(2)}
               onSelectRack={(rack) => {
                 setSelectedRack(rack);
@@ -252,7 +293,7 @@ export default function App() {
             <Step4CountDetail
               sessionData={sessionData}
               rack={selectedRack}
-              onLogout={() => handleLogout(false)}
+              onLogout={handleRequestLogout}
               onBackToList={() => setCurrentStep(isDemoMode ? 'admin_demo' : 3)}
               onSelectNextRack={(nextRack) => {
                 setSelectedRack(nextRack);
