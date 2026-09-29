@@ -280,6 +280,31 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
           return;
         }
 
+        // 3. Query tambahan ke Master Katalog Referensi (sku_catalog)
+        const qc1 = query(collection(db, "sku_catalog"), where("UPC1", "==", cleanBarcode), limit(1));
+        const snapC1 = await getDocs(qc1);
+        if (!snapC1.empty && !isCancelled) {
+          setMatchedMasterSKU(snapC1.docs[0].data());
+          setIsSearchingBarcode(false);
+          return;
+        }
+
+        const qc2 = query(collection(db, "sku_catalog"), where("UPC2", "==", cleanBarcode), limit(1));
+        const snapC2 = await getDocs(qc2);
+        if (!snapC2.empty && !isCancelled) {
+          setMatchedMasterSKU(snapC2.docs[0].data());
+          setIsSearchingBarcode(false);
+          return;
+        }
+
+        const qc3 = query(collection(db, "sku_catalog"), where("SKU", "==", cleanBarcode.toUpperCase()), limit(1));
+        const snapC3 = await getDocs(qc3);
+        if (!snapC3.empty && !isCancelled) {
+          setMatchedMasterSKU(snapC3.docs[0].data());
+          setIsSearchingBarcode(false);
+          return;
+        }
+
         if (!isCancelled) {
           setMatchedMasterSKU(null);
           setIsSearchingBarcode(false);

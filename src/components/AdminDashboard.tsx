@@ -218,6 +218,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
     const [consignmentStoreList, setConsignmentStoreList] = useState<LocationOption[]>([]);
     const [activeProject, setActiveProject] = useState<ProjectSession | null>(null);
     const [masterDataList, setMasterDataList] = useState<MasterSKUItem[]>([]);
+    const [catalogDataList, setCatalogDataList] = useState<any[]>([]);
 
     useEffect(() => {
         const unsub1 = onSnapshot(collection(db, "global_accounts"), (snap) => setGlobalAccounts(snap.docs.map(d => ({ id: d.id, ...d.data() } as GlobalAccount))));
@@ -246,7 +247,19 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             setAuditLogs(logs);
         });
 
-        return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); unsubOwner(); unsubBadStock(); unsubAudit(); };
+        let catalogTimer: any = null;
+        const unsubCatalog = onSnapshot(collection(db, "sku_catalog"), (snap) => {
+            if (isUploadingRef.current) return;
+            if (catalogTimer) clearTimeout(catalogTimer);
+            catalogTimer = setTimeout(() => {
+                setCatalogDataList(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+            }, 250);
+        });
+
+        return () => { 
+            if (catalogTimer) clearTimeout(catalogTimer);
+            unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); unsubOwner(); unsubBadStock(); unsubAudit(); unsubCatalog(); 
+        };
     }, []);
 
     const handleAddBadStockCategory = async () => {
@@ -1167,6 +1180,168 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         triggerNotification("Export data Master Task (.xlsx) berhasil diunduh!");
     };
 
+    const handleDownloadCatalogTemplateXLSX = () => {
+        const templateData = [
+            {
+                'Owner': 'DDI',
+                'SKU': 'FREEGIFT-TASCCMELON',
+                'Description': 'Gimmick Tas Ransel Anak Cocomelon',
+                'UPC 1': 'FREEGIFT-TASCCMELON',
+                'UPC 2': '',
+                'SKU Brand': 'Sanofi',
+                'satuan hitung': 'PCS',
+                'Unit Price': 10000
+            },
+            {
+                'Owner': 'DDI',
+                'SKU': 'UG016',
+                'Description': 'Gimmick - Tas Pokojang (Backpack)',
+                'UPC 1': 'UG016',
+                'UPC 2': '',
+                'SKU Brand': 'UNICHARM',
+                'satuan hitung': 'PCS',
+                'Unit Price': 10000
+            }
+        ];
+        const ws = XLSX.utils.json_to_sheet(templateData);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Master_Katalog_SKU");
+        XLSX.writeFile(wb, "Template_Master_Katalog_SKU.xlsx");
+        triggerNotification("Template Master Katalog (.xlsx) berhasil diunduh!");
+    };
+
+    const handleExportCatalogXLSX = () => {
+        if (filteredSKUCatalog.length === 0) {
+            triggerNotification("Tidak ada data Master Katalog untuk diexport!");
+            return;
+        }
+
+        const exportData = filteredSKUCatalog.map(item => ({
+            'Owner': item.Owner || 'DDI',
+            'SKU': item.SKU,
+            'Description': item.Description || '',
+            'UPC 1 (ECERAN)': item.UPC1 || '',
+            'UPC 2 (KARDUS)': item.UPC2 || '',
+            'Brand': item.SKUBrand || '',
+            'Satuan Hitung': item.satuanHitung || 'PCS',
+            'Harga Satuan (Rp)': item.unitPrice || 0
+        }));
+
+        const ws = XLSX.utils.json_to_sheet(exportData);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Master_Katalog");
+        XLSX.writeFile(wb, `Master_Katalog_SKU_${new Date().toISOString().slice(0, 10)}.xlsx`);
+        triggerNotification("Master Katalog SKU (.xlsx) berhasil diexport!");
+    };
+
+    const handleUploadSKUCatalog = async (file: File) => {
+        try {
+            const data = await file.arrayBuffer();
+            const workbook = XLSX.read(data, { type: 'array' });
+            const sheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[sheetName];
+            const json = XLSX.utils.sheet_to_json(worksheet) as any[];
+
+            if (!json || json.length === 0) {
+                triggerNotification("File Excel/CSV katalog referensi kosong.");
+                return;
+            }
+
+            const totalRows = json.length;
+            isUploadCancelledRef.current = false;
+            isUploadingRef.current = true;
+            setUploadProgress({ current: 0, total: totalRows, stepMessage: "Membaca & memvalidasi data katalog referensi..." });
+
+            // Peta SKU ke ID master_tasks untuk auto-sync deskripsi, barcode & harga
+            const skuToTaskDocIds = new Map<string, string[]>();
+            masterDataList.forEach(m => {
+                if (!m.SKU) return;
+                if (!skuToTaskDocIds.has(m.SKU)) skuToTaskDocIds.set(m.SKU, []);
+                skuToTaskDocIds.get(m.SKU)!.push(m.id || `${m.Location}_${m.SKU}`);
+            });
+
+            const CHUNK_SIZE = 100;
+            let successCount = 0;
+
+            for (let i = 0; i < totalRows; i += CHUNK_SIZE) {
+                if (isUploadCancelledRef.current) {
+                    triggerNotification("Upload katalog dibatalkan.");
+                    break;
+                }
+
+                const chunk = json.slice(i, i + CHUNK_SIZE);
+                const batch = writeBatch(db);
+
+                chunk.forEach((row: any) => {
+                    const rawSku = (row['SKU'] || row['SKU BARANG'] || row['Kode Barang'] || row['sku'] || '').toString().trim();
+                    if (!rawSku) return;
+
+                    const skuKey = sanitizeDocId(rawSku);
+                    const owner = (row['Owner'] || row['OWNER'] || row['owner'] || 'DDI').toString().trim();
+                    const desc = (row['Description'] || row['DESKRIPSI PRODUK'] || row['Deskripsi'] || row['Nama Produk'] || row['description'] || '').toString().trim();
+                    const upc1 = (row['UPC 1'] || row['UPC1'] || row['UPC 1 (ECERAN)'] || row['Barcode'] || row['barcode'] || row['upc1'] || '').toString().trim();
+                    const upc2 = (row['UPC 2'] || row['UPC2'] || row['UPC 2 (KARDUS)'] || row['Barcode Kardus'] || row['upc2'] || '').toString().trim();
+                    const brand = (row['SKU Brand'] || row['BRAND'] || row['Brand'] || row['Merk'] || row['brand'] || '').toString().trim();
+                    const satuan = (row['satuan hitung'] || row['SATUAN HITUNG'] || row['Satuan'] || row['UOM'] || 'PCS').toString().trim();
+                    const rawPrice = row['Unit Price'] ?? row['HARGA SATUAN'] ?? row['Harga Satuan'] ?? row['Price'] ?? row['harga'];
+                    const unitPrice = parseInt(rawPrice, 10) || 0;
+
+                    const catalogDoc = {
+                        SKU: rawSku,
+                        Owner: owner,
+                        Description: desc,
+                        UPC1: upc1,
+                        UPC2: upc2,
+                        SKUBrand: brand,
+                        satuanHitung: satuan,
+                        unitPrice: unitPrice,
+                        updatedAt: new Date().toISOString()
+                    };
+
+                    const catRef = doc(db, "sku_catalog", skuKey);
+                    batch.set(catRef, catalogDoc, { merge: true });
+                    successCount++;
+
+                    // Sinkronkan ke master_tasks jika SKU tersebut ada di task operasional aktif
+                    if (skuToTaskDocIds.has(rawSku)) {
+                        skuToTaskDocIds.get(rawSku)!.forEach(tId => {
+                            const tRef = doc(db, "master_tasks", tId);
+                            const syncUpdates: any = {};
+                            if (desc) syncUpdates.Description = desc;
+                            if (upc1) syncUpdates.UPC1 = upc1;
+                            if (upc2) syncUpdates.UPC2 = upc2;
+                            if (brand) syncUpdates.SKUBrand = brand;
+                            if (satuan) syncUpdates.satuanHitung = satuan;
+                            if (unitPrice > 0) syncUpdates.unitPrice = unitPrice;
+                            if (Object.keys(syncUpdates).length > 0) {
+                                batch.set(tRef, syncUpdates, { merge: true });
+                            }
+                        });
+                    }
+                });
+
+                await batch.commit();
+
+                setUploadProgress({
+                    current: Math.min(i + CHUNK_SIZE, totalRows),
+                    total: totalRows,
+                    stepMessage: `Menyimpan referensi SKU (${Math.min(i + CHUNK_SIZE, totalRows).toLocaleString('id-ID')} / ${totalRows.toLocaleString('id-ID')})...`
+                });
+            }
+
+            isUploadingRef.current = false;
+            setUploadProgress(null);
+            const refreshSnap = await getDocs(collection(db, "sku_catalog"));
+            setCatalogDataList(refreshSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+            triggerNotification(`Berhasil mengunggah ${successCount} referensi SKU ke Master Katalog!`);
+        } catch (err: any) {
+            console.error("Error upload SKU catalog:", err);
+            isUploadingRef.current = false;
+            setUploadProgress(null);
+            triggerNotification(`Gagal mengunggah katalog: ${err.message || 'Format tidak valid'}`);
+        }
+    };
+
     const handleOpenHistoricalProject = (proj: ProjectSession) => {
         setActiveProject(proj); setViewState('DASHBOARD'); setActiveTab('progress');
         triggerNotification(`Membuka Dashboard Project "${proj.sessionCode}"`);
@@ -1347,6 +1522,24 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
     // 2. FILTERED SKU CATALOG WITH PAGINATION (Single-pass Map O(N))
     const filteredSKUCatalog = useMemo(() => {
         const catalogMap = new Map<string, any>();
+
+        // Sumber 1: Master SKU Catalog yang diunggah terpisah
+        for (let i = 0; i < catalogDataList.length; i++) {
+            const c = catalogDataList[i];
+            if (!c.SKU) continue;
+            catalogMap.set(c.SKU, {
+                SKU: c.SKU,
+                Owner: c.Owner || 'DDI',
+                Description: c.Description || '-',
+                UPC1: c.UPC1 || '-',
+                UPC2: c.UPC2 || '-',
+                SKUBrand: c.SKUBrand || '-',
+                satuanHitung: c.satuanHitung || 'PCS',
+                unitPrice: c.unitPrice || 0
+            });
+        }
+
+        // Sumber 2: Data SKU dari Master Task WMS aktif
         for (let i = 0; i < masterDataList.length; i++) {
             const m = masterDataList[i];
             if (!m.SKU) continue;
@@ -1361,17 +1554,27 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     satuanHitung: m.satuanHitung || 'PCS',
                     unitPrice: m.unitPrice || 0
                 });
+            } else {
+                const item = catalogMap.get(m.SKU);
+                if (item.Description === '-' && m.Description) item.Description = m.Description;
+                if (item.UPC1 === '-' && m.UPC1) item.UPC1 = m.UPC1;
+                if (item.UPC2 === '-' && m.UPC2) item.UPC2 = m.UPC2;
+                if (item.SKUBrand === '-' && m.SKUBrand) item.SKUBrand = m.SKUBrand;
+                if (item.unitPrice === 0 && m.unitPrice) item.unitPrice = m.unitPrice;
             }
         }
+
         const lowerSearch = catalogSearch.toLowerCase();
         const allItems = Array.from(catalogMap.values());
         if (!lowerSearch) return allItems;
         return allItems.filter(c =>
             c.SKU.toLowerCase().includes(lowerSearch) ||
             c.Description.toLowerCase().includes(lowerSearch) ||
-            c.UPC1.toLowerCase().includes(lowerSearch)
+            c.UPC1.toLowerCase().includes(lowerSearch) ||
+            (c.UPC2 && c.UPC2.toLowerCase().includes(lowerSearch)) ||
+            (c.SKUBrand && c.SKUBrand.toLowerCase().includes(lowerSearch))
         );
-    }, [masterDataList, catalogSearch]);
+    }, [catalogDataList, masterDataList, catalogSearch]);
 
     const totalCatalogPages = Math.ceil(filteredSKUCatalog.length / ITEMS_PER_PAGE) || 1;
     const paginatedSKUCatalog = useMemo(() => {
@@ -2859,18 +3062,54 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                     </h3>
                                     <p className="text-xs text-slate-500 font-medium">Basis data referensi resmi untuk pencocokan barcode temuan di HP Counter.</p>
                                 </div>
-                                <div className="relative w-full sm:w-72">
-                                    <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-2.5" />
-                                    <input
-                                        type="text"
-                                        placeholder="Cari SKU, Barcode, Deskripsi..."
-                                        value={catalogSearch}
-                                        onChange={(e) => {
-                                            setCatalogSearch(e.target.value);
-                                            setCatalogCurrentPage(1);
-                                        }}
-                                        className="w-full pl-9 pr-4 py-2 bg-slate-50 border rounded-xl text-xs font-bold outline-none"
-                                    />
+                                <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
+                                    <div className="relative flex-1 sm:w-64">
+                                        <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-2.5" />
+                                        <input
+                                            type="text"
+                                            placeholder="Cari SKU, Barcode, Deskripsi..."
+                                            value={catalogSearch}
+                                            onChange={(e) => {
+                                                setCatalogSearch(e.target.value);
+                                                setCatalogCurrentPage(1);
+                                            }}
+                                            className="w-full pl-9 pr-4 py-2 bg-slate-50 border rounded-xl text-xs font-bold outline-none"
+                                        />
+                                    </div>
+                                    <button
+                                        onClick={handleDownloadCatalogTemplateXLSX}
+                                        className="px-3.5 py-2.5 bg-slate-50 hover:bg-slate-100 border rounded-xl text-xs font-bold flex items-center space-x-1.5 shrink-0 cursor-pointer text-slate-700"
+                                        title="Download template Excel katalog referensi"
+                                    >
+                                        <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                                        <span>Template (.xlsx)</span>
+                                    </button>
+                                    <button
+                                        onClick={handleExportCatalogXLSX}
+                                        className="px-3.5 py-2.5 bg-slate-50 hover:bg-slate-100 border rounded-xl text-xs font-bold flex items-center space-x-1.5 shrink-0 cursor-pointer text-slate-700"
+                                        title="Export semua katalog referensi"
+                                    >
+                                        <Download className="w-4 h-4 text-indigo-600" />
+                                        <span>Export (.xlsx)</span>
+                                    </button>
+                                    {(effectiveRole === 'owner' || effectiveRole === 'spv') && (
+                                        <label className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold cursor-pointer flex items-center space-x-2 shrink-0 shadow-md transition-all">
+                                            <Upload className="w-4 h-4" />
+                                            <span>Upload Referensi SKU</span>
+                                            <input
+                                                type="file"
+                                                accept=".xlsx, .xls, .csv"
+                                                className="hidden"
+                                                onChange={(e) => {
+                                                    if (e.target.files?.[0]) {
+                                                        const f = e.target.files[0];
+                                                        e.target.value = '';
+                                                        handleUploadSKUCatalog(f);
+                                                    }
+                                                }}
+                                            />
+                                        </label>
+                                    )}
                                 </div>
                             </div>
 
