@@ -97,46 +97,43 @@ export default function Step1Login({ onSuccessLogin }: Step1LoginProps) {
   };
 
   return (
-    <div className="relative min-h-screen bg-[#0B0F14] font-sans flex flex-col justify-center items-center p-4 overflow-hidden select-none">
-      {/* 1. ATMOSPHERIC DARK SPACE - MESH/GRID OVERLAY */}
+    <div className="relative min-h-screen bg-[#F4F6F9] font-sans flex flex-col justify-center items-center p-4 overflow-hidden select-none">
+      {/* 1. ATMOSPHERIC TECH GRID (LIGHT MODE) */}
       <div 
-        className="absolute inset-0 pointer-events-none opacity-5"
+        className="absolute inset-0 pointer-events-none opacity-40"
         style={{
-          backgroundImage: `linear-gradient(to right, #ffffff 1px, transparent 1px), linear-gradient(to bottom, #ffffff 1px, transparent 1px)`,
+          backgroundImage: `linear-gradient(to right, #e2e8f0 1px, transparent 1px), linear-gradient(to bottom, #e2e8f0 1px, transparent 1px)`,
           backgroundSize: '36px 36px'
         }}
       />
 
       {/* 2. AMBIENT RADIAL GLOW (COOL CYAN / TOSCA #00F2FE) */}
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-130 h-130 bg-cyan-400/15 rounded-full blur-[140px] pointer-events-none" />
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-70 h-70 bg-sky-600/20 rounded-full blur-[90px] pointer-events-none" />
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-140 h-140 bg-cyan-400/10 rounded-full blur-[140px] pointer-events-none" />
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-80 h-80 bg-sky-400/15 rounded-full blur-[90px] pointer-events-none" />
 
-      {/* 3. LOGIN CARD (FROSTED GLASSMORPHISM) */}
+      {/* 3. LOGIN CARD (CLEAN TECH WHITE CARD - VAULT INSPIRED) */}
       <div 
-        className="relative z-10 w-full max-w-sm rounded-[28px] p-8 sm:p-9 backdrop-blur-xl bg-slate-900/65 border border-cyan-400/25 space-y-7 animate-in fade-in zoom-in-95 duration-500"
-        style={{
-          boxShadow: '0 25px 60px rgba(0,0,0,0.85), 0 10px 35px rgba(0,242,254,0.08)'
-        }}
+        className="relative z-10 w-full max-w-sm rounded-[28px] p-8 sm:p-9 bg-white/95 border border-slate-200/90 space-y-7 animate-in fade-in zoom-in-95 duration-500 shadow-[0_20px_60px_rgba(15,23,42,0.08),0_4px_20px_rgba(0,242,254,0.1)]"
       >
         {/* LOGO & CINEMATIC TYPOGRAPHY */}
         <div className="text-center space-y-3">
-          {/* LOGO NC MONOGRAM MURNI TRANSPARAN + CYAN RIM LIGHT */}
+          {/* LOGO NC MONOGRAM MURNI + CYAN GLOW */}
           <div className="w-24 h-24 mx-auto flex items-center justify-center">
             <img 
               src="/logo.png" 
               alt="Noctus Count Monogram" 
               className="w-full h-full object-contain transition-transform duration-500 hover:scale-105"
               style={{
-                filter: 'drop-shadow(0 0 18px rgba(0,242,254,0.45)) drop-shadow(0 4px 12px rgba(0,0,0,0.9))'
+                filter: 'drop-shadow(0 0 16px rgba(0,242,254,0.5)) drop-shadow(0 4px 8px rgba(15,23,42,0.15))'
               }}
             />
           </div>
 
           <div className="space-y-1 pt-1">
-            <h1 className="text-xl font-light text-white tracking-[0.3em] uppercase leading-none pl-[0.3em]">
+            <h1 className="text-xl font-black text-slate-900 tracking-[0.25em] uppercase leading-none pl-[0.25em]">
               NOCTUS COUNT
             </h1>
-            <p className="font-mono text-[10px] text-slate-400 tracking-[0.2em] uppercase font-medium">
+            <p className="font-mono text-[10px] text-slate-500 tracking-[0.2em] uppercase font-bold">
               ENTER AUTHORIZED CREDENTIALS
             </p>
           </div>
@@ -144,7 +141,7 @@ export default function Step1Login({ onSuccessLogin }: Step1LoginProps) {
 
         {/* ERROR NOTIFICATION */}
         {errorMsg && (
-          <div className="bg-rose-950/50 border border-rose-500/30 text-rose-300 px-4 py-2.5 rounded-xl text-xs font-mono text-center shadow-inner animate-in fade-in">
+          <div className="bg-rose-50 border border-rose-200 text-rose-700 px-4 py-2.5 rounded-xl text-xs font-mono text-center shadow-xs animate-in fade-in font-bold">
             {errorMsg}
           </div>
         )}
@@ -153,7 +150,7 @@ export default function Step1Login({ onSuccessLogin }: Step1LoginProps) {
         <form onSubmit={handleLogin} className="space-y-4">
           {/* USERNAME FIELD */}
           <div className="space-y-1.5">
-            <label className="font-mono text-[10px] tracking-[0.18em] text-slate-400 block uppercase font-medium">
+            <label className="font-mono text-[10px] tracking-[0.18em] text-slate-500 block uppercase font-bold">
               IDENTIFIER / USERNAME
             </label>
             <input
@@ -161,14 +158,14 @@ export default function Step1Login({ onSuccessLogin }: Step1LoginProps) {
               value={usernameInput}
               onChange={(e) => setUsernameInput(e.target.value)}
               placeholder="e.g. pamungkas / spv / owner"
-              className="cipher-input w-full h-12 px-4 rounded-xl text-sm font-mono outline-none transition-all duration-300 focus:ring-1 focus:ring-cyan-400/40"
+              className="cipher-input w-full h-12 px-4 rounded-xl text-sm font-mono font-bold outline-none transition-all duration-300 focus:ring-2 focus:ring-cyan-400/20"
               required
             />
           </div>
 
           {/* PIN FIELD */}
           <div className="space-y-1.5">
-            <label className="font-mono text-[10px] tracking-[0.18em] text-slate-400 block uppercase font-medium">
+            <label className="font-mono text-[10px] tracking-[0.18em] text-slate-500 block uppercase font-bold">
               SECURITY PIN (4-DIGIT)
             </label>
             <input
@@ -177,7 +174,7 @@ export default function Step1Login({ onSuccessLogin }: Step1LoginProps) {
               value={pinInput}
               onChange={(e) => setPinInput(e.target.value)}
               placeholder="••••"
-              className="cipher-input w-full h-12 px-4 rounded-xl text-sm font-mono tracking-widest outline-none transition-all duration-300 focus:ring-1 focus:ring-cyan-400/40"
+              className="cipher-input w-full h-12 px-4 rounded-xl text-sm font-mono font-bold tracking-widest outline-none transition-all duration-300 focus:ring-2 focus:ring-cyan-400/20"
               required
             />
           </div>
@@ -186,19 +183,19 @@ export default function Step1Login({ onSuccessLogin }: Step1LoginProps) {
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full h-12 mt-2 rounded-xl text-xs font-mono font-bold tracking-[0.2em] uppercase transition-all duration-300 cursor-pointer disabled:opacity-50 text-slate-950 bg-cyan-400 hover:bg-cyan-300 shadow-[0_0_20px_rgba(0,242,254,0.35)] hover:shadow-[0_0_30px_rgba(0,242,254,0.6)] active:scale-[0.98] flex items-center justify-center space-x-2"
+            className="w-full h-12 mt-2 rounded-xl text-xs font-mono font-black tracking-[0.2em] uppercase transition-all duration-300 cursor-pointer disabled:opacity-50 text-slate-950 bg-cyan-400 hover:bg-cyan-300 shadow-[0_0_20px_rgba(0,242,254,0.35)] hover:shadow-[0_0_25px_rgba(0,242,254,0.55)] active:scale-[0.98] flex items-center justify-center space-x-2"
           >
             <span>{isLoading ? 'AUTHENTICATING...' : 'MASUK APLIKASI'}</span>
           </button>
         </form>
 
         {/* FOOTER METADATA */}
-        <div className="pt-4 border-t border-white/6 text-center space-y-1">
-          <p className="font-mono text-[9px] text-slate-400 tracking-[0.25em] uppercase">
+        <div className="pt-4 border-t border-slate-100 text-center space-y-1">
+          <p className="font-mono text-[9px] text-slate-400 tracking-[0.25em] uppercase font-semibold">
             NOCTUS COUNT™ • SECURE TERMINAL
           </p>
           <p className="font-mono text-[9px] text-slate-500 tracking-wider">
-            DEVELOPED BY <span className="text-cyan-400 font-bold">NOCTUS</span>
+            DEVELOPED BY <span className="text-cyan-600 font-bold">NOCTUS</span>
           </p>
         </div>
       </div>

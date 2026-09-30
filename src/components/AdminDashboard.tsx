@@ -68,6 +68,12 @@ interface MasterSKUItem {
     isCounted?: boolean;
     round1Actual?: number;
     round2Actual?: number;
+    round3Actual?: number;
+    round1Counter?: string;
+    round2Counter?: string;
+    round3Counter?: string;
+    previousCounter?: string;
+    lastSwapBatchId?: string;
 }
 
 interface LocationOption {
@@ -178,6 +184,35 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
     const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number; stepMessage?: string } | null>(null);
     const isUploadCancelledRef = useRef<boolean>(false);
     const isUploadingRef = useRef<boolean>(false);
+
+    // DEPLOY & SWAP MODAL STATES
+    const [deployModal, setDeployModal] = useState<{
+        isOpen: boolean;
+        sourceCounter: string;
+        sourceRound: number;
+        sourceDisputeCount: number;
+        mode: 'KEEP' | 'SWAP';
+        targetCounter: string;
+        searchQuery: string;
+    }>({
+        isOpen: false,
+        sourceCounter: '',
+        sourceRound: 1,
+        sourceDisputeCount: 0,
+        mode: 'SWAP',
+        targetCounter: '',
+        searchQuery: ''
+    });
+    const [isDeploySubmitting, setIsDeploySubmitting] = useState<boolean>(false);
+    const [lastSwapEvent, setLastSwapEvent] = useState<{
+        swapId: string;
+        sourceCounter: string;
+        targetCounter: string;
+        round: number;
+        sourceItemIds: string[];
+        targetItemIds: string[];
+        timestamp: string;
+    } | null>(null);
 
     // STATE KATEGORI BAD STOCK (CONFIGURABLE BY OWNER)
     const [badStockCategories, setBadStockCategories] = useState<string[]>(['Dus Penyok', 'Kemasan Bocor', 'Segel Rusak', 'Basah / Lembab', 'Barang Expired']);
@@ -541,7 +576,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         };
     }, [activeProject]);
 
-    const handleDeployNextRoundForCounter = async (targetCounter: string) => {
+    const handleOpenDeployModal = (targetCounter: string) => {
         if (effectiveRole === 'spv') {
             triggerNotification('Hanya Super Admin/Owner yang memiliki hak deploy ronde.');
             return;
@@ -563,7 +598,12 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             return;
         }
 
-        const nextRound = currentCounterRound + 1;
+        const cData = counterGroups[cleanCounter];
+        const is100PctDone = cData && cData.total > 0 && cData.counted === cData.total;
+        if (!is100PctDone) {
+            triggerNotification(`Counter "${cleanCounter}" belum menyelesaikan 100% hitungan Ronde ${currentCounterRound} (${cData?.counted || 0}/${cData?.total || 0} SKU).`);
+            return;
+        }
 
         const disputeTasks = counterTasks.filter(item => {
             const act = item.countedQty ?? item.Qty;
@@ -578,62 +618,307 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             return;
         }
 
-        if (!window.confirm(`AKSI OWNER: Deploy RONDE ${nextRound} KHUSUS untuk Counter "${cleanCounter}"? (${disputeTasks.length} SKU Selisih akan di-reset)`)) return;
+        setDeployModal({
+            isOpen: true,
+            sourceCounter: cleanCounter,
+            sourceRound: currentCounterRound,
+            sourceDisputeCount: disputeTasks.length,
+            mode: 'SWAP',
+            targetCounter: '',
+            searchQuery: ''
+        });
+    };
 
+    const handleExecuteDeploy = async () => {
+        if (!activeProject || isDeploySubmitting) return;
+        const { sourceCounter, sourceRound, mode, targetCounter } = deployModal;
+        const nextRound = sourceRound + 1;
+        const timestampNow = new Date().toISOString();
+        const swapBatchId = `SWAP_${Date.now()}`;
+
+        setIsDeploySubmitting(true);
         try {
-            const batch = writeBatch(db);
-            const timestampNow = new Date().toISOString();
-
-            counterTasks.forEach((item) => {
-                if (!item.id) return;
-                const ref = doc(db, "master_tasks", item.id);
+            const sourceTasks = masterDataList.filter(m => m.counter === sourceCounter);
+            const sourceDispute = sourceTasks.filter(item => {
                 const act = item.countedQty ?? item.Qty;
-
-                const isR2MatchR1 = (currentCounterRound === 2 && item.round1Actual !== undefined && act === item.round1Actual);
-
-                if (item.isCounted && act !== item.Qty && !isR2MatchR1) {
-                    batch.update(ref, {
-                        currentRound: nextRound,
-                        QTY_ACTUAL: null,
-                        QTY_GOOD: null,
-                        QTY_BAD: null,
-                        isCounted: false,
-                        [`round${currentCounterRound}Actual`]: act,
-                        updatedAt: timestampNow
-                    });
-
-                    const logId = `${activeProject.sessionCode}_DEPLOY_R${nextRound}_${cleanCounter}_${item.SKU}_${item.Location}`;
-                    const auditRef = doc(db, "audit_logs", logId);
-                    batch.set(auditRef, {
-                        timestamp: timestampNow,
-                        rackLocation: item.Location,
-                        ownerSku: item.Owner || 'DDI',
-                        sku: item.SKU,
-                        description: item.Description,
-                        upc1: item.UPC1 || '-',
-                        upc2: item.UPC2 || '-',
-                        counterPic: cleanCounter,
-                        round: nextRound,
-                        qtyGood: 0,
-                        qtyBad: 0,
-                        totalFinalSubmitted: 0,
-                        edActual: '-',
-                        remarks: `[DEPLOY R${nextRound} PIC: ${cleanCounter}] Di-reset untuk hitung ulang karena selisih R${currentCounterRound} (Act: ${act} vs WMS: ${item.Qty})`
-                    }, { merge: true });
-
-                } else {
-                    batch.update(ref, {
-                        isLocked: true,
-                        updatedAt: timestampNow
-                    });
-                }
+                const isR2MatchR1 = (sourceRound === 2 && item.round1Actual !== undefined && act === item.round1Actual);
+                return item.isCounted && act !== item.Qty && !isR2MatchR1;
             });
 
-            await batch.commit();
-            triggerNotification(`🚀 Ronde ${nextRound} Berhasil Dideploy Khusus untuk Counter "${cleanCounter}"! (${disputeTasks.length} SKU Selisih)`);
+            const updates: { ref: any; data: any }[] = [];
+            const auditEntries: { ref: any; data: any }[] = [];
+
+            if (mode === 'KEEP' || !targetCounter) {
+                sourceTasks.forEach(item => {
+                    if (!item.id) return;
+                    const ref = doc(db, "master_tasks", item.id);
+                    const act = item.countedQty ?? item.Qty;
+                    const isR2MatchR1 = (sourceRound === 2 && item.round1Actual !== undefined && act === item.round1Actual);
+
+                    if (item.isCounted && act !== item.Qty && !isR2MatchR1) {
+                        updates.push({
+                            ref,
+                            data: {
+                                currentRound: nextRound,
+                                QTY_ACTUAL: null,
+                                QTY_GOOD: null,
+                                QTY_BAD: null,
+                                isCounted: false,
+                                [`round${sourceRound}Actual`]: act,
+                                [`round${sourceRound}Counter`]: sourceCounter,
+                                updatedAt: timestampNow
+                            }
+                        });
+
+                        const logId = `${activeProject.sessionCode}_DEPLOY_R${nextRound}_${sourceCounter}_${item.SKU}_${item.Location}`;
+                        auditEntries.push({
+                            ref: doc(db, "audit_logs", logId),
+                            data: {
+                                timestamp: timestampNow,
+                                rackLocation: item.Location,
+                                ownerSku: item.Owner || 'DDI',
+                                sku: item.SKU,
+                                description: item.Description,
+                                upc1: item.UPC1 || '-',
+                                upc2: item.UPC2 || '-',
+                                counterPic: sourceCounter,
+                                round: nextRound,
+                                qtyGood: 0,
+                                qtyBad: 0,
+                                totalFinalSubmitted: 0,
+                                edActual: '-',
+                                remarks: `[DEPLOY R${nextRound} PIC: ${sourceCounter}] Di-reset untuk hitung ulang karena selisih R${sourceRound} (Act: ${act} vs WMS: ${item.Qty})`
+                            }
+                        });
+                    } else {
+                        updates.push({
+                            ref,
+                            data: { isLocked: true, updatedAt: timestampNow }
+                        });
+                    }
+                });
+            } else {
+                const targetTasks = masterDataList.filter(m => m.counter === targetCounter);
+                const targetDispute = targetTasks.filter(item => {
+                    const act = item.countedQty ?? item.Qty;
+                    const isR2MatchR1 = (sourceRound === 2 && item.round1Actual !== undefined && act === item.round1Actual);
+                    return item.isCounted && act !== item.Qty && !isR2MatchR1;
+                });
+
+                // Source dispute items -> move to targetCounter
+                sourceTasks.forEach(item => {
+                    if (!item.id) return;
+                    const ref = doc(db, "master_tasks", item.id);
+                    const act = item.countedQty ?? item.Qty;
+                    const isR2MatchR1 = (sourceRound === 2 && item.round1Actual !== undefined && act === item.round1Actual);
+
+                    if (item.isCounted && act !== item.Qty && !isR2MatchR1) {
+                        updates.push({
+                            ref,
+                            data: {
+                                counter: targetCounter,
+                                currentRound: nextRound,
+                                QTY_ACTUAL: null,
+                                QTY_GOOD: null,
+                                QTY_BAD: null,
+                                isCounted: false,
+                                [`round${sourceRound}Actual`]: act,
+                                [`round${sourceRound}Counter`]: sourceCounter,
+                                previousCounter: sourceCounter,
+                                lastSwapBatchId: swapBatchId,
+                                updatedAt: timestampNow
+                            }
+                        });
+
+                        const logId = `${activeProject.sessionCode}_SWAP_R${nextRound}_${sourceCounter}_TO_${targetCounter}_${item.SKU}_${item.Location}`;
+                        auditEntries.push({
+                            ref: doc(db, "audit_logs", logId),
+                            data: {
+                                timestamp: timestampNow,
+                                rackLocation: item.Location,
+                                ownerSku: item.Owner || 'DDI',
+                                sku: item.SKU,
+                                description: item.Description,
+                                upc1: item.UPC1 || '-',
+                                upc2: item.UPC2 || '-',
+                                counterPic: targetCounter,
+                                round: nextRound,
+                                qtyGood: 0,
+                                qtyBad: 0,
+                                totalFinalSubmitted: 0,
+                                edActual: '-',
+                                remarks: `[MUTUAL SWAP R${nextRound}] Dari ${sourceCounter} dipindahkan ke ${targetCounter} karena selisih R${sourceRound}`
+                            }
+                        });
+                    } else {
+                        updates.push({
+                            ref,
+                            data: { isLocked: true, updatedAt: timestampNow }
+                        });
+                    }
+                });
+
+                // Target dispute items -> move to sourceCounter
+                targetTasks.forEach(item => {
+                    if (!item.id) return;
+                    const ref = doc(db, "master_tasks", item.id);
+                    const act = item.countedQty ?? item.Qty;
+                    const isR2MatchR1 = (sourceRound === 2 && item.round1Actual !== undefined && act === item.round1Actual);
+
+                    if (item.isCounted && act !== item.Qty && !isR2MatchR1) {
+                        updates.push({
+                            ref,
+                            data: {
+                                counter: sourceCounter,
+                                currentRound: nextRound,
+                                QTY_ACTUAL: null,
+                                QTY_GOOD: null,
+                                QTY_BAD: null,
+                                isCounted: false,
+                                [`round${sourceRound}Actual`]: act,
+                                [`round${sourceRound}Counter`]: targetCounter,
+                                previousCounter: targetCounter,
+                                lastSwapBatchId: swapBatchId,
+                                updatedAt: timestampNow
+                            }
+                        });
+
+                        const logId = `${activeProject.sessionCode}_SWAP_R${nextRound}_${targetCounter}_TO_${sourceCounter}_${item.SKU}_${item.Location}`;
+                        auditEntries.push({
+                            ref: doc(db, "audit_logs", logId),
+                            data: {
+                                timestamp: timestampNow,
+                                rackLocation: item.Location,
+                                ownerSku: item.Owner || 'DDI',
+                                sku: item.SKU,
+                                description: item.Description,
+                                upc1: item.UPC1 || '-',
+                                upc2: item.UPC2 || '-',
+                                counterPic: sourceCounter,
+                                round: nextRound,
+                                qtyGood: 0,
+                                qtyBad: 0,
+                                totalFinalSubmitted: 0,
+                                edActual: '-',
+                                remarks: `[MUTUAL SWAP R${nextRound}] Dari ${targetCounter} dipindahkan ke ${sourceCounter} karena selisih R${sourceRound}`
+                            }
+                        });
+                    } else {
+                        updates.push({
+                            ref,
+                            data: { isLocked: true, updatedAt: timestampNow }
+                        });
+                    }
+                });
+
+                setLastSwapEvent({
+                    swapId: swapBatchId,
+                    sourceCounter,
+                    targetCounter,
+                    round: nextRound,
+                    sourceItemIds: sourceDispute.map(d => d.id!),
+                    targetItemIds: targetDispute.map(d => d.id!),
+                    timestamp: timestampNow
+                });
+            }
+
+            // Commit in safe chunks of 400
+            const allOps = [...updates, ...auditEntries];
+            const CHUNK_SIZE = 400;
+            for (let i = 0; i < allOps.length; i += CHUNK_SIZE) {
+                const chunk = allOps.slice(i, i + CHUNK_SIZE);
+                const b = writeBatch(db);
+                chunk.forEach(op => {
+                    if (op.data.remarks) {
+                        b.set(op.ref, op.data, { merge: true });
+                    } else {
+                        b.update(op.ref, op.data);
+                    }
+                });
+                await b.commit();
+            }
+
+            setDeployModal(prev => ({ ...prev, isOpen: false }));
+            if (mode === 'SWAP' && targetCounter) {
+                triggerNotification(`🚀 SWAP BERHASIL! Ronde ${nextRound}: ${sourceCounter} ⇄ ${targetCounter} saling bertukar task.`);
+            } else {
+                triggerNotification(`🚀 Ronde ${nextRound} Berhasil Dideploy untuk ${sourceCounter}!`);
+            }
         } catch (err: any) {
-            console.error(`Deploy Round ${nextRound} Error:`, err);
-            triggerNotification(`Gagal Deploy Ronde ${nextRound}: ${err.message || String(err)}`);
+            console.error("Deploy/Swap Error:", err);
+            triggerNotification(`Gagal deploy ronde: ${err.message || String(err)}`);
+        } finally {
+            setIsDeploySubmitting(false);
+        }
+    };
+
+    const handleRevertLastSwap = async () => {
+        if (!lastSwapEvent || isDeploySubmitting) return;
+        const { sourceCounter, targetCounter, round, sourceItemIds, targetItemIds } = lastSwapEvent;
+
+        const affectedItems = masterDataList.filter(m => m.id && (sourceItemIds.includes(m.id) || targetItemIds.includes(m.id)));
+        const alreadyCountedInNewRound = affectedItems.some(m => m.isCounted && m.currentRound === round);
+
+        if (alreadyCountedInNewRound) {
+            triggerNotification(`⚠️ Tidak dapat membatalkan: Salah satu counter sudah mulai menginput hitungan fisik di Ronde ${round}!`);
+            return;
+        }
+
+        setIsDeploySubmitting(true);
+        try {
+            const prevRound = round - 1;
+            const timestampNow = new Date().toISOString();
+            const revertOps: { ref: any; data: any }[] = [];
+
+            sourceItemIds.forEach(id => {
+                const m = masterDataList.find(item => item.id === id);
+                if (!m) return;
+                const ref = doc(db, "master_tasks", id);
+                revertOps.push({
+                    ref,
+                    data: {
+                        counter: sourceCounter,
+                        currentRound: prevRound,
+                        isCounted: true,
+                        QTY_ACTUAL: m[`round${prevRound}Actual` as keyof MasterSKUItem] ?? m.countedQty ?? m.Qty,
+                        lastSwapBatchId: null,
+                        updatedAt: timestampNow
+                    }
+                });
+            });
+
+            targetItemIds.forEach(id => {
+                const m = masterDataList.find(item => item.id === id);
+                if (!m) return;
+                const ref = doc(db, "master_tasks", id);
+                revertOps.push({
+                    ref,
+                    data: {
+                        counter: targetCounter,
+                        currentRound: prevRound,
+                        isCounted: true,
+                        QTY_ACTUAL: m[`round${prevRound}Actual` as keyof MasterSKUItem] ?? m.countedQty ?? m.Qty,
+                        lastSwapBatchId: null,
+                        updatedAt: timestampNow
+                    }
+                });
+            });
+
+            const CHUNK_SIZE = 400;
+            for (let i = 0; i < revertOps.length; i += CHUNK_SIZE) {
+                const chunk = revertOps.slice(i, i + CHUNK_SIZE);
+                const b = writeBatch(db);
+                chunk.forEach(op => b.update(op.ref, op.data));
+                await b.commit();
+            }
+
+            setLastSwapEvent(null);
+            triggerNotification(`↩️ SUKSES! Pertukaran ${sourceCounter} ⇄ ${targetCounter} berhasil dibatalkan. Seluruh task dikembalikan.`);
+        } catch (err: any) {
+            console.error("Revert Swap Error:", err);
+            triggerNotification(`Gagal membatalkan swap: ${err.message || 'Error'}`);
+        } finally {
+            setIsDeploySubmitting(false);
         }
     };
 
@@ -674,7 +959,13 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 'DESKRIPSI PRODUK': item.Description,
                 'BRAND': item.SKUBrand || '',
                 'LOKASI RAK': item.Location,
-                'COUNTER PIC': item.counter,
+                'COUNTER R1': item.round1Counter || (item.currentRound >= 1 ? (item.previousCounter || item.counter) : '-'),
+                'QTY R1': item.round1Actual !== undefined ? item.round1Actual : (item.currentRound === 1 && isCounted ? actQty : '-'),
+                'COUNTER R2': item.round2Counter || (item.currentRound >= 2 ? (item.currentRound === 2 ? item.counter : (item.previousCounter || '-')) : '-'),
+                'QTY R2': item.round2Actual !== undefined ? item.round2Actual : (item.currentRound === 2 && isCounted ? actQty : '-'),
+                'COUNTER R3': item.round3Counter || (item.currentRound >= 3 ? item.counter : '-'),
+                'QTY R3': item.round3Actual !== undefined ? item.round3Actual : (item.currentRound === 3 && isCounted ? actQty : '-'),
+                'FINAL COUNTER PIC': item.counter,
                 'QTY SYSTEM (WMS)': sysQty,
                 'QTY GOOD': isCounted ? goodQty : '-',
                 'QTY BAD': isCounted ? badQty : '-',
@@ -1720,19 +2011,19 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
     }, [filteredDiscrepancies, reconCurrentPage]);
 
     return (
-        <div className={`min-h-screen font-sans relative ${viewState === 'DASHBOARD' ? 'w-full p-0 max-w-none bg-slate-50 text-slate-800' : 'bg-[#0B0F14] text-slate-100 p-4 lg:p-8 min-h-screen'}`}>
-            {/* ATMOSPHERIC DARK SPACE - MESH/GRID & AMBIENT RADIAL GLOW (THE CIPHER SANCTUM) */}
+        <div className={`min-h-screen font-sans relative ${viewState === 'DASHBOARD' ? 'w-full p-0 max-w-none bg-slate-50 text-slate-800' : 'bg-[#F4F6F9] text-slate-900 p-4 lg:p-8 min-h-screen'}`}>
+            {/* ATMOSPHERIC TECH GRID (LIGHT MODE) */}
             {viewState !== 'DASHBOARD' && (
                 <>
                     <div 
-                        className="fixed inset-0 pointer-events-none opacity-5 z-0"
+                        className="fixed inset-0 pointer-events-none opacity-40 z-0"
                         style={{
-                            backgroundImage: 'linear-gradient(to right, #ffffff 1px, transparent 1px), linear-gradient(to bottom, #ffffff 1px, transparent 1px)',
+                            backgroundImage: 'linear-gradient(to right, #e2e8f0 1px, transparent 1px), linear-gradient(to bottom, #e2e8f0 1px, transparent 1px)',
                             backgroundSize: '36px 36px'
                         }}
                     />
-                    <div className="fixed top-10 left-1/4 -translate-x-1/2 w-130 h-130 bg-cyan-400/10 rounded-full blur-[150px] pointer-events-none z-0" />
-                    <div className="fixed bottom-10 right-1/4 translate-x-1/2 w-100 h-100 bg-sky-600/15 rounded-full blur-[130px] pointer-events-none z-0" />
+                    <div className="fixed top-10 left-1/4 -translate-x-1/2 w-140 h-140 bg-cyan-400/10 rounded-full blur-[150px] pointer-events-none z-0" />
+                    <div className="fixed bottom-10 right-1/4 translate-x-1/2 w-100 h-100 bg-sky-400/10 rounded-full blur-[130px] pointer-events-none z-0" />
                 </>
             )}
 
@@ -1950,29 +2241,273 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 </div>
             )}
 
+            {deployModal.isOpen && (
+                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-3xl max-w-xl w-full p-6 space-y-5 shadow-2xl border border-slate-200 animate-in zoom-in-95 duration-200">
+                        {/* Modal Header */}
+                        <div className="flex justify-between items-start border-b border-slate-100 pb-4">
+                            <div className="flex items-center space-x-3">
+                                <div className="w-10 h-10 rounded-2xl bg-cyan-50 border border-cyan-200 text-cyan-700 flex items-center justify-center shrink-0">
+                                    <Repeat className="w-5 h-5 text-cyan-600" />
+                                </div>
+                                <div>
+                                    <div className="flex items-center space-x-2">
+                                        <h3 className="text-base font-black text-slate-900">
+                                            Deploy Ronde {deployModal.sourceRound + 1}
+                                        </h3>
+                                        <span className="px-2 py-0.5 rounded-full bg-cyan-100 text-cyan-800 text-[10px] font-bold font-mono">
+                                            {deployModal.sourceCounter}
+                                        </span>
+                                    </div>
+                                    <p className="text-xs text-slate-500 font-medium mt-0.5">
+                                        {deployModal.sourceDisputeCount} SKU mengalami selisih di Ronde {deployModal.sourceRound}.
+                                    </p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => setDeployModal(prev => ({ ...prev, isOpen: false }))}
+                                disabled={isDeploySubmitting}
+                                className="p-2 text-slate-400 hover:text-slate-700 bg-slate-100 rounded-xl cursor-pointer"
+                            >
+                                ✕
+                            </button>
+                        </div>
+
+                        {/* Mode Selector */}
+                        <div className="space-y-2">
+                            <label className="text-xs font-bold text-slate-700 block uppercase tracking-wider">
+                                Metode Penugasan Ronde {deployModal.sourceRound + 1}:
+                            </label>
+                            <div className="grid grid-cols-2 gap-3">
+                                <div
+                                    onClick={() => setDeployModal(prev => ({ ...prev, mode: 'SWAP' }))}
+                                    className={`p-3.5 rounded-2xl border-2 cursor-pointer transition-all ${
+                                        deployModal.mode === 'SWAP'
+                                            ? 'border-cyan-400 bg-cyan-50/50 shadow-xs'
+                                            : 'border-slate-200 bg-white hover:bg-slate-50'
+                                    }`}
+                                >
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                                            <Repeat className="w-3.5 h-3.5 text-cyan-600" />
+                                            <span>Swap 2 Arah</span>
+                                        </span>
+                                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                                            SOP Audit
+                                        </span>
+                                    </div>
+                                    <p className="text-[11px] text-slate-500 mt-1 leading-snug">
+                                        Tukar tugas selisih dengan counter lain yang sudah 100% selesai.
+                                    </p>
+                                </div>
+
+                                <div
+                                    onClick={() => setDeployModal(prev => ({ ...prev, mode: 'KEEP' }))}
+                                    className={`p-3.5 rounded-2xl border-2 cursor-pointer transition-all ${
+                                        deployModal.mode === 'KEEP'
+                                            ? 'border-cyan-400 bg-cyan-50/50 shadow-xs'
+                                            : 'border-slate-200 bg-white hover:bg-slate-50'
+                                    }`}
+                                >
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                                            <UserCheck className="w-3.5 h-3.5 text-slate-600" />
+                                            <span>Tetap di {deployModal.sourceCounter}</span>
+                                        </span>
+                                    </div>
+                                    <p className="text-[11px] text-slate-500 mt-1 leading-snug">
+                                        {deployModal.sourceCounter} menghitung ulang task selisih miliknya sendiri.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* If SWAP Mode: Target Counter Selection with Search Box */}
+                        {deployModal.mode === 'SWAP' && (
+                            <div className="space-y-3 pt-1">
+                                <div className="flex items-center justify-between">
+                                    <label className="text-xs font-bold text-slate-700 block uppercase tracking-wider">
+                                        Pilih Counter Partner untuk Bertukar:
+                                    </label>
+                                    <span className="text-[10px] font-bold text-slate-500">
+                                        Wajib selesai Ronde {deployModal.sourceRound} (100%)
+                                    </span>
+                                </div>
+
+                                {/* Search Box */}
+                                <div className="relative">
+                                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                                    <input
+                                        type="text"
+                                        value={deployModal.searchQuery}
+                                        onChange={(e) => setDeployModal(prev => ({ ...prev, searchQuery: e.target.value }))}
+                                        placeholder="Cari nama counter..."
+                                        className="cipher-input w-full pl-9 pr-3 py-2 rounded-xl text-xs font-bold outline-none"
+                                    />
+                                </div>
+
+                                {/* Counter Candidate List */}
+                                <div className="max-h-48 overflow-y-auto space-y-2 pr-1 scrollbar-thin">
+                                    {filteredCounterNames
+                                        .filter(cName => cName !== deployModal.sourceCounter)
+                                        .filter(cName => cName.toLowerCase().includes(deployModal.searchQuery.toLowerCase()))
+                                        .map((cName) => {
+                                            const cData = counterGroups[cName];
+                                            const cTasks = masterDataList.filter(m => m.counter === cName);
+                                            const cRound = cTasks.length > 0 ? Math.max(...cTasks.map(t => t.currentRound || 1)) : 1;
+                                            const isRoundMatch = cRound === deployModal.sourceRound;
+                                            const is100Pct = cData && cData.total > 0 && cData.counted === cData.total;
+                                            const isEligible = isRoundMatch && is100Pct;
+                                            const isSelected = deployModal.targetCounter === cName;
+
+                                            return (
+                                                <div
+                                                    key={cName}
+                                                    onClick={() => {
+                                                        if (isEligible) {
+                                                            setDeployModal(prev => ({ ...prev, targetCounter: cName }));
+                                                        }
+                                                    }}
+                                                    className={`p-3 rounded-2xl border transition-all flex items-center justify-between ${
+                                                        !isEligible
+                                                            ? 'bg-slate-100/60 border-slate-200 opacity-60 cursor-not-allowed'
+                                                            : isSelected
+                                                                ? 'bg-cyan-50 border-cyan-400 shadow-xs cursor-pointer'
+                                                                : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50 cursor-pointer'
+                                                    }`}
+                                                >
+                                                    <div className="flex items-center space-x-3">
+                                                        <div className="w-8 h-8 rounded-xl bg-slate-900 text-white text-xs font-black flex items-center justify-center uppercase shrink-0">
+                                                            {cName.slice(0, 2)}
+                                                        </div>
+                                                        <div>
+                                                            <div className="flex items-center space-x-2">
+                                                                <span className="text-xs font-black text-slate-900 capitalize">{cName}</span>
+                                                                <span className="text-[9px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
+                                                                    Ronde {cRound}
+                                                                </span>
+                                                            </div>
+                                                            <p className="text-[10px] text-slate-500">
+                                                                {cData ? `${cData.counted} / ${cData.total} SKU (${cData.errorCount} Selisih)` : '0 SKU'}
+                                                            </p>
+                                                        </div>
+                                                    </div>
+
+                                                    <div>
+                                                        {!isRoundMatch ? (
+                                                            <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md">
+                                                                Beda Ronde (R{cRound})
+                                                            </span>
+                                                        ) : !is100Pct ? (
+                                                            <span className="text-[10px] font-bold text-rose-700 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-md">
+                                                                Belum 100% ({cData ? Math.round((cData.counted / cData.total) * 100) : 0}%)
+                                                            </span>
+                                                        ) : isSelected ? (
+                                                            <span className="text-[10px] font-bold text-cyan-800 bg-cyan-200/80 px-2.5 py-1 rounded-lg">
+                                                                ✓ Terpilih
+                                                            </span>
+                                                        ) : (
+                                                            <span className="text-[10px] font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 px-2.5 py-1 rounded-lg">
+                                                                Pilih Partner
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+
+                                    {filteredCounterNames.filter(cName => cName !== deployModal.sourceCounter).length === 0 && (
+                                        <p className="text-xs text-slate-400 text-center py-4">
+                                            Tidak ada counter lain yang terdaftar.
+                                        </p>
+                                    )}
+                                </div>
+
+                                {/* Preview comparison card */}
+                                {deployModal.targetCounter && (
+                                    <div className="p-3.5 bg-cyan-50/70 border border-cyan-200 rounded-2xl space-y-2">
+                                        <span className="text-[10px] font-bold text-cyan-800 uppercase tracking-wider block">
+                                            Ringkasan Pertukaran 2 Arah (Mutual Swap):
+                                        </span>
+                                        <div className="flex items-center justify-between text-xs font-bold text-slate-800">
+                                            <div className="text-center flex-1">
+                                                <span className="block text-slate-500 font-normal text-[10px]">Tugas Selisih Dari</span>
+                                                <span className="capitalize font-black text-cyan-950">{deployModal.sourceCounter}</span>
+                                                <span className="block text-rose-600 font-mono text-[11px] font-black">{deployModal.sourceDisputeCount} SKU</span>
+                                            </div>
+                                            <div className="p-2 bg-white rounded-full shadow-xs text-cyan-600 shrink-0">
+                                                <Repeat className="w-4 h-4" />
+                                            </div>
+                                            <div className="text-center flex-1">
+                                                <span className="block text-slate-500 font-normal text-[10px]">Ditukar Ke</span>
+                                                <span className="capitalize font-black text-cyan-950">{deployModal.targetCounter}</span>
+                                                <span className="block text-rose-600 font-mono text-[11px] font-black">
+                                                    {counterGroups[deployModal.targetCounter]?.errorCount || 0} SKU
+                                                </span>
+                                            </div>
+                                        </div>
+                                        <p className="text-[10px] text-cyan-900/80 text-center leading-snug">
+                                            Barang yang sudah cocok (match) di masing-masing counter tetap terkunci dan tidak ikut bertukar.
+                                        </p>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* Modal Actions */}
+                        <div className="flex justify-end space-x-3 pt-3 border-t border-slate-100">
+                            <button
+                                onClick={() => setDeployModal(prev => ({ ...prev, isOpen: false }))}
+                                disabled={isDeploySubmitting}
+                                className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold cursor-pointer disabled:opacity-50"
+                            >
+                                Batal
+                            </button>
+                            <button
+                                onClick={handleExecuteDeploy}
+                                disabled={isDeploySubmitting || (deployModal.mode === 'SWAP' && !deployModal.targetCounter)}
+                                className="px-6 py-2.5 bg-cyan-400 hover:bg-cyan-300 disabled:opacity-50 text-slate-950 rounded-xl text-xs font-black shadow-md flex items-center space-x-2 cursor-pointer transition-all"
+                            >
+                                {isDeploySubmitting ? (
+                                    <>
+                                        <Loader2 className="w-4 h-4 animate-spin text-slate-950" />
+                                        <span>Menyimpan ke Cloud...</span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <PlayCircle className="w-4 h-4 text-slate-950" />
+                                        <span>Deploy Ronde {deployModal.sourceRound + 1} Sekarang</span>
+                                    </>
+                                )}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* SCREEN 1: LANDING PAGE */}
             {viewState === 'LANDING' && (
                 <div className="space-y-6 animate-in fade-in duration-500 relative z-10 max-w-7xl mx-auto">
-                    {/* TOP COMMAND HEADER */}
-                    <div className="relative overflow-hidden rounded-3xl p-6 sm:p-7 backdrop-blur-xl bg-slate-900/65 border border-cyan-400/25 shadow-[0_20px_60px_rgba(0,0,0,0.8),0_5px_25px_rgba(0,242,254,0.06)] flex flex-col md:flex-row justify-between items-start md:items-center gap-5">
+                    {/* TOP COMMAND HEADER (NOCTUS LIGHT ENTERPRISE) */}
+                    <div className="relative overflow-hidden rounded-3xl p-6 sm:p-7 bg-white border border-slate-200/90 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-5">
                         <div className="flex items-center space-x-4 relative z-10">
                             <div className="w-13 h-13 flex items-center justify-center shrink-0">
                                 <img 
                                     src="/logo.png" 
                                     alt="Noctus Count Monogram" 
                                     className="w-full h-full object-contain transition-transform duration-300 hover:scale-105"
-                                    style={{ filter: 'drop-shadow(0 0 16px rgba(0,242,254,0.45)) drop-shadow(0 4px 10px rgba(0,0,0,0.8))' }}
+                                    style={{ filter: 'drop-shadow(0 0 12px rgba(0,242,254,0.4)) drop-shadow(0 2px 6px rgba(15,23,42,0.1))' }}
                                 />
                             </div>
                             <div className="space-y-0.5">
-                                <h1 className="text-xl sm:text-2xl font-light text-white tracking-[0.2em] uppercase flex items-center gap-2.5">
+                                <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-[0.2em] uppercase flex items-center gap-2.5">
                                     <span>NOCTUS COUNT</span>
-                                    <span className="text-[9px] font-mono font-bold uppercase tracking-[0.15em] px-2 py-0.5 bg-cyan-400/10 text-cyan-300 border border-cyan-400/30 rounded-md shadow-[0_0_10px_rgba(0,242,254,0.15)]">
+                                    <span className="text-[9px] font-mono font-bold uppercase tracking-[0.15em] px-2 py-0.5 bg-cyan-50 text-cyan-800 border border-cyan-300 rounded-md">
                                         SYSTEMS
                                     </span>
                                 </h1>
-                                <p className="font-mono text-[10px] text-slate-400 tracking-[0.15em] uppercase">
-                                    ENTERPRISE STOCK OPNAME • DEVELOPED BY <span className="text-cyan-400 font-bold">NOCTUS</span>
+                                <p className="font-mono text-[10px] text-slate-500 tracking-[0.15em] uppercase font-bold">
+                                    ENTERPRISE STOCK OPNAME • DEVELOPED BY <span className="text-cyan-600 font-extrabold">NOCTUS</span>
                                 </p>
                             </div>
                         </div>
@@ -1980,24 +2515,24 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                             {onSwitchToCounterView && (
                                 <button
                                     onClick={onSwitchToCounterView}
-                                    className="px-4 py-2.5 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 border border-emerald-400/30 rounded-xl text-xs font-mono font-bold uppercase tracking-wider flex items-center justify-center space-x-2 shadow-[0_0_15px_rgba(16,185,129,0.15)] transition-all cursor-pointer"
+                                    className="px-4 py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-xl text-xs font-mono font-bold uppercase tracking-wider flex items-center justify-center space-x-2 transition-all cursor-pointer shadow-xs"
                                     title="Buka Tampilan HP Counter untuk Demo"
                                 >
-                                    <Smartphone className="w-4 h-4 text-emerald-400" />
+                                    <Smartphone className="w-4 h-4 text-emerald-600" />
                                     <span className="hidden sm:inline">Demo Mode Counter</span>
                                 </button>
                             )}
                             {effectiveRole === 'owner' && (
                                 <button 
                                     onClick={() => setViewState('WIZARD_SETUP')} 
-                                    className="flex-1 md:flex-none px-5 py-2.5 bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-mono text-xs font-bold uppercase tracking-wider rounded-xl flex items-center justify-center space-x-2 shadow-[0_0_20px_rgba(0,242,254,0.35)] hover:shadow-[0_0_25px_rgba(0,242,254,0.55)] transition-all cursor-pointer active:scale-95"
+                                    className="flex-1 md:flex-none px-5 py-2.5 bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-mono text-xs font-bold uppercase tracking-wider rounded-xl flex items-center justify-center space-x-2 shadow-[0_0_15px_rgba(0,242,254,0.3)] transition-all cursor-pointer active:scale-95"
                                 >
                                     <Plus className="w-4 h-4" /><span>New Project</span>
                                 </button>
                             )}
                             <button 
                                 onClick={onBackToApp} 
-                                className="px-3.5 py-2.5 bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white border border-white/10 rounded-xl text-xs font-bold flex items-center justify-center transition-all cursor-pointer"
+                                className="px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 rounded-xl text-xs font-bold flex items-center justify-center transition-all cursor-pointer"
                                 title="Keluar"
                             >
                                 <LogOut className="w-4 h-4" />
@@ -2005,17 +2540,17 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                         </div>
                     </div>
 
-                    {/* INTERACTIVE NAVIGATION & TELEMETRY STRIP (FILLS THE EMPTY VOID) */}
+                    {/* INTERACTIVE NAVIGATION & TELEMETRY STRIP */}
                     {effectiveRole === 'owner' && (
-                        <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-4 p-2 rounded-2xl backdrop-blur-xl bg-slate-900/60 border border-white/10">
+                        <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-4 p-2 rounded-2xl bg-white border border-slate-200/90 shadow-xs">
                             {/* LEFT: TABS */}
                             <div className="flex space-x-2">
                                 <button 
                                     onClick={() => setLandingTab('projects')} 
                                     className={`px-4 py-2 text-xs font-mono font-bold tracking-wider uppercase rounded-xl transition-all flex items-center space-x-2 cursor-pointer ${
                                         landingTab === 'projects' 
-                                            ? 'bg-cyan-400 text-slate-950 shadow-[0_0_15px_rgba(0,242,254,0.3)]' 
-                                            : 'text-slate-400 hover:text-white hover:bg-white/5'
+                                            ? 'bg-cyan-400 text-slate-950 shadow-[0_0_12px_rgba(0,242,254,0.25)]' 
+                                            : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
                                     }`}
                                 >
                                     <Building2 className="w-3.5 h-3.5" /><span>Lokasi & Project</span>
@@ -2024,8 +2559,8 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                     onClick={() => setLandingTab('accounts')} 
                                     className={`px-4 py-2 text-xs font-mono font-bold tracking-wider uppercase rounded-xl transition-all flex items-center space-x-2 cursor-pointer ${
                                         landingTab === 'accounts' 
-                                            ? 'bg-cyan-400 text-slate-950 shadow-[0_0_15px_rgba(0,242,254,0.3)]' 
-                                            : 'text-slate-400 hover:text-white hover:bg-white/5'
+                                            ? 'bg-cyan-400 text-slate-950 shadow-[0_0_12px_rgba(0,242,254,0.25)]' 
+                                            : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
                                     }`}
                                 >
                                     <Contact className="w-3.5 h-3.5" /><span>KTP Cloud</span>
@@ -2033,25 +2568,25 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                             </div>
 
                             {/* RIGHT: SYSTEM TELEMETRY CAPSULE */}
-                            <div className="flex items-center space-x-4 px-3.5 py-1.5 bg-black/40 border border-white/5 rounded-xl text-xs font-mono">
-                                <div className="flex items-center space-x-1.5 text-slate-400">
-                                    <span className="text-[10px] uppercase tracking-wider text-slate-500">WMS:</span>
-                                    <span className="font-bold text-white">{warehouseList.length}</span>
+                            <div className="flex items-center space-x-4 px-3.5 py-1.5 bg-slate-100 border border-slate-200 rounded-xl text-xs font-mono">
+                                <div className="flex items-center space-x-1.5 text-slate-600">
+                                    <span className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">WMS:</span>
+                                    <span className="font-black text-slate-900">{warehouseList.length}</span>
                                 </div>
-                                <span className="text-slate-700">•</span>
-                                <div className="flex items-center space-x-1.5 text-slate-400">
-                                    <span className="text-[10px] uppercase tracking-wider text-slate-500">Consign:</span>
-                                    <span className="font-bold text-white">{consignmentStoreList.length}</span>
+                                <span className="text-slate-300">•</span>
+                                <div className="flex items-center space-x-1.5 text-slate-600">
+                                    <span className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Consign:</span>
+                                    <span className="font-black text-slate-900">{consignmentStoreList.length}</span>
                                 </div>
-                                <span className="text-slate-700">•</span>
-                                <div className="flex items-center space-x-1.5 text-slate-400">
-                                    <span className="text-[10px] uppercase tracking-wider text-slate-500">Projects:</span>
-                                    <span className="font-bold text-cyan-400">{projectHistory.length}</span>
+                                <span className="text-slate-300">•</span>
+                                <div className="flex items-center space-x-1.5 text-slate-600">
+                                    <span className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Projects:</span>
+                                    <span className="font-black text-cyan-700">{projectHistory.length}</span>
                                 </div>
-                                <span className="text-slate-700">•</span>
+                                <span className="text-slate-300">•</span>
                                 <div className="flex items-center space-x-1.5">
-                                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
-                                    <span className="text-[10px] text-emerald-400 uppercase tracking-widest font-bold">ONLINE</span>
+                                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                                    <span className="text-[10px] text-emerald-700 uppercase tracking-widest font-black">ONLINE</span>
                                 </div>
                             </div>
                         </div>
@@ -2062,13 +2597,13 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                             {effectiveRole === 'owner' && (
                                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                                     {/* MASTER GUDANG WMS */}
-                                    <div className="rounded-3xl backdrop-blur-xl bg-slate-900/60 border border-cyan-400/20 p-6 shadow-xl space-y-4">
-                                        <div className="border-b border-white/10 pb-3 flex justify-between items-center">
-                                            <h3 className="text-sm font-mono font-bold text-white uppercase tracking-wider flex items-center space-x-2">
-                                                <Building2 className="w-4 h-4 text-cyan-400" />
+                                    <div className="rounded-3xl bg-white border border-slate-200/90 p-6 shadow-sm space-y-4">
+                                        <div className="border-b border-slate-100 pb-3 flex justify-between items-center">
+                                            <h3 className="text-sm font-mono font-black text-slate-900 uppercase tracking-wider flex items-center space-x-2">
+                                                <Building2 className="w-4 h-4 text-cyan-600" />
                                                 <span>Master Gudang WMS</span>
                                             </h3>
-                                            <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-cyan-400/10 text-cyan-400 border border-cyan-400/20">
+                                            <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-cyan-50 text-cyan-800 border border-cyan-300 font-bold">
                                                 {warehouseList.length} Gudang
                                             </span>
                                         </div>
@@ -2078,36 +2613,36 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                 placeholder="Nama Gudang Baru..." 
                                                 value={newWhName} 
                                                 onChange={(e) => setNewWhName(e.target.value)} 
-                                                className="cipher-input flex-1 px-3.5 py-2 text-xs font-mono rounded-xl outline-none" 
+                                                className="cipher-input flex-1 px-3.5 py-2 text-xs font-mono font-bold rounded-xl outline-none" 
                                             />
                                             <button 
                                                 onClick={handleAddWarehouseCloud} 
-                                                className="px-4 py-2 bg-cyan-400 hover:bg-cyan-300 text-slate-950 rounded-xl text-xs font-mono font-bold uppercase tracking-wider shadow-[0_0_12px_rgba(0,242,254,0.3)] transition-all cursor-pointer"
+                                                className="px-4 py-2 bg-cyan-400 hover:bg-cyan-300 text-slate-950 rounded-xl text-xs font-mono font-bold uppercase tracking-wider shadow-xs transition-all cursor-pointer"
                                             >
                                                 + Tambah
                                             </button>
                                         </div>
                                         <div className="max-h-52 overflow-y-auto space-y-2 pr-1 scrollbar-thin">
                                             {warehouseList.map((wh) => (
-                                                <div key={wh.id} className="p-3 bg-white/3 hover:bg-white/6 border border-white/8 rounded-xl flex justify-between items-center transition-colors">
-                                                    <span className="font-mono font-semibold text-xs text-slate-200">{wh.name}</span>
-                                                    <span className="text-[9px] font-mono uppercase tracking-wider text-slate-500 bg-white/5 px-2 py-0.5 rounded border border-white/5">WMS Node</span>
+                                                <div key={wh.id} className="p-3 bg-slate-50 hover:bg-slate-100/80 border border-slate-200 rounded-xl flex justify-between items-center transition-colors">
+                                                    <span className="font-mono font-bold text-xs text-slate-800">{wh.name}</span>
+                                                    <span className="text-[9px] font-mono uppercase tracking-wider text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-200">WMS Node</span>
                                                 </div>
                                             ))}
                                             {warehouseList.length === 0 && (
-                                                <p className="text-xs text-slate-500 font-mono text-center py-4">Belum ada gudang terdaftar.</p>
+                                                <p className="text-xs text-slate-400 font-mono text-center py-4">Belum ada gudang terdaftar.</p>
                                             )}
                                         </div>
                                     </div>
 
                                     {/* MASTER TOKO CONSIGNMENT */}
-                                    <div className="rounded-3xl backdrop-blur-xl bg-slate-900/60 border border-purple-400/20 p-6 shadow-xl space-y-4">
-                                        <div className="border-b border-white/10 pb-3 flex justify-between items-center">
-                                            <h3 className="text-sm font-mono font-bold text-white uppercase tracking-wider flex items-center space-x-2">
-                                                <Store className="w-4 h-4 text-purple-400" />
+                                    <div className="rounded-3xl bg-white border border-slate-200/90 p-6 shadow-sm space-y-4">
+                                        <div className="border-b border-slate-100 pb-3 flex justify-between items-center">
+                                            <h3 className="text-sm font-mono font-black text-slate-900 uppercase tracking-wider flex items-center space-x-2">
+                                                <Store className="w-4 h-4 text-purple-600" />
                                                 <span>Master Toko Consignment</span>
                                             </h3>
-                                            <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-purple-400/10 text-purple-300 border border-purple-400/20">
+                                            <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-purple-50 text-purple-800 border border-purple-300 font-bold">
                                                 {consignmentStoreList.length} Outlet
                                             </span>
                                         </div>
@@ -2117,24 +2652,24 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                 placeholder="Nama Toko Baru..." 
                                                 value={newStoreName} 
                                                 onChange={(e) => setNewStoreName(e.target.value)} 
-                                                className="cipher-input flex-1 px-3.5 py-2 text-xs font-mono rounded-xl outline-none" 
+                                                className="cipher-input flex-1 px-3.5 py-2 text-xs font-mono font-bold rounded-xl outline-none focus:border-purple-400" 
                                             />
                                             <button 
                                                 onClick={handleAddStoreCloud} 
-                                                className="px-4 py-2 bg-purple-500 hover:bg-purple-400 text-white rounded-xl text-xs font-mono font-bold uppercase tracking-wider shadow-[0_0_12px_rgba(168,85,247,0.3)] transition-all cursor-pointer"
+                                                className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-mono font-bold uppercase tracking-wider shadow-xs transition-all cursor-pointer"
                                             >
                                                 + Tambah
                                             </button>
                                         </div>
                                         <div className="max-h-52 overflow-y-auto space-y-2 pr-1 scrollbar-thin">
                                             {consignmentStoreList.map((st) => (
-                                                <div key={st.id} className="p-3 bg-white/3 hover:bg-white/6 border border-white/8 rounded-xl flex justify-between items-center transition-colors">
-                                                    <span className="font-mono font-semibold text-xs text-slate-200">{st.name}</span>
-                                                    <span className="text-[9px] font-mono uppercase tracking-wider text-purple-400 bg-purple-500/10 px-2 py-0.5 rounded border border-purple-500/20">Consignment</span>
+                                                <div key={st.id} className="p-3 bg-slate-50 hover:bg-slate-100/80 border border-slate-200 rounded-xl flex justify-between items-center transition-colors">
+                                                    <span className="font-mono font-bold text-xs text-slate-800">{st.name}</span>
+                                                    <span className="text-[9px] font-mono uppercase tracking-wider text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-200">Consignment</span>
                                                 </div>
                                             ))}
                                             {consignmentStoreList.length === 0 && (
-                                                <p className="text-xs text-slate-500 font-mono text-center py-4">Belum ada toko terdaftar.</p>
+                                                <p className="text-xs text-slate-400 font-mono text-center py-4">Belum ada toko terdaftar.</p>
                                             )}
                                         </div>
                                     </div>
@@ -2142,19 +2677,19 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                             )}
 
                             {/* LIVE FIRESTORE PROJECTS TABLE */}
-                            <div className="rounded-3xl backdrop-blur-xl bg-slate-900/60 border border-white/10 p-6 shadow-xl space-y-5">
-                                <div className="flex justify-between items-center border-b border-white/10 pb-3">
-                                    <h3 className="text-sm font-mono font-bold text-white uppercase tracking-wider flex items-center space-x-2">
-                                        <Database className="w-4 h-4 text-cyan-400" />
+                            <div className="rounded-3xl bg-white border border-slate-200/90 p-6 shadow-sm space-y-5">
+                                <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+                                    <h3 className="text-sm font-mono font-black text-slate-900 uppercase tracking-wider flex items-center space-x-2">
+                                        <Database className="w-4 h-4 text-cyan-600" />
                                         <span>Live Firestore Projects</span>
                                     </h3>
-                                    <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider">
+                                    <span className="text-[10px] font-mono text-slate-500 uppercase tracking-wider font-bold">
                                         {projectHistory.length} sesi terarsip
                                     </span>
                                 </div>
-                                <div className="overflow-x-auto border border-white/10 rounded-2xl">
+                                <div className="overflow-x-auto border border-slate-200 rounded-2xl">
                                     <table className="w-full text-left text-xs font-mono">
-                                        <thead className="bg-white/5 font-bold text-slate-400 border-b border-white/10">
+                                        <thead className="bg-slate-50 font-bold text-slate-600 border-b border-slate-200">
                                             <tr>
                                                 <th className="p-4 uppercase tracking-wider">KODE PROJECT</th>
                                                 <th className="p-4 uppercase tracking-wider">LOKASI</th>
@@ -2163,21 +2698,21 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                 <th className="p-4 text-right uppercase tracking-wider">AKSI</th>
                                             </tr>
                                         </thead>
-                                        <tbody className="divide-y divide-white/5">
+                                        <tbody className="divide-y divide-slate-100">
                                             {projectHistory.map((proj) => (
-                                                <tr key={proj.id} className="hover:bg-white/4 transition-colors">
-                                                    <td className="p-4 font-bold text-cyan-400">{proj.sessionCode}</td>
-                                                    <td className="p-4 font-medium text-slate-200">{proj.locationName}</td>
-                                                    <td className="p-4 text-slate-400">{proj.opnameDate}</td>
+                                                <tr key={proj.id} className="hover:bg-slate-50/80 transition-colors">
+                                                    <td className="p-4 font-black text-cyan-700">{proj.sessionCode}</td>
+                                                    <td className="p-4 font-bold text-slate-800">{proj.locationName}</td>
+                                                    <td className="p-4 text-slate-500">{proj.opnameDate}</td>
                                                     <td className="p-4 text-center">
-                                                        <span className="px-2.5 py-1 rounded-md bg-emerald-400/10 text-emerald-400 border border-emerald-400/30 text-[10px] font-bold uppercase tracking-wider shadow-[0_0_8px_rgba(52,211,153,0.15)]">
+                                                        <span className="px-2.5 py-1 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-300 text-[10px] font-black uppercase tracking-wider">
                                                             {proj.status}
                                                         </span>
                                                     </td>
                                                     <td className="p-4 text-right space-x-2">
                                                         <button 
                                                             onClick={() => handleOpenHistoricalProject(proj)} 
-                                                            className="px-3.5 py-1.5 bg-cyan-400 hover:bg-cyan-300 text-slate-950 rounded-xl text-xs font-bold inline-flex items-center space-x-1.5 shadow-[0_0_12px_rgba(0,242,254,0.25)] transition-all cursor-pointer"
+                                                            className="px-3.5 py-1.5 bg-cyan-400 hover:bg-cyan-300 text-slate-950 rounded-xl text-xs font-bold inline-flex items-center space-x-1.5 shadow-xs transition-all cursor-pointer"
                                                         >
                                                             <PlayCircle className="w-3.5 h-3.5" />
                                                             <span>Buka Dashboard</span>
@@ -2185,7 +2720,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                         {effectiveRole === 'owner' && (
                                                             <button 
                                                                 onClick={() => setProjectToDelete(proj)} 
-                                                                className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-xl transition-colors cursor-pointer"
+                                                                className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors cursor-pointer"
                                                                 title="Hapus Project"
                                                             >
                                                                 <Trash2 className="w-3.5 h-3.5" />
@@ -2196,7 +2731,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                             ))}
                                             {projectHistory.length === 0 && (
                                                 <tr>
-                                                    <td colSpan={5} className="p-8 text-center text-slate-500">
+                                                    <td colSpan={5} className="p-8 text-center text-slate-400 font-bold">
                                                         Belum ada project aktif di Firestore. Klik + New Project untuk membuat baru.
                                                     </td>
                                                 </tr>
@@ -2211,13 +2746,13 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     {landingTab === 'accounts' && effectiveRole === 'owner' && (
                         <div className="space-y-6">
                             {/* OWNER PROFILE */}
-                            <div className="rounded-3xl backdrop-blur-xl bg-slate-900/60 border border-white/10 p-6 shadow-xl space-y-4">
-                                <div className="border-b border-white/10 pb-3 flex justify-between items-center">
-                                    <h3 className="text-sm font-mono font-bold text-white uppercase tracking-wider flex items-center space-x-2">
-                                        <KeyRound className="w-4 h-4 text-cyan-400" />
+                            <div className="rounded-3xl bg-white border border-slate-200/90 p-6 shadow-sm space-y-4">
+                                <div className="border-b border-slate-100 pb-3 flex justify-between items-center">
+                                    <h3 className="text-sm font-mono font-bold text-slate-900 uppercase tracking-wider flex items-center space-x-2">
+                                        <KeyRound className="w-4 h-4 text-cyan-600" />
                                         <span>Pengaturan Akun & Profil Owner</span>
                                     </h3>
-                                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-cyan-400/10 text-cyan-300 border border-cyan-400/20">
+                                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-cyan-50 text-cyan-700 border border-cyan-200 font-semibold">
                                         Master Authorization
                                     </span>
                                 </div>
@@ -2248,7 +2783,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                 <div className="flex justify-end">
                                     <button 
                                         onClick={handleUpdateOwnerAccount} 
-                                        className="px-5 py-2.5 bg-cyan-400 hover:bg-cyan-300 text-slate-950 rounded-xl text-xs font-mono font-bold uppercase tracking-wider shadow-[0_0_15px_rgba(0,242,254,0.3)] flex items-center space-x-1.5 transition-all cursor-pointer"
+                                        className="px-5 py-2.5 bg-cyan-400 hover:bg-cyan-300 text-slate-950 rounded-xl text-xs font-mono font-bold uppercase tracking-wider shadow-sm flex items-center space-x-1.5 transition-all cursor-pointer"
                                     >
                                         <Save className="w-4 h-4" />
                                         <span>Simpan Profil Owner</span>
@@ -2257,38 +2792,38 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                             </div>
 
                             {/* MASTER KTP & AUTHORIZATION */}
-                            <div className="rounded-3xl backdrop-blur-xl bg-slate-900/60 border border-white/10 p-6 shadow-xl space-y-6">
-                                <div className="flex flex-col md:flex-row justify-between md:items-center gap-4 border-b border-white/10 pb-4">
+                            <div className="rounded-3xl bg-white border border-slate-200/90 p-6 shadow-sm space-y-6">
+                                <div className="flex flex-col md:flex-row justify-between md:items-center gap-4 border-b border-slate-100 pb-4">
                                     <div>
-                                        <h3 className="text-sm font-mono font-bold text-white uppercase tracking-wider flex items-center gap-2">
-                                            <Contact className="w-4 h-4 text-cyan-400" />
+                                        <h3 className="text-sm font-mono font-bold text-slate-900 uppercase tracking-wider flex items-center gap-2">
+                                            <Contact className="w-4 h-4 text-cyan-600" />
                                             <span>Master KTP & Otorisasi Personel</span>
                                         </h3>
-                                        <p className="text-[11px] font-mono text-slate-400 mt-0.5">Kelola akun counter dan supervisor cloud</p>
+                                        <p className="text-[11px] font-mono text-slate-500 mt-0.5">Kelola akun counter dan supervisor cloud</p>
                                     </div>
                                     <div className="flex flex-wrap items-center gap-2">
                                         <button 
                                             onClick={handleDownloadKTPTemplate} 
-                                            className="px-3 py-2 bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10 rounded-xl text-xs font-mono flex items-center space-x-1 transition-all cursor-pointer"
+                                            className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-xl text-xs font-mono flex items-center space-x-1 transition-all cursor-pointer"
                                         >
-                                            <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
+                                            <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
                                             <span>Template KTP</span>
                                         </button>
-                                        <label className="px-3.5 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-400/30 rounded-xl text-xs font-mono font-bold flex items-center space-x-1.5 shadow-[0_0_12px_rgba(16,185,129,0.2)] transition-all cursor-pointer">
+                                        <label className="px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-300 rounded-xl text-xs font-mono font-bold flex items-center space-x-1.5 shadow-xs transition-all cursor-pointer">
                                             <Upload className="w-4 h-4" />
                                             <span>Upload KTP Massal</span>
                                             <input type="file" accept=".xlsx, .xls, .csv" className="hidden" onChange={(e) => { if (e.target.files?.[0]) handleUploadBulkKTPAccounts(e.target.files[0]); }} />
                                         </label>
                                         <button 
                                             onClick={handleGenerateCredentialsText} 
-                                            className="px-3.5 py-2 bg-cyan-400 hover:bg-cyan-300 text-slate-950 rounded-xl text-xs font-mono font-bold flex items-center space-x-1.5 shadow-[0_0_12px_rgba(0,242,254,0.3)] transition-all cursor-pointer"
+                                            className="px-3.5 py-2 bg-cyan-400 hover:bg-cyan-300 text-slate-950 rounded-xl text-xs font-mono font-bold flex items-center space-x-1.5 shadow-sm transition-all cursor-pointer"
                                         >
                                             <Copy className="w-4 h-4" />
                                             <span>Salin Kredensial</span>
                                         </button>
                                         <button 
                                             onClick={handleBlastEmailCredentials} 
-                                            className="px-3.5 py-2 bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 border border-purple-400/30 rounded-xl text-xs font-mono font-bold flex items-center space-x-1.5 shadow-[0_0_12px_rgba(168,85,247,0.2)] transition-all cursor-pointer"
+                                            className="px-3.5 py-2 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-300 rounded-xl text-xs font-mono font-bold flex items-center space-x-1.5 shadow-xs transition-all cursor-pointer"
                                         >
                                             <Mail className="w-4 h-4" />
                                             <span>Blast Email</span>
@@ -2297,8 +2832,8 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                 </div>
 
                                 {/* MANUAL KTP REGISTRATION */}
-                                <div className="p-4 bg-black/40 border border-white/5 rounded-2xl space-y-3">
-                                    <h4 className="text-xs font-mono font-bold text-slate-300 uppercase tracking-wider">Daftar KTP Manual</h4>
+                                <div className="p-4 bg-slate-50/80 border border-slate-200/80 rounded-2xl space-y-3">
+                                    <h4 className="text-xs font-mono font-bold text-slate-700 uppercase tracking-wider">Daftar KTP Manual</h4>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                         <input type="text" placeholder="Username..." value={newAccUser} onChange={(e) => setNewAccUser(e.target.value)} className="cipher-input px-3.5 py-2 text-xs font-mono rounded-xl outline-none" />
                                         <input type="text" placeholder="Nama Lengkap..." value={newAccName} onChange={(e) => setNewAccName(e.target.value)} className="cipher-input px-3.5 py-2 text-xs font-mono rounded-xl outline-none" />
@@ -2306,7 +2841,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                         <input type="email" placeholder="Email..." value={newAccEmail} onChange={(e) => setNewAccEmail(e.target.value)} className="cipher-input px-3.5 py-2 text-xs font-mono rounded-xl outline-none" />
                                     </div>
                                     <div className="flex justify-end">
-                                        <button onClick={handleAddGlobalAccount} className="px-4 py-2 bg-cyan-400 hover:bg-cyan-300 text-slate-950 rounded-xl text-xs font-mono font-bold uppercase tracking-wider shadow-[0_0_12px_rgba(0,242,254,0.3)] flex items-center space-x-2 cursor-pointer transition-all">
+                                        <button onClick={handleAddGlobalAccount} className="px-4 py-2 bg-cyan-400 hover:bg-cyan-300 text-slate-950 rounded-xl text-xs font-mono font-bold uppercase tracking-wider shadow-sm flex items-center space-x-2 cursor-pointer transition-all">
                                             <UserPlus className="w-4 h-4" /><span>Buat Akun KTP</span>
                                         </button>
                                     </div>
@@ -2314,7 +2849,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
                                 {/* SEARCH BAR */}
                                 <div className="relative w-full">
-                                    <Search className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
+                                    <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
                                     <input 
                                         type="text" 
                                         value={ktpSearch} 
@@ -2325,9 +2860,9 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                 </div>
 
                                 {/* TABLE */}
-                                <div className="overflow-x-auto border border-white/10 rounded-2xl">
+                                <div className="overflow-x-auto border border-slate-200 rounded-2xl">
                                     <table className="w-full text-left text-xs font-mono">
-                                        <thead className="bg-white/5 font-bold text-slate-400 border-b border-white/10">
+                                        <thead className="bg-slate-50 font-bold text-slate-600 border-b border-slate-200">
                                             <tr>
                                                 <th className="p-4 uppercase tracking-wider">USERNAME</th>
                                                 <th className="p-4 uppercase tracking-wider">NAMA PEGAWAI</th>
@@ -2336,22 +2871,22 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                 <th className="p-4 text-right uppercase tracking-wider">AKSI</th>
                                             </tr>
                                         </thead>
-                                        <tbody className="divide-y divide-white/5">
+                                        <tbody className="divide-y divide-slate-100">
                                             {filteredGlobalAccounts.map((acc) => (
-                                                <tr key={acc.id} className="hover:bg-white/4 transition-colors">
-                                                    <td className="p-4 font-bold text-cyan-400">{acc.username}</td>
-                                                    <td className="p-4 font-medium text-slate-200">{acc.name}</td>
-                                                    <td className="p-4 text-slate-400 text-xs">{acc.email || '-'}</td>
-                                                    <td className="p-4 text-center font-bold text-slate-300 flex justify-center items-center space-x-2">
+                                                <tr key={acc.id} className="hover:bg-slate-50/80 transition-colors">
+                                                    <td className="p-4 font-bold text-cyan-700">{acc.username}</td>
+                                                    <td className="p-4 font-medium text-slate-800">{acc.name}</td>
+                                                    <td className="p-4 text-slate-500 text-xs">{acc.email || '-'}</td>
+                                                    <td className="p-4 text-center font-bold text-slate-700 flex justify-center items-center space-x-2">
                                                         <span>{visiblePins[acc.id] ? acc.pin : '••••'}</span>
-                                                        <button onClick={() => togglePinVisibility(acc.id)} className="text-slate-500 hover:text-cyan-400 cursor-pointer">
+                                                        <button onClick={() => togglePinVisibility(acc.id)} className="text-slate-400 hover:text-cyan-600 cursor-pointer">
                                                             {visiblePins[acc.id] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                                                         </button>
                                                     </td>
                                                     <td className="p-4 text-right space-x-2">
-                                                        <button onClick={() => setEditingAccount(acc)} className="p-1.5 text-cyan-400 hover:bg-cyan-400/10 rounded-lg cursor-pointer" title="Edit Akun KTP"><Edit2 className="w-4 h-4" /></button>
-                                                        <button onClick={() => handleSendIndividualEmail(acc)} className="p-1.5 text-purple-400 hover:bg-purple-400/10 rounded-lg cursor-pointer" title="Kirim Email Individual"><Mail className="w-4 h-4" /></button>
-                                                        <button onClick={() => handleDeleteGlobalAccount(acc.username)} className="p-1.5 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg cursor-pointer"><Trash2 className="w-4 h-4" /></button>
+                                                        <button onClick={() => setEditingAccount(acc)} className="p-1.5 text-cyan-600 hover:bg-cyan-50 rounded-lg cursor-pointer" title="Edit Akun KTP"><Edit2 className="w-4 h-4" /></button>
+                                                        <button onClick={() => handleSendIndividualEmail(acc)} className="p-1.5 text-purple-600 hover:bg-purple-50 rounded-lg cursor-pointer" title="Kirim Email Individual"><Mail className="w-4 h-4" /></button>
+                                                        <button onClick={() => handleDeleteGlobalAccount(acc.username)} className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg cursor-pointer"><Trash2 className="w-4 h-4" /></button>
                                                     </td>
                                                 </tr>
                                             ))}
@@ -2367,61 +2902,61 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             {/* SCREEN 2: WIZARD SETUP */}
             {viewState === 'WIZARD_SETUP' && (
                 <div className="max-w-2xl mx-auto space-y-6 animate-in slide-in-from-bottom-4 duration-500 relative z-10">
-                    <div className="rounded-3xl backdrop-blur-xl bg-slate-900/65 border border-cyan-400/25 p-6 shadow-xl flex items-center justify-between">
+                    <div className="rounded-3xl bg-white border border-slate-200/90 p-6 shadow-sm flex items-center justify-between">
                         <div className="flex items-center space-x-4">
-                            <div className="p-3 bg-cyan-400/10 text-cyan-400 border border-cyan-400/20 rounded-2xl">
+                            <div className="p-3 bg-cyan-50 text-cyan-600 border border-cyan-200 rounded-2xl">
                                 <SlidersHorizontal className="w-6 h-6" />
                             </div>
                             <div>
-                                <h1 className="text-xl font-mono font-bold text-white uppercase tracking-wider">Project Setup</h1>
-                                <p className="text-xs font-mono text-slate-400">Konfigurasi sesi opname baru</p>
+                                <h1 className="text-xl font-mono font-bold text-slate-900 uppercase tracking-wider">Project Setup</h1>
+                                <p className="text-xs font-mono text-slate-500">Konfigurasi sesi opname baru</p>
                             </div>
                         </div>
-                        <button onClick={() => setViewState('LANDING')} className="p-2.5 bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 rounded-xl cursor-pointer transition-colors">
+                        <button onClick={() => setViewState('LANDING')} className="p-2.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 rounded-xl cursor-pointer transition-colors">
                             <ArrowLeft className="w-5 h-5" />
                         </button>
                     </div>
-                    <div className="rounded-3xl backdrop-blur-xl bg-slate-900/65 border border-white/10 p-8 shadow-xl space-y-6">
+                    <div className="rounded-3xl bg-white border border-slate-200/90 p-8 shadow-sm space-y-6">
                         <div className="space-y-2">
-                            <label className="text-xs font-mono font-bold text-slate-300 uppercase tracking-wider">1. Tipe Lokasi Opname:</label>
+                            <label className="text-xs font-mono font-bold text-slate-700 uppercase tracking-wider">1. Tipe Lokasi Opname:</label>
                             <SearchableSelect options={combinedLocationOptions} value={wizLocationId} onChange={setWizLocationId} placeholder="-- Cari Lokasi --" className="w-full" />
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div className="space-y-2">
-                                <label className="text-xs font-mono font-bold text-slate-300 uppercase tracking-wider">2. Kode Sesi:</label>
-                                <input type="text" value={wizSessionCode} onChange={(e) => setWizSessionCode(e.target.value)} className="cipher-input w-full p-3.5 rounded-2xl text-sm font-bold font-mono text-cyan-400 outline-none" />
+                                <label className="text-xs font-mono font-bold text-slate-700 uppercase tracking-wider">2. Kode Sesi:</label>
+                                <input type="text" value={wizSessionCode} onChange={(e) => setWizSessionCode(e.target.value)} className="cipher-input w-full p-3.5 rounded-2xl text-sm font-bold font-mono text-cyan-700 outline-none" />
                             </div>
                             <div className="space-y-2">
-                                <label className="text-xs font-mono font-bold text-slate-300 uppercase tracking-wider">3. Tanggal:</label>
+                                <label className="text-xs font-mono font-bold text-slate-700 uppercase tracking-wider">3. Tanggal:</label>
                                 <input type="date" value={wizOpnameDate} onChange={(e) => setWizOpnameDate(e.target.value)} className="cipher-input w-full p-3.5 rounded-2xl text-sm font-mono outline-none" />
                             </div>
                         </div>
                         <div className="space-y-3 pt-2">
-                            <label className="text-xs font-mono font-bold text-slate-300 uppercase tracking-wider">4. Metode Lock:</label>
+                            <label className="text-xs font-mono font-bold text-slate-700 uppercase tracking-wider">4. Metode Lock:</label>
                             <div className="grid grid-cols-2 gap-4">
-                                <div onClick={() => setWizMethod('LIST_TO_FLOOR')} className={`p-4 rounded-2xl border cursor-pointer transition-all ${wizMethod === 'LIST_TO_FLOOR' ? 'border-cyan-400 bg-cyan-400/10 text-cyan-300 shadow-[0_0_15px_rgba(0,242,254,0.15)]' : 'border-white/10 bg-white/3 text-slate-400'}`}>
+                                <div onClick={() => setWizMethod('LIST_TO_FLOOR')} className={`p-4 rounded-2xl border cursor-pointer transition-all ${wizMethod === 'LIST_TO_FLOOR' ? 'border-cyan-500 bg-cyan-50/80 text-cyan-950 font-bold shadow-xs' : 'border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-600'}`}>
                                     <div className="text-xs font-mono font-bold uppercase text-center tracking-wider">LIST TO FLOOR</div>
                                 </div>
-                                <div onClick={() => setWizMethod('FLOOR_TO_LIST')} className={`p-4 rounded-2xl border cursor-pointer transition-all ${wizMethod === 'FLOOR_TO_LIST' ? 'border-cyan-400 bg-cyan-400/10 text-cyan-300 shadow-[0_0_15px_rgba(0,242,254,0.15)]' : 'border-white/10 bg-white/3 text-slate-400'}`}>
+                                <div onClick={() => setWizMethod('FLOOR_TO_LIST')} className={`p-4 rounded-2xl border cursor-pointer transition-all ${wizMethod === 'FLOOR_TO_LIST' ? 'border-cyan-500 bg-cyan-50/80 text-cyan-950 font-bold shadow-xs' : 'border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-600'}`}>
                                     <div className="text-xs font-mono font-bold uppercase text-center tracking-wider">FLOOR TO LIST</div>
                                 </div>
                             </div>
                         </div>
 
-                        <div className="p-5 bg-black/40 border border-cyan-400/20 rounded-2xl text-center space-y-3">
-                            <div className="flex justify-center"><FileSpreadsheet className="w-8 h-8 text-cyan-400" /></div>
+                        <div className="p-5 bg-slate-50 border border-dashed border-cyan-400/50 rounded-2xl text-center space-y-3">
+                            <div className="flex justify-center"><FileSpreadsheet className="w-8 h-8 text-cyan-600" /></div>
                             <div>
-                                <div className="text-xs font-mono font-bold text-white uppercase tracking-wider">Pre-load Master Task Excel (.xlsx)</div>
-                                <p className="text-[11px] font-mono text-slate-400 mt-1">Upload sekarang untuk mempercepat sesi opname.</p>
+                                <div className="text-xs font-mono font-bold text-slate-900 uppercase tracking-wider">Pre-load Master Task Excel (.xlsx)</div>
+                                <p className="text-[11px] font-mono text-slate-500 mt-1">Upload sekarang untuk mempercepat sesi opname.</p>
                             </div>
 
-                            <div className="flex flex-col sm:flex-row justify-center items-center gap-3 pt-2 text-slate-400">
+                            <div className="flex flex-col sm:flex-row justify-center items-center gap-3 pt-2 text-slate-600">
                                 <button
                                     type="button"
                                     onClick={handleDownloadTemplateXLSX}
-                                    className="px-4 py-2 bg-white/5 border border-white/15 text-slate-200 hover:bg-white/10 rounded-xl text-xs font-mono font-bold flex items-center space-x-1.5 shadow-xs transition-colors cursor-pointer"
+                                    className="px-4 py-2 bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 rounded-xl text-xs font-mono font-bold flex items-center space-x-1.5 shadow-xs transition-colors cursor-pointer"
                                 >
-                                    <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
+                                    <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
                                     <span>Download Template (.xlsx)</span>
                                 </button>
                                 <input
@@ -2436,7 +2971,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                         <div className="flex justify-end pt-4">
                             <button 
                                 onClick={handleStartNewProjectSession} 
-                                className="w-full md:w-auto px-8 py-3.5 bg-cyan-400 hover:bg-cyan-300 text-slate-950 rounded-2xl text-xs font-mono font-bold uppercase tracking-wider flex items-center justify-center space-x-2 shadow-[0_0_20px_rgba(0,242,254,0.35)] transition-all cursor-pointer"
+                                className="w-full md:w-auto px-8 py-3.5 bg-cyan-400 hover:bg-cyan-300 text-slate-950 rounded-2xl text-xs font-mono font-bold uppercase tracking-wider flex items-center justify-center space-x-2 shadow-sm transition-all cursor-pointer"
                             >
                                 <PlayCircle className="w-5 h-5" />
                                 <span>Launch Dashboard</span>
@@ -2632,6 +3167,32 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                         </div>
                                                     </div>
 
+                                                    {/* ACTIVE SWAP REVERT BANNER */}
+                                                    {lastSwapEvent && (
+                                                        <div className="p-3 bg-amber-50 border border-amber-300 rounded-2xl flex items-center justify-between gap-3 shadow-xs animate-in fade-in">
+                                                            <div className="flex items-center space-x-2 text-xs">
+                                                                <span className="material-symbols-outlined text-amber-600 text-lg">swap_horiz</span>
+                                                                <div>
+                                                                    <span className="font-black text-amber-950 block text-xs">
+                                                                        Swap Ronde {lastSwapEvent.round} Aktif:
+                                                                    </span>
+                                                                    <span className="text-[11px] text-amber-800">
+                                                                        <b className="capitalize">{lastSwapEvent.sourceCounter}</b> ⇄ <b className="capitalize">{lastSwapEvent.targetCounter}</b>
+                                                                    </span>
+                                                                </div>
+                                                            </div>
+                                                            <button
+                                                                onClick={handleRevertLastSwap}
+                                                                disabled={isDeploySubmitting}
+                                                                className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                                                                title="Kembalikan penugasan ke counter asal sebelum hitungan fisik dimulai"
+                                                            >
+                                                                <RefreshCw className={`w-3.5 h-3.5 ${isDeploySubmitting ? 'animate-spin' : ''}`} />
+                                                                <span>Batalkan Swap</span>
+                                                            </button>
+                                                        </div>
+                                                    )}
+
                                                     {/* COUNTER PIC LIST */}
                                                     <div className="space-y-3 max-h-110 overflow-y-auto pr-1 scrollbar-thin">
                                                         {filteredCounterNames.map((cName, idx) => {
@@ -2671,8 +3232,8 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                                             {effectiveRole === 'owner' && (
                                                                                 <>
                                                                                     <button
-                                                                                        onClick={(e) => { e.stopPropagation(); handleDeployNextRoundForCounter(cName); }}
-                                                                                        title={cMaxRound >= 3 ? 'Sudah mencapai Ronde 3 Maksimal' : `Deploy Ronde ${cMaxRound + 1} Khusus ${cName}`}
+                                                                                        onClick={(e) => { e.stopPropagation(); handleOpenDeployModal(cName); }}
+                                                                                        title={cMaxRound >= 3 ? 'Sudah mencapai Ronde 3 Maksimal' : `Deploy Ronde ${cMaxRound + 1} / Swap Task ${cName}`}
                                                                                         disabled={cMaxRound >= 3}
                                                                                         className={`p-1.5 rounded-lg cursor-pointer transition-colors ${cMaxRound >= 3 ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-red-50 text-red-600 hover:bg-red-100 border border-red-200'}`}
                                                                                     >

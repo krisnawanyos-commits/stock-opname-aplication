@@ -654,16 +654,16 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handlePhotoCaptured} />
       <input ref={barcodeScanInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleBarcodeCaptured} />
 
-      {/* HEADER HP COUNTER */}
-      <header className="fixed top-0 w-full z-50 bg-white/95 border-b border-slate-200 backdrop-blur-md pt-safe shadow-xs">
-        <div className="h-32 px-margin flex flex-col justify-center gap-space-xs max-w-md mx-auto">
+      {/* HEADER HP COUNTER (RELATIVE - TIDAK IKUT TURUN SAAT SCROLLING) */}
+      <header className="relative w-full z-10 bg-white border-b border-slate-200/90 pt-safe shadow-xs shrink-0">
+        <div className="py-3 px-margin flex flex-col justify-center gap-space-xs max-w-md mx-auto">
           <div className="flex items-center justify-between">
-            <button type="button" onClick={onBackToList} className="min-h-11 min-w-11 -ml-2 px-2 flex items-center gap-1 text-blue-600 hover:text-blue-700 transition-colors cursor-pointer">
+            <button type="button" onClick={onBackToList} className="min-h-11 min-w-11 -ml-2 px-2 flex items-center gap-1 text-slate-800 hover:text-cyan-600 transition-colors cursor-pointer font-bold">
               <span className="material-symbols-outlined text-[20px]">chevron_left</span>
-              <span className="font-label-md uppercase tracking-wider font-semibold">Countsheet List</span>
+              <span className="font-label-md uppercase tracking-wider font-bold text-xs">Countsheet List</span>
             </button>
             <div className="flex items-center gap-2">
-              <span className="px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 font-label-sm text-[11px] uppercase font-bold border border-amber-300">
+              <span className="px-2.5 py-1 rounded-full bg-cyan-50 text-cyan-900 font-mono text-[11px] uppercase font-bold border border-cyan-300">
                 Round {currentDisplayRound}
               </span>
               <button
@@ -677,21 +677,21 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             </div>
           </div>
 
-          <div className="flex items-baseline justify-between gap-space-sm">
-            <h1 className="font-headline-md text-slate-900 tracking-tight truncate">{sessionData.sessionName}</h1>
+          <div className="flex items-center justify-between gap-space-sm pt-0.5">
+            <h1 className="font-headline-md text-slate-900 tracking-tight font-extrabold truncate text-base">{sessionData.sessionName}</h1>
           </div>
 
           <div className="flex items-center justify-between gap-space-sm pt-0.5">
-            <div className="flex items-center gap-1.5 text-slate-600 font-label-sm text-label-sm truncate">
-              <span className="material-symbols-outlined text-[16px] text-emerald-600 shrink-0">group</span>
-              <span className="truncate">Counter Active: <b className="text-slate-900">{sessionData.primaryCounter}</b></span>
+            <div className="flex items-center gap-1.5 text-slate-600 font-label-sm text-xs truncate">
+              <span className="material-symbols-outlined text-[16px] text-cyan-600 shrink-0">group</span>
+              <span className="truncate">Counter Active: <b className="text-slate-900 font-mono">{sessionData.primaryCounter}</b></span>
             </div>
           </div>
         </div>
       </header>
 
       {/* KONTEN UTAMA DENGAN KARTU SKU & DRAWER UNMAPPED */}
-      <main className="flex-1 flex flex-col relative w-full px-margin pt-36 pb-32 bg-slate-50 min-h-screen max-w-md mx-auto">
+      <main className="flex-1 flex flex-col relative w-full px-margin pt-4 pb-32 bg-slate-100 min-h-screen max-w-md mx-auto">
         <div className="flex flex-col w-full pb-12 space-y-4">
 
           <div className="flex items-center justify-between pb-1">
