@@ -248,7 +248,7 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
             </div>
             <div className="flex justify-end space-x-2 pt-2">
               <button onClick={() => setShowAddRackModal(false)} className="px-4 py-2 bg-slate-100 text-slate-700 rounded-xl text-xs font-bold">Batal</button>
-              <button onClick={handleCreateNewRack} className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-extrabold shadow-md">Simpan Rak Baru</button>
+              <button onClick={handleCreateNewRack} className="px-5 py-2 bg-cyan-400 hover:bg-cyan-300 text-slate-950 rounded-xl text-xs font-black shadow-md cursor-pointer transition-all">Simpan Rak Baru</button>
             </div>
           </div>
         </div>
@@ -351,12 +351,12 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
                     <h3 className="font-headline-sm text-headline-sm text-on-surface font-bold">Progress Perhitungan</h3>
                   </div>
                   <div className="flex flex-col items-end">
-                    <span className="font-headline-lg-mobile text-headline-lg-mobile text-secondary font-bold leading-none">{progressPercent}%</span>
-                    <span className="font-label-sm text-label-sm text-on-surface-variant">{completedCount} / {racks.length} Rak</span>
+                    <span className="font-headline-lg-mobile text-headline-lg-mobile text-cyan-600 font-black leading-none">{progressPercent}%</span>
+                    <span className="font-label-sm text-label-sm text-on-surface-variant font-bold">{completedCount} / {racks.length} Rak</span>
                   </div>
                 </div>
-                <div className="w-full bg-surface-container-high h-2.5 rounded-full overflow-hidden flex">
-                  <div className="bg-secondary h-full rounded-full transition-all duration-500" style={{ width: `${progressPercent}%` }}></div>
+                <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden flex">
+                  <div className="bg-cyan-400 h-full rounded-full transition-all duration-500 shadow-[0_0_8px_rgba(34,211,238,0.4)]" style={{ width: `${progressPercent}%` }}></div>
                 </div>
               </div>
 
@@ -375,28 +375,28 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
                   <button
                     type="button"
                     onClick={() => setShowAddRackModal(true)}
-                    className="px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-1 shadow-md cursor-pointer shrink-0"
+                    className="px-3 bg-cyan-400 hover:bg-cyan-300 text-slate-950 rounded-xl text-xs font-black flex items-center gap-1 shadow-sm cursor-pointer shrink-0 transition-all active:scale-95"
                   >
                     <span>+ Rak Baru</span>
                   </button>
                 </div>
 
                 <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none">
-                  <button type="button" onClick={() => setActiveFilter('all')} className={`flex items-center gap-1 px-3.5 py-1.5 rounded-full font-label-md text-label-md shadow-sm shrink-0 transition-colors cursor-pointer ${activeFilter === 'all' ? 'bg-secondary text-on-secondary' : 'bg-surface-container-lowest text-on-surface-variant border border-outline-variant/30'}`}>Semua ({racks.length})</button>
-                  <button type="button" onClick={() => setActiveFilter('completed')} className={`flex items-center gap-1 px-3.5 py-1.5 rounded-full font-label-md text-label-md shadow-sm shrink-0 transition-colors cursor-pointer ${activeFilter === 'completed' ? 'bg-secondary text-on-secondary' : 'bg-surface-container-lowest text-on-surface-variant border border-outline-variant/30'}`}>Selesai ({completedCount})</button>
-                  <button type="button" onClick={() => setActiveFilter('in_progress')} className={`flex items-center gap-1 px-3.5 py-1.5 rounded-full font-label-md text-label-md shadow-sm shrink-0 transition-colors cursor-pointer ${activeFilter === 'in_progress' ? 'bg-secondary text-on-secondary' : 'bg-surface-container-lowest text-on-surface-variant border border-outline-variant/30'}`}>Berjalan ({inProgressCount})</button>
-                  <button type="button" onClick={() => setActiveFilter('pending')} className={`flex items-center gap-1 px-3.5 py-1.5 rounded-full font-label-md text-label-md shadow-sm shrink-0 transition-colors cursor-pointer ${activeFilter === 'pending' ? 'bg-secondary text-on-secondary' : 'bg-surface-container-lowest text-on-surface-variant border border-outline-variant/30'}`}>Pending ({pendingCount})</button>
+                  <button type="button" onClick={() => setActiveFilter('all')} className={`flex items-center gap-1 px-3.5 py-1.5 rounded-full font-label-md text-label-md shadow-xs shrink-0 transition-all cursor-pointer ${activeFilter === 'all' ? 'bg-cyan-400 text-slate-950 font-black shadow-[0_0_8px_rgba(34,211,238,0.3)]' : 'bg-surface-container-lowest text-on-surface-variant border border-outline-variant/30 font-medium'}`}>Semua ({racks.length})</button>
+                  <button type="button" onClick={() => setActiveFilter('completed')} className={`flex items-center gap-1 px-3.5 py-1.5 rounded-full font-label-md text-label-md shadow-xs shrink-0 transition-all cursor-pointer ${activeFilter === 'completed' ? 'bg-cyan-400 text-slate-950 font-black shadow-[0_0_8px_rgba(34,211,238,0.3)]' : 'bg-surface-container-lowest text-on-surface-variant border border-outline-variant/30 font-medium'}`}>Selesai ({completedCount})</button>
+                  <button type="button" onClick={() => setActiveFilter('in_progress')} className={`flex items-center gap-1 px-3.5 py-1.5 rounded-full font-label-md text-label-md shadow-xs shrink-0 transition-all cursor-pointer ${activeFilter === 'in_progress' ? 'bg-cyan-400 text-slate-950 font-black shadow-[0_0_8px_rgba(34,211,238,0.3)]' : 'bg-surface-container-lowest text-on-surface-variant border border-outline-variant/30 font-medium'}`}>Berjalan ({inProgressCount})</button>
+                  <button type="button" onClick={() => setActiveFilter('pending')} className={`flex items-center gap-1 px-3.5 py-1.5 rounded-full font-label-md text-label-md shadow-xs shrink-0 transition-all cursor-pointer ${activeFilter === 'pending' ? 'bg-cyan-400 text-slate-950 font-black shadow-[0_0_8px_rgba(34,211,238,0.3)]' : 'bg-surface-container-lowest text-on-surface-variant border border-outline-variant/30 font-medium'}`}>Pending ({pendingCount})</button>
                 </div>
               </div>
 
               <div className="flex flex-col gap-space-sm">
                 {filteredRacks.map((rack) => (
-                  <div key={rack.id} onClick={() => onSelectRack(rack)} className="bg-surface-container-lowest rounded-xl p-space-md shadow-sm border border-outline-variant/30 flex flex-col gap-3 cursor-pointer hover:border-secondary/50 transition-all relative overflow-hidden">
+                  <div key={rack.id} onClick={() => onSelectRack(rack)} className="bg-surface-container-lowest rounded-xl p-space-md shadow-sm border border-outline-variant/30 flex flex-col gap-3 cursor-pointer hover:border-cyan-400/60 transition-all relative overflow-hidden">
                     {rack.status === 'in-progress' && <div className="absolute left-0 top-0 bottom-0 w-1 bg-amber-500"></div>}
                     <div className={`flex items-start justify-between gap-space-xs ${rack.status === 'in-progress' ? 'pl-1' : ''}`}>
                       <div className="flex flex-col min-w-0">
                         <div className="flex items-center gap-1.5">
-                          <span className="material-symbols-outlined text-[18px] text-indigo-600">shelves</span>
+                          <span className="material-symbols-outlined text-[18px] text-cyan-600">shelves</span>
                           <h4 className="font-headline-sm text-headline-sm text-on-surface truncate">Rak {rack.rackNumber}</h4>
                         </div>
                         <p className="font-body-sm text-body-sm text-on-surface-variant mt-0.5">{rack.countedSKU} / {rack.totalSKU} SKU Dihitung • Zone: {rack.zone}</p>
@@ -439,7 +439,7 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
       </main>
 
       <footer className="text-center py-4 bg-surface text-slate-400 text-[10px] font-medium border-t border-slate-100">
-        Noctus Count™ • Developed by <span className="font-bold text-indigo-600">Noctus</span>
+        Noctus Count™ • Developed by <span className="font-bold text-cyan-500">Noctus</span>
       </footer>
     </div>
   );

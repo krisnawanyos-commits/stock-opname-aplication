@@ -2568,23 +2568,20 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                             </div>
 
                             {/* RIGHT: SYSTEM TELEMETRY CAPSULE */}
-                            <div className="flex items-center space-x-4 px-3.5 py-1.5 bg-slate-100 border border-slate-200 rounded-xl text-xs font-mono">
+                            <div className="flex items-center space-x-3 px-3.5 py-1.5 bg-slate-100 border border-slate-200 rounded-xl text-xs font-mono">
                                 <div className="flex items-center space-x-1.5 text-slate-600">
                                     <span className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">WMS:</span>
                                     <span className="font-black text-slate-900">{warehouseList.length}</span>
                                 </div>
-                                <span className="text-slate-300">•</span>
-                                <div className="flex items-center space-x-1.5 text-slate-600">
+                                <div className="flex items-center space-x-1.5 text-slate-600 border-l border-slate-200 pl-3">
                                     <span className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Consign:</span>
                                     <span className="font-black text-slate-900">{consignmentStoreList.length}</span>
                                 </div>
-                                <span className="text-slate-300">•</span>
-                                <div className="flex items-center space-x-1.5 text-slate-600">
+                                <div className="flex items-center space-x-1.5 text-slate-600 border-l border-slate-200 pl-3">
                                     <span className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Projects:</span>
                                     <span className="font-black text-cyan-700">{projectHistory.length}</span>
                                 </div>
-                                <span className="text-slate-300">•</span>
-                                <div className="flex items-center space-x-1.5">
+                                <div className="flex items-center space-x-1.5 border-l border-slate-200 pl-3">
                                     <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
                                     <span className="text-[10px] text-emerald-700 uppercase tracking-widest font-black">ONLINE</span>
                                 </div>
@@ -3031,7 +3028,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                             {effectiveRole === 'owner' ? (
                                 <div className="flex items-center space-x-2">
                                     <span className="bg-slate-900 text-white text-[10px] font-black px-2.5 py-1.5 rounded-xl flex items-center space-x-1 border border-slate-800 shadow-xs">
-                                        <ShieldCheck className="w-3.5 h-3.5 text-indigo-400" />
+                                        <ShieldCheck className="w-3.5 h-3.5 text-cyan-400" />
                                         <span>SUPER ADMIN</span>
                                     </span>
                                     <button
@@ -3092,7 +3089,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                             title={t.label}
                                             className={`w-full px-3 py-2.5 rounded-xl flex items-center space-x-3 cursor-pointer transition-all ${
                                                 isActive
-                                                    ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 ring-1 ring-indigo-400/40 font-bold'
+                                                    ? 'bg-cyan-400 text-slate-950 font-black shadow-[0_0_15px_rgba(34,211,238,0.35)] ring-1 ring-cyan-300'
                                                     : 'text-slate-400 hover:text-white hover:bg-slate-800/70 font-medium'
                                             }`}
                                         >
@@ -3114,15 +3111,15 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                             <div>
                                                 <h2 className="text-base font-black text-slate-900 tracking-tight flex items-center gap-2">
                                                     <span>PROGRESS & ANALYTICS</span>
-                                                    <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-md">Live Telemetry</span>
+                                                    <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 bg-cyan-50 text-cyan-800 border border-cyan-200 rounded-md">Live Telemetry</span>
                                                 </h2>
                                                 <p className="text-xs text-slate-400 font-medium">Monitoring performa fisik vs sistem secara paten dan real-time</p>
                                             </div>
 
                                             {/* 4-PILL KPI CAPSULE (PATENT IN PROGRESS TAB) */}
-                                            <div className="inline-flex items-center bg-[#0F172A] text-white p-1 rounded-2xl border border-slate-800 shadow-md text-xs self-start md:self-auto">
+                                            <div className="inline-flex items-center bg-[#0F172A] text-white p-1 rounded-2xl border border-cyan-500/40 shadow-[0_0_14px_rgba(34,211,238,0.2)] text-xs self-start md:self-auto">
                                                 <div className="px-4 py-1.5 text-center border-r border-slate-800">
-                                                    <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-widest block">TOTAL ITEMS</span>
+                                                    <span className="text-[9px] text-cyan-400 font-extrabold uppercase tracking-widest block">TOTAL ITEMS</span>
                                                     <span className="text-xs sm:text-sm font-black text-white">{totalSKUs.toLocaleString('id-ID')}</span>
                                                 </div>
                                                 <div className="px-4 py-1.5 text-center border-r border-slate-800">
@@ -3147,7 +3144,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                 <div className="bg-white p-5 sm:p-6 rounded-3xl border border-slate-200/80 shadow-md space-y-4">
                                                     <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-100 pb-3 gap-3">
                                                         <div className="flex items-center space-x-2">
-                                                            <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
+                                                            <div className="p-2 bg-cyan-50 text-cyan-700 rounded-xl">
                                                                 <Users className="w-4 h-4" />
                                                             </div>
                                                             <div>
@@ -3242,7 +3239,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                                                     <button
                                                                                         onClick={(e) => { e.stopPropagation(); setTransferSourceCounter(cName); }}
                                                                                         title="Transfer Seluruh Tugas Counter Ini"
-                                                                                        className="p-1.5 rounded-lg cursor-pointer bg-indigo-50 text-indigo-600 hover:bg-indigo-100 border border-indigo-200 transition-colors"
+                                                                                        className="p-1.5 rounded-lg cursor-pointer bg-cyan-50 text-cyan-700 hover:bg-cyan-100 border border-cyan-200 transition-colors"
                                                                                     >
                                                                                         <UserPlus className="w-3.5 h-3.5" />
                                                                                     </button>
@@ -3268,7 +3265,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                                     {/* PROGRESS BAR */}
                                                                     <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
                                                                         <div
-                                                                            className="bg-indigo-600 h-1.5 rounded-full transition-all duration-300"
+                                                                            className="bg-cyan-400 h-1.5 rounded-full transition-all duration-300 shadow-[0_0_6px_rgba(34,211,238,0.4)]"
                                                                             style={{ width: `${pct}%` }}
                                                                         />
                                                                     </div>
@@ -3304,10 +3301,10 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                                 <div key={idx} className="space-y-1.5">
                                                                     <div className="flex justify-between text-xs font-bold">
                                                                         <span className="text-slate-700">Level {lvl.name}</span>
-                                                                        <span className="text-indigo-600 font-mono">{lvl.counted}/{lvl.total} ({lvl.percentage}%)</span>
+                                                                        <span className="text-cyan-700 font-mono font-bold">{lvl.counted}/{lvl.total} ({lvl.percentage}%)</span>
                                                                     </div>
                                                                     <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
-                                                                        <div className="bg-indigo-600 h-2 rounded-full transition-all duration-300" style={{ width: `${lvl.percentage}%` }} />
+                                                                        <div className="bg-cyan-400 h-2 rounded-full transition-all duration-300 shadow-[0_0_6px_rgba(34,211,238,0.4)]" style={{ width: `${lvl.percentage}%` }} />
                                                                     </div>
                                                                 </div>
                                                             ))}
@@ -4028,7 +4025,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     </span>
                 </div>
                 <p className={`text-[11px] font-mono ${viewState === 'DASHBOARD' ? 'text-slate-400 font-medium' : 'text-slate-500'}`}>
-                    Stock Opname Systems • Developed by <span className={viewState === 'DASHBOARD' ? 'font-bold text-indigo-600' : 'font-bold text-cyan-400'}>Noctus</span>
+                    Stock Opname Systems • Developed by <span className="font-bold text-cyan-500">Noctus</span>
                 </p>
             </div>
         </div>
