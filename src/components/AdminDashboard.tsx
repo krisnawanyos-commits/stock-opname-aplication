@@ -13,7 +13,7 @@ import {
     Download, Scale, PlayCircle, ArrowLeft, AlertTriangle,
     LogOut, Contact, Eye, EyeOff, UserCheck, Clock, Store, Link2, KeyRound,
     Mail, Edit2, Smartphone, Lock, Unlock, Repeat, Copy, Tag, RefreshCw, HardDrive, Loader2, AlertCircle, X,
-    ChevronLeft, ChevronRight, Bell, LayoutDashboard
+    ChevronLeft, ChevronRight, Bell, LayoutDashboard, ArrowRightLeft
 } from 'lucide-react';
 import type { UserRole } from '../types';
 
@@ -60,6 +60,9 @@ interface MasterSKUItem {
     expiredDateActual: string;
     Qty: number;
     countedQty?: number;
+    QTY_ACTUAL?: number | null;
+    QTY_GOOD?: number | null;
+    QTY_BAD?: number | null;
     qtyGood?: number;
     qtyBad?: number;
     Remarks: string;
@@ -173,6 +176,22 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
     const [transferSourceCounter, setTransferSourceCounter] = useState<string | null>(null);
     const [transferTargetCounter, setTransferTargetCounter] = useState<string>('');
+
+    // STATE RE-ASSIGN SISA RAK PENDING (BANTU TEMAN DI LIST TO FLOOR)
+    const [reassignModal, setReassignModal] = useState<{
+        isOpen: boolean;
+        sourceCounter: string;
+        targetCounter: string;
+        selectedRacks: string[];
+        searchRack: string;
+    }>({
+        isOpen: false,
+        sourceCounter: '',
+        targetCounter: '',
+        selectedRacks: [],
+        searchRack: '',
+    });
+    const [isReassignSubmitting, setIsReassignSubmitting] = useState<boolean>(false);
 
     const [isProjectLocked, setIsProjectLocked] = useState(false);
     const [lockedCounters, setLockedCounters] = useState<Record<string, boolean>>({});
@@ -1096,6 +1115,146 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         setTransferTargetCounter('');
     };
 
+    const handleOpenReassignModal = (initialSource?: string) => {
+        const source = initialSource || (filteredCounterNames[0] || '');
+        setReassignModal({
+            isOpen: true,
+            sourceCounter: source,
+            targetCounter: '',
+            selectedRacks: [],
+            searchRack: '',
+        });
+    };
+
+    const handleToggleSelectRack = (rackName: string) => {
+        setReassignModal(prev => {
+            const exists = prev.selectedRacks.includes(rackName);
+            return {
+                ...prev,
+                selectedRacks: exists
+                    ? prev.selectedRacks.filter(r => r !== rackName)
+                    : [...prev.selectedRacks, rackName]
+            };
+        });
+    };
+
+    const handleSelectAllPendingRacks = () => {
+        setReassignModal(prev => {
+            const allRackNames = pendingRacksForSource.map(r => r.rack);
+            const isAllSelected = prev.selectedRacks.length === allRackNames.length && allRackNames.length > 0;
+            return {
+                ...prev,
+                selectedRacks: isAllSelected ? [] : allRackNames
+            };
+        });
+    };
+
+    const handleExecuteReassignRacks = async () => {
+        if (!activeProject || isReassignSubmitting) return;
+        const { sourceCounter, targetCounter, selectedRacks } = reassignModal;
+        if (!sourceCounter || !targetCounter) {
+            triggerNotification('Mohon pilih counter asal dan counter penerima tugas.');
+            return;
+        }
+        if (selectedRacks.length === 0) {
+            triggerNotification('Pilih minimal 1 rak pending yang ingin dialihkan.');
+            return;
+        }
+
+        const cleanSource = sourceCounter.toLowerCase().trim();
+        const cleanTarget = targetCounter.toLowerCase().trim();
+
+        if (cleanSource === cleanTarget) {
+            triggerNotification('Counter asal dan counter tujuan tidak boleh sama.');
+            return;
+        }
+
+        setIsReassignSubmitting(true);
+        try {
+            const timestampNow = new Date().toISOString();
+            const actorName = currentUserEmail || effectiveRole;
+
+            // Kumpulkan task yang berada di rak terpilih
+            const targetTasksToMove = masterDataList.filter(m => 
+                (m.counter || '').toLowerCase().trim() === cleanSource &&
+                selectedRacks.includes(m.Location)
+            );
+
+            if (targetTasksToMove.length === 0) {
+                triggerNotification('Tidak ada task ditemukan pada rak yang dipilih.');
+                setIsReassignSubmitting(false);
+                return;
+            }
+
+            // Batch update Firestore untuk master_tasks
+            const CHUNK = 400;
+            for (let i = 0; i < targetTasksToMove.length; i += CHUNK) {
+                const chunk = targetTasksToMove.slice(i, i + CHUNK);
+                const batch = writeBatch(db);
+                chunk.forEach(task => {
+                    if (task.id) {
+                        const ref = doc(db, "master_tasks", task.id);
+                        batch.update(ref, {
+                            counter: cleanTarget,
+                            previousCounter: cleanSource,
+                            updatedAt: timestampNow
+                        });
+                    }
+                });
+                await batch.commit();
+            }
+
+            // Catat Audit Trail per Rak terpilih
+            const auditBatch = writeBatch(db);
+            selectedRacks.forEach(rackName => {
+                const rackTasks = targetTasksToMove.filter(t => t.Location === rackName);
+                const rackRound = rackTasks[0]?.currentRound || 1;
+                const logId = `${activeProject.sessionCode || 'SO'}_REASSIGN_${Date.now()}_${rackName.replace(/[\/\s]/g, '-')}`;
+                const auditRef = doc(db, "audit_logs", logId);
+                auditBatch.set(auditRef, {
+                    timestamp: timestampNow,
+                    actionType: 'REASSIGN_PENDING_RACK',
+                    rackLocation: rackName,
+                    ownerSku: rackTasks[0]?.Owner || 'DDI',
+                    sku: `MULTI (${rackTasks.length} SKU)`,
+                    description: `Reassign sisa rak pending dari ${cleanSource} ke ${cleanTarget}`,
+                    upc1: '-',
+                    upc2: '-',
+                    counterPic: `${cleanSource} ➔ ${cleanTarget}`,
+                    round: rackRound,
+                    qtyGood: 0,
+                    qtyBad: 0,
+                    totalFinalSubmitted: 0,
+                    edActual: '-',
+                    remarks: `[REASSIGN RAK PENDING] Rak ${rackName} (Ronde ${rackRound}, ${rackTasks.length} SKU) dialihkan dari ${cleanSource} ke ${cleanTarget} oleh ${actorName} (${effectiveRole.toUpperCase()})`
+                });
+            });
+            await auditBatch.commit();
+
+            // Update local state masterDataList
+            setMasterDataList(prev => prev.map(m => {
+                if ((m.counter || '').toLowerCase().trim() === cleanSource && selectedRacks.includes(m.Location)) {
+                    return { ...m, counter: cleanTarget, previousCounter: cleanSource };
+                }
+                return m;
+            }));
+
+            triggerNotification(`✅ Sukses! ${selectedRacks.length} rak (${targetTasksToMove.length} SKU) dialihkan dari ${cleanSource} ke ${cleanTarget}.`);
+            setReassignModal({
+                isOpen: false,
+                sourceCounter: '',
+                targetCounter: '',
+                selectedRacks: [],
+                searchRack: '',
+            });
+        } catch (err: any) {
+            console.error("Reassign Racks Error:", err);
+            triggerNotification(`Gagal mere-assign rak: ${err?.message || String(err)}`);
+        } finally {
+            setIsReassignSubmitting(false);
+        }
+    };
+
     const handleSendDirectEmailJS = async (recipientEmail: string, username: string, pin: string, name: string) => {
         if (!recipientEmail || !recipientEmail.trim()) {
             triggerNotification("Alamat email tidak valid.");
@@ -1810,6 +1969,61 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         return masterDataList.filter(m => m.counter === selectedCounterForDetail && m.isCounted && (m.countedQty ?? m.Qty) !== m.Qty);
     }, [masterDataList, selectedCounterForDetail]);
 
+    // 1b. PENDING RACKS FOR SOURCE COUNTER (HANYA RAK 100% PENDING BELUM DIHITUNG)
+    const pendingRacksForSource = useMemo(() => {
+        if (!reassignModal.sourceCounter) return [];
+        const cleanSource = reassignModal.sourceCounter.toLowerCase().trim();
+        const sourceTasks = masterDataList.filter(m => (m.counter || '').toLowerCase().trim() === cleanSource);
+
+        const groups: Record<string, { rack: string; zone: string; currentRound: number; tasks: MasterSKUItem[] }> = {};
+        sourceTasks.forEach(t => {
+            const loc = t.Location || 'NO-LOC';
+            if (!groups[loc]) {
+                groups[loc] = {
+                    rack: loc,
+                    zone: t.Zone || 'RACKING',
+                    currentRound: t.currentRound || 1,
+                    tasks: []
+                };
+            }
+            groups[loc].tasks.push(t);
+        });
+
+        const purePendingList = Object.values(groups).filter(g => {
+            return g.tasks.every(t => !t.isCounted && t.QTY_ACTUAL === null && t.countedQty === undefined);
+        }).map(g => ({
+            rack: g.rack,
+            zone: g.zone,
+            skuCount: g.tasks.length,
+            currentRound: g.currentRound,
+            tasks: g.tasks
+        }));
+
+        if (!reassignModal.searchRack.trim()) return purePendingList;
+        const q = reassignModal.searchRack.toLowerCase().trim();
+        return purePendingList.filter(p => p.rack.toLowerCase().includes(q) || p.zone.toLowerCase().includes(q));
+    }, [masterDataList, reassignModal.sourceCounter, reassignModal.searchRack]);
+
+    // 1c. TARGET COUNTERS OPTIONS WITH PROGRESS BADGE
+    const targetCounterOptions = useMemo(() => {
+        const cleanSource = reassignModal.sourceCounter.toLowerCase().trim();
+        const allKnownCounters = Array.from(new Set([
+            ...Object.keys(counterGroups),
+            ...globalAccounts.map(a => a.username)
+        ])).filter(name => name.toLowerCase().trim() !== cleanSource && name.toLowerCase().trim() !== 'unassigned');
+
+        return allKnownCounters.map(cName => {
+            const cData = counterGroups[cName];
+            const pct = cData && cData.total > 0 ? Math.round((cData.counted / cData.total) * 100) : 0;
+            const is100Done = cData && cData.total > 0 && cData.counted === cData.total;
+            const labelSuffix = is100Done ? ' — 100% Selesai (Siap Bantu ✨)' : (cData ? ` — ${pct}% Progress (${cData.counted}/${cData.total} SKU)` : '');
+            return {
+                value: cName,
+                label: `${cName}${labelSuffix}`
+            };
+        });
+    }, [reassignModal.sourceCounter, counterGroups, globalAccounts]);
+
     // 2. FILTERED SKU CATALOG WITH PAGINATION (Single-pass Map O(N))
     const filteredSKUCatalog = useMemo(() => {
         const catalogMap = new Map<string, any>();
@@ -2148,6 +2362,200 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                 <Repeat className="w-4 h-4" />
                                 <span>Proses Pindahkan Tugas</span>
                             </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* MODAL RE-ASSIGN SISA RAK PENDING (BANTU TEMAN DI LIST TO FLOOR) */}
+            {reassignModal.isOpen && (
+                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-3xl max-w-xl w-full p-6 space-y-5 shadow-2xl border border-slate-200 animate-in fade-in duration-200">
+                        {/* HEADER MODAL */}
+                        <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+                            <div className="flex items-center space-x-3">
+                                <div className="p-2.5 bg-cyan-50 text-cyan-700 rounded-2xl border border-cyan-200">
+                                    <ArrowRightLeft className="w-6 h-6" />
+                                </div>
+                                <div>
+                                    <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
+                                        <span>Bagi Tugas / Oper Sisa Rak</span>
+                                        <span className="text-[10px] font-extrabold uppercase bg-cyan-100 text-cyan-800 px-2 py-0.5 rounded-md">List To Floor</span>
+                                    </h3>
+                                    <p className="text-xs text-slate-500 font-medium">Alihkan rak yang belum disentuh (Pending) ke rekan yang sudah selesai.</p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => setReassignModal(prev => ({ ...prev, isOpen: false }))}
+                                className="p-2 text-slate-400 hover:text-slate-700 bg-slate-100 rounded-xl cursor-pointer"
+                            >
+                                ✕
+                            </button>
+                        </div>
+
+                        {/* SELECT COUNTER ASAL & TUJUAN */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div className="space-y-1.5">
+                                <label className="text-xs font-black text-slate-700 block uppercase tracking-wider">1. Counter Asal (Pemberi Tugas):</label>
+                                <SearchableSelect
+                                    options={Object.keys(counterGroups).map(cName => ({
+                                        value: cName,
+                                        label: `${cName} (${counterGroups[cName].counted}/${counterGroups[cName].total} SKU)`
+                                    }))}
+                                    value={reassignModal.sourceCounter}
+                                    onChange={(val: string) => setReassignModal(prev => ({ ...prev, sourceCounter: val, selectedRacks: [] }))}
+                                    placeholder="-- Pilih Counter Asal --"
+                                    className="w-full"
+                                />
+                                <span className="text-[10px] font-bold text-slate-400 block">
+                                    Tersedia <b className="text-cyan-700 font-mono">{pendingRacksForSource.length} Rak</b> murni pending
+                                </span>
+                            </div>
+
+                            <div className="space-y-1.5">
+                                <label className="text-xs font-black text-slate-700 block uppercase tracking-wider">2. Counter Penerima (Pembantu):</label>
+                                <SearchableSelect
+                                    options={targetCounterOptions}
+                                    value={reassignModal.targetCounter}
+                                    onChange={(val: string) => setReassignModal(prev => ({ ...prev, targetCounter: val }))}
+                                    placeholder="-- Pilih Counter Penerima --"
+                                    className="w-full"
+                                />
+                                <span className="text-[10px] font-bold text-slate-400 block">
+                                    Rekomendasi: pilih yang bertanda <b className="text-emerald-600 font-bold">100% Selesai ✨</b>
+                                </span>
+                            </div>
+                        </div>
+
+                        {/* DAFTAR PILIHAN RAK PENDING */}
+                        <div className="space-y-2.5 bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                                <div className="flex items-center gap-2">
+                                    <span className="text-xs font-black text-slate-800 uppercase tracking-wider">3. Pilih Rak yang Ingin Dialihkan:</span>
+                                    <span className="text-[11px] font-black bg-white px-2 py-0.5 rounded-full border border-slate-300 text-slate-700">
+                                        {reassignModal.selectedRacks.length} / {pendingRacksForSource.length} Terpilih
+                                    </span>
+                                </div>
+                                <div className="flex items-center gap-2 w-full sm:w-auto">
+                                    <input
+                                        type="text"
+                                        placeholder="Filter rak / zona..."
+                                        value={reassignModal.searchRack}
+                                        onChange={(e) => setReassignModal(prev => ({ ...prev, searchRack: e.target.value }))}
+                                        className="h-8 px-2.5 bg-white border border-slate-200 rounded-lg text-xs font-bold outline-none flex-1 sm:w-40"
+                                    />
+                                    {pendingRacksForSource.length > 0 && (
+                                        <button
+                                            type="button"
+                                            onClick={handleSelectAllPendingRacks}
+                                            className="px-2.5 h-8 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-lg text-[11px] font-bold cursor-pointer whitespace-nowrap transition-colors"
+                                        >
+                                            {reassignModal.selectedRacks.length === pendingRacksForSource.length ? 'Batal Semua' : 'Pilih Semua'}
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* LIST KARTU RAK CHECKBOX */}
+                            <div className="max-h-56 overflow-y-auto space-y-2 pr-1 scrollbar-thin">
+                                {pendingRacksForSource.map((rItem) => {
+                                    const isChecked = reassignModal.selectedRacks.includes(rItem.rack);
+                                    return (
+                                        <div
+                                            key={rItem.rack}
+                                            onClick={() => handleToggleSelectRack(rItem.rack)}
+                                            className={`p-3 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${
+                                                isChecked
+                                                    ? 'bg-cyan-50/90 border-cyan-400 shadow-xs'
+                                                    : 'bg-white border-slate-200 hover:border-slate-300'
+                                            }`}
+                                        >
+                                            <div className="flex items-center gap-3">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={isChecked}
+                                                    onChange={() => {}} // dikontrol parent div
+                                                    className="w-4 h-4 rounded text-cyan-600 cursor-pointer accent-cyan-500"
+                                                />
+                                                <div>
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="font-mono font-black text-sm text-slate-900">{rItem.rack}</span>
+                                                        <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
+                                                            Zone: {rItem.zone}
+                                                        </span>
+                                                        <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200">
+                                                            Ronde {rItem.currentRound}
+                                                        </span>
+                                                    </div>
+                                                    <span className="text-[11px] text-slate-500 font-medium">
+                                                        {rItem.skuCount} SKU terdaftar • Status: <b className="text-amber-700 font-bold">Pending (Belum Dihitung)</b>
+                                                    </span>
+                                                </div>
+                                            </div>
+                                            <span className={`text-xs font-black px-2 py-1 rounded-lg ${isChecked ? 'bg-cyan-500 text-slate-950' : 'bg-slate-100 text-slate-400'}`}>
+                                                {isChecked ? 'Dipilih' : 'Lewati'}
+                                            </span>
+                                        </div>
+                                    );
+                                })}
+
+                                {pendingRacksForSource.length === 0 && (
+                                    <div className="p-6 text-center bg-white rounded-xl border border-dashed border-slate-200 space-y-1">
+                                        <span className="material-symbols-outlined text-slate-300 text-3xl">shelves</span>
+                                        <p className="text-xs font-bold text-slate-600">
+                                            Tidak ada sisa rak pending untuk counter "{reassignModal.sourceCounter}".
+                                        </p>
+                                        <p className="text-[11px] text-slate-400">
+                                            Semua rak milik counter ini sudah selesai atau sedang dalam proses perhitungan fisik.
+                                        </p>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* RINGKASAN AUDIT & FOOTER */}
+                        <div className="p-3 bg-amber-50/70 border border-amber-200 rounded-xl flex items-center gap-2 text-[11px] text-amber-900 font-medium">
+                            <Clock className="w-4 h-4 text-amber-700 shrink-0" />
+                            <span>
+                                <b>Audit Trail:</b> Pemindahan ini akan dicatat permanen di log audit dengan nama PIC asal, penerima baru, dan timestamp SO.
+                            </span>
+                        </div>
+
+                        <div className="flex justify-between items-center pt-2 border-t border-slate-100">
+                            <span className="text-xs font-bold text-slate-600">
+                                {reassignModal.selectedRacks.length > 0 ? (
+                                    <>Akan mengoper <b className="text-cyan-700">{reassignModal.selectedRacks.length} rak</b> ke <b className="text-slate-900 capitalize">{reassignModal.targetCounter || '...'}</b></>
+                                ) : (
+                                    'Pilih rak di atas untuk melanjutkan.'
+                                )}
+                            </span>
+                            <div className="flex items-center space-x-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setReassignModal(prev => ({ ...prev, isOpen: false }))}
+                                    className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold cursor-pointer transition-colors"
+                                >
+                                    Batal
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={handleExecuteReassignRacks}
+                                    disabled={!reassignModal.targetCounter || reassignModal.selectedRacks.length === 0 || isReassignSubmitting}
+                                    className="px-5 py-2.5 bg-cyan-400 hover:bg-cyan-300 disabled:opacity-50 text-slate-950 rounded-xl text-xs font-black shadow-md flex items-center space-x-1.5 cursor-pointer transition-all"
+                                >
+                                    {isReassignSubmitting ? (
+                                        <>
+                                            <Loader2 className="w-4 h-4 animate-spin" />
+                                            <span>Memindahkan Rak...</span>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <ArrowRightLeft className="w-4 h-4" />
+                                            <span>Konfirmasi Oper Rak</span>
+                                        </>
+                                    )}
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -3152,15 +3560,26 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                                 <p className="text-[11px] text-slate-400 font-medium">Monitoring Real-Time PIC Counter Lapangan</p>
                                                             </div>
                                                         </div>
-                                                        <div className="relative w-full sm:w-56">
-                                                            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
-                                                            <input
-                                                                type="text"
-                                                                placeholder="Cari PIC Counter..."
-                                                                value={counterSearch}
-                                                                onChange={(e) => setCounterSearch(e.target.value)}
-                                                                className="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none"
-                                                            />
+                                                        <div className="flex items-center gap-2 w-full sm:w-auto">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleOpenReassignModal()}
+                                                                className="px-3 py-1.5 bg-cyan-400 hover:bg-cyan-300 text-slate-950 rounded-xl text-xs font-black flex items-center gap-1.5 shadow-xs transition-all cursor-pointer shrink-0"
+                                                                title="Bagi sisa tugas / Oper rak pending ke counter lain"
+                                                            >
+                                                                <ArrowRightLeft className="w-3.5 h-3.5" />
+                                                                <span>Oper Sisa Rak</span>
+                                                            </button>
+                                                            <div className="relative w-full sm:w-56">
+                                                                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+                                                                <input
+                                                                    type="text"
+                                                                    placeholder="Cari PIC Counter..."
+                                                                    value={counterSearch}
+                                                                    onChange={(e) => setCounterSearch(e.target.value)}
+                                                                    className="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none"
+                                                                />
+                                                            </div>
                                                         </div>
                                                     </div>
 
@@ -3226,6 +3645,13 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                                                     ⚠️ {cData.errorCount} Selisih
                                                                                 </span>
                                                                             )}
+                                                                            <button
+                                                                                onClick={(e) => { e.stopPropagation(); handleOpenReassignModal(cName); }}
+                                                                                title={`Oper Sisa Rak Pending ${cName}`}
+                                                                                className="p-1.5 rounded-lg cursor-pointer bg-cyan-50 text-cyan-700 hover:bg-cyan-100 border border-cyan-200 transition-colors"
+                                                                            >
+                                                                                <ArrowRightLeft className="w-3.5 h-3.5" />
+                                                                            </button>
                                                                             {effectiveRole === 'owner' && (
                                                                                 <>
                                                                                     <button
