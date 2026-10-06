@@ -119,6 +119,11 @@ export default function App() {
     localStorage.setItem(STORAGE_KEYS.STEP, currentStep.toString());
     localStorage.setItem(STORAGE_KEYS.SESSION, JSON.stringify(sessionData));
 
+    // Reset posisi scroll ke paling atas setiap ganti step/layar
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+
     if (currentUser) {
       localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(currentUser));
     } else {

@@ -241,6 +241,13 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         setOrderedTabs(ALL_AVAILABLE_TABS.filter(tab => tab.roles.includes(effectiveRole)));
     }, [effectiveRole]);
 
+    // RESET SCROLL KE ATAS SETIAP KALI GANTI SCREEN / PINDAH TAB
+    useEffect(() => {
+        window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+        document.documentElement.scrollTop = 0;
+        document.body.scrollTop = 0;
+    }, [viewState, activeTab]);
+
     const [gsheetWebhookUrl, setGsheetWebhookUrl] = useState<string>('');
     const [newWhName, setNewWhName] = useState<string>('');
     const [newStoreName, setNewStoreName] = useState<string>('');
@@ -560,6 +567,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                         expiredDateActual: data.expDateActual || data.expiredDateActual || '',
                         Qty: parseInt(data.Qty || data.QTY_SYSTEM) || 0,
                         countedQty: isCounted ? totalActualCalculated : undefined,
+                        QTY_ACTUAL: isCounted ? totalActualCalculated : null,
                         qtyGood: isCounted ? calcGood : undefined,
                         qtyBad: isCounted ? calcBad : undefined,
                         Remarks: data.badRemarks || data.Remarks || '',
@@ -1177,7 +1185,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             // Kumpulkan task yang berada di rak terpilih
             const targetTasksToMove = masterDataList.filter(m => 
                 (m.counter || '').toLowerCase().trim() === cleanSource &&
-                selectedRacks.includes(m.Location)
+                selectedRacks.includes((m.Location || '').trim())
             );
 
             if (targetTasksToMove.length === 0) {
@@ -1977,7 +1985,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
         const groups: Record<string, { rack: string; zone: string; currentRound: number; tasks: MasterSKUItem[] }> = {};
         sourceTasks.forEach(t => {
-            const loc = t.Location || 'NO-LOC';
+            const loc = (t.Location || 'NO-LOC').trim();
             if (!groups[loc]) {
                 groups[loc] = {
                     rack: loc,
@@ -1990,7 +1998,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         });
 
         const purePendingList = Object.values(groups).filter(g => {
-            return g.tasks.every(t => !t.isCounted && t.QTY_ACTUAL === null && t.countedQty === undefined);
+            return g.tasks.every(t => !t.isCounted);
         }).map(g => ({
             rack: g.rack,
             zone: g.zone,
