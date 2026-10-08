@@ -107,6 +107,9 @@ export interface CustomModalState {
   type?: 'success' | 'warning' | 'info' | 'error';
   details?: { label: string; value: string }[];
   confirmText?: string;
+  cancelText?: string;
+  showCancel?: boolean;
   onConfirm?: () => void;
+  onCancel?: () => void;
 }
 

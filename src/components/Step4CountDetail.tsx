@@ -64,6 +64,19 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
   const [modal, setModal] = useState<CustomModalState>({
     isOpen: false, title: '', message: '',
   });
+  const [isDirty, setIsDirty] = useState<boolean>(false);
+
+  // Proteksi tab close/refresh saat ada inputan belum disimpan
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (isDirty) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [isDirty]);
 
   // 1. LISTEN GEMBOK LOCK SESI GLOBAL & COUNTER
   useEffect(() => {
@@ -328,6 +341,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
 
   const handleSetSameExpAsSystem = (index: number) => {
     if (isSessionLocked) return;
+    setIsDirty(true);
     setSkuList((prev) =>
       prev.map((item, idx) => (idx === index && item.expDateSystem ? { ...item, expDateActual: item.expDateSystem } : item))
     );
@@ -335,6 +349,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
 
   const adjustQty = (index: number, type: 'good' | 'bad', delta: number) => {
     if (isSessionLocked) return;
+    setIsDirty(true);
     setSkuList((prev) =>
       prev.map((item, idx) => {
         if (idx === index) {
@@ -356,6 +371,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
 
   const toggleBadStock = (index: number) => {
     if (isSessionLocked) return;
+    setIsDirty(true);
     setSkuList((prev) =>
       prev.map((item, idx) => (idx === index ? { ...item, isBadStock: !item.isBadStock } : item))
     );
@@ -363,6 +379,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
 
   const toggleCategoryChip = (skuIdx: number, catName: string) => {
     if (isSessionLocked) return;
+    setIsDirty(true);
     setSkuList(prev => prev.map((item, idx) => {
       if (idx === skuIdx) {
         const currentCats = item.selectedCategories || [];
@@ -380,6 +397,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
 
   const toggleUnmappedCategoryChip = (catName: string) => {
     if (isSessionLocked) return;
+    setIsDirty(true);
     setUnmappedSelectedCategories(prev => {
       if (prev.includes(catName)) {
         return prev.filter(c => c !== catName);
@@ -390,6 +408,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
 
   const handleInputText = (index: number, field: 'qtyGood' | 'qtyBad', rawVal: string) => {
     if (isSessionLocked) return;
+    setIsDirty(true);
 
     let cleanVal = rawVal.replace(/^0+/, '');
     if (cleanVal === "" && rawVal !== "") cleanVal = "0";
@@ -404,14 +423,56 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     let cleanVal = rawVal.replace(/^0+/, '');
     if (cleanVal === "" && rawVal !== "") cleanVal = "0";
     if (rawVal === "") cleanVal = "";
+    setIsDirty(true);
     setUnmappedBadQty(cleanVal);
   };
 
   const updateItemField = (index: number, field: keyof GroupedSKUItem, value: any) => {
     if (isSessionLocked) return;
+    setIsDirty(true);
     setSkuList((prev) =>
       prev.map((item, idx) => (idx === index ? { ...item, [field]: value } : item))
     );
+  };
+
+  const handleSafeBackToList = () => {
+    if (isDirty) {
+      setModal({
+        isOpen: true,
+        type: 'warning',
+        title: 'Hasil Hitung Belum Disimpan!',
+        message: `Kamu memiliki inputan di Rak ${rack.rackNumber} yang belum disimpan ke Cloud. Jika keluar sekarang, inputan kamu akan hilang. Yakin ingin keluar?`,
+        showCancel: true,
+        cancelText: 'Tetap di Rak Ini',
+        confirmText: 'Keluar Tanpa Simpan',
+        onConfirm: () => {
+          setIsDirty(false);
+          onBackToList();
+        }
+      });
+      return;
+    }
+    onBackToList();
+  };
+
+  const handleSafeLogout = () => {
+    if (isDirty) {
+      setModal({
+        isOpen: true,
+        type: 'warning',
+        title: 'Hasil Hitung Belum Disimpan!',
+        message: `Kamu memiliki inputan di Rak ${rack.rackNumber} yang belum disimpan ke Cloud. Yakin ingin keluar dari akun?`,
+        showCancel: true,
+        cancelText: 'Batal / Tetap di Rak',
+        confirmText: 'Keluar Akun',
+        onConfirm: () => {
+          setIsDirty(false);
+          onLogout();
+        }
+      });
+      return;
+    }
+    onLogout();
   };
 
   const triggerNativeCamera = () => { if (cameraInputRef.current) cameraInputRef.current.click(); };
@@ -528,6 +589,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     }, { merge: true });
 
     await batch.commit();
+    setIsDirty(false);
 
     setUnmappedBarcode('');
     setUnmappedDesc('');
@@ -597,6 +659,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       });
 
       await batch.commit();
+      setIsDirty(false);
 
       const remainingTasksQuery = query(
         collection(db, "master_tasks"),
@@ -658,7 +721,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       <header className="relative w-full z-10 bg-white border-b border-slate-200/90 pt-safe shadow-xs shrink-0">
         <div className="py-3 px-margin flex flex-col justify-center gap-space-xs max-w-md mx-auto">
           <div className="flex items-center justify-between">
-            <button type="button" onClick={onBackToList} className="min-h-11 min-w-11 -ml-2 px-2 flex items-center gap-1 text-slate-800 hover:text-cyan-600 transition-colors cursor-pointer font-bold">
+            <button type="button" onClick={handleSafeBackToList} className="min-h-11 min-w-11 -ml-2 px-2 flex items-center gap-1 text-slate-800 hover:text-cyan-600 transition-colors cursor-pointer font-bold">
               <span className="material-symbols-outlined text-[20px]">chevron_left</span>
               <span className="font-label-md uppercase tracking-wider font-bold text-xs">Countsheet List</span>
             </button>
@@ -668,7 +731,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
               </span>
               <button
                 type="button"
-                onClick={onLogout}
+                onClick={handleSafeLogout}
                 className="px-3 py-1 bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
               >
                 <span className="material-symbols-outlined text-[16px]">logout</span>

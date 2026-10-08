@@ -80,11 +80,23 @@ export default function CustomModal({ modal, onClose }: CustomModalProps) {
           </div>
         )}
 
-        <div className="pt-2 flex justify-end">
+        <div className="pt-2 flex items-center gap-2">
+          {modal.showCancel && (
+            <button
+              type="button"
+              onClick={() => {
+                if (modal.onCancel) modal.onCancel();
+                onClose();
+              }}
+              className="flex-1 h-11 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-label-md text-label-md font-bold uppercase transition-all cursor-pointer"
+            >
+              {modal.cancelText || 'Batal'}
+            </button>
+          )}
           <button
             type="button"
             onClick={handleConfirm}
-            className={`w-full h-11 rounded-xl font-label-md text-label-md font-bold uppercase transition-all shadow-sm cursor-pointer ${style.btn}`}
+            className={`${modal.showCancel ? 'flex-1' : 'w-full'} h-11 rounded-xl font-label-md text-label-md font-bold uppercase transition-all shadow-sm cursor-pointer ${style.btn}`}
           >
             {modal.confirmText || 'OK / Lanjutkan'}
           </button>
