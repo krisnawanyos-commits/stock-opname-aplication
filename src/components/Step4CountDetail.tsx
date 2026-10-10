@@ -55,7 +55,8 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
   const [matchedMasterSKU, setMatchedMasterSKU] = useState<any | null>(null);
   const [isSearchingBarcode, setIsSearchingBarcode] = useState<boolean>(false);
   const [isSessionLocked, setIsSessionLocked] = useState<boolean>(false);
-  const [unmappedDrawerOpen, setUnmappedDrawerOpen] = useState<boolean>(true);
+  const [unmappedDrawerOpen, setUnmappedDrawerOpen] = useState<boolean>(false);
+  const [expandedSku, setExpandedSku] = useState<string | null>(null);
   const [isLoadingSave, setIsLoadingSave] = useState<boolean>(false);
 
   // MASTER KATEGORI BAD STOCK DARI OWNER
@@ -685,6 +686,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     setUnmappedIsBadStock(false);
     setUnmappedBadQty("");
     setUnmappedSelectedCategories([]);
+    setUnmappedDrawerOpen(false);
     setModal({ isOpen: true, type: 'success', title: 'Item Temuan Tersimpan!', message: `Item ${unmSku} & seluruh inputan SKU lain pada Rak ${rack.rackNumber} tersimpan aman!` });
   };
 
@@ -856,152 +858,265 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             </div>
           </div>
 
-          {/* RENDER KARTU SKU MASTER WMS & TEMUAN */}
-          {skuList.map((currentSku, idx) => (
-            <div key={currentSku.sku} className={`bg-white rounded-xl p-space-md shadow-xs border space-y-space-md relative overflow-hidden ${currentSku.isUnmappedFound ? 'border-amber-300' : 'border-slate-200'}`}>
-              <div className={`absolute top-0 left-0 right-0 h-1.5 ${currentSku.isUnmappedFound ? 'bg-amber-500' : 'bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.4)]'}`}></div>
+          {/* RENDER KARTU SKU MASTER WMS & TEMUAN (ACCORDION COMPACT MODE) */}
+          {skuList.map((currentSku, idx) => {
+            const isExpanded = expandedSku === currentSku.sku;
+            const numGood = parseInt(currentSku.qtyGood || "0", 10);
+            const numBad = parseInt(currentSku.qtyBad || "0", 10);
+            const totalCounted = numGood + numBad;
+            const hasInputValue = currentSku.qtyGood !== "" || currentSku.qtyBad !== "";
+            const isCounted = currentSku.isCounted || (hasInputValue && totalCounted > 0);
 
-              <div className="space-y-1 pt-1">
-                <div className="flex items-center justify-between">
-                  <span className={`font-label-lg tracking-wider font-bold ${currentSku.isUnmappedFound ? 'text-amber-800' : 'text-cyan-800'}`}>
-                    {currentSku.isUnmappedFound ? `[TEMUAN] SKU: ${currentSku.sku}` : `SKU: ${currentSku.sku}`}
-                  </span>
-                  <span className="bg-slate-100 text-slate-700 border border-slate-200 px-2 py-0.5 rounded font-label-sm">{currentSku.uom}</span>
-                </div>
-                <p className="font-mono text-xs font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded-md w-fit">
-                  UPC1: {currentSku.upc || 'N/A'} {currentSku.upc2 ? `• UPC2: ${currentSku.upc2}` : ''}
-                </p>
-                <h3 className="font-headline-sm text-slate-900 font-bold leading-snug">{currentSku.name}</h3>
-                <p className="font-body-sm text-slate-500">{currentSku.category}</p>
-              </div>
+            return (
+              <div
+                key={currentSku.sku}
+                className={`bg-white rounded-2xl shadow-xs border transition-all overflow-hidden ${
+                  isExpanded
+                    ? 'border-cyan-400 ring-2 ring-cyan-400/20 shadow-md'
+                    : isCounted
+                      ? 'border-emerald-300 bg-emerald-50/15'
+                      : currentSku.isUnmappedFound
+                        ? 'border-amber-300 bg-amber-50/15'
+                        : 'border-slate-200 hover:border-slate-300'
+                }`}
+              >
+                {/* ACCENT LINE TOP */}
+                <div className={`h-1.5 w-full ${
+                  currentSku.isUnmappedFound
+                    ? 'bg-amber-500'
+                    : isCounted
+                      ? 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.4)]'
+                      : isExpanded
+                        ? 'bg-cyan-400'
+                        : 'bg-slate-200'
+                }`} />
 
-              {/* EXPIRED DATE FEFO DENGAN FORMAT DD/MM/YYYY */}
-              <div className="bg-cyan-50/60 border border-cyan-200 p-space-sm rounded-xl space-y-2">
-                <div className="flex justify-between items-center">
-                  <span className="font-label-sm text-cyan-950 font-bold flex items-center gap-1">
-                    <span className="material-symbols-outlined text-[16px] text-cyan-700">event</span> Expired Date System (FEFO)
-                  </span>
-                  <button
-                    type="button"
-                    disabled={isSessionLocked}
-                    onClick={() => handleSetSameExpAsSystem(idx)}
-                    className={`px-2.5 py-1 text-white rounded-lg text-[10px] font-bold cursor-pointer ${isSessionLocked ? 'bg-slate-400 opacity-50 cursor-not-allowed' : 'bg-emerald-600 active:scale-95'}`}
-                  >
-                    Sama dgn System
-                  </button>
-                </div>
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div>
-                    <label className="text-[10px] text-slate-500 font-bold block uppercase mb-0.5">ED System Terdekat</label>
-                    <input type="text" readOnly value={formatDateDisplay(currentSku.expDateSystem)} className="w-full p-2 bg-white/80 border border-slate-200 rounded-lg text-slate-600 font-mono text-xs font-bold outline-none" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-cyan-800 font-bold block uppercase mb-0.5">ED Actual (Fisik)</label>
-                    <input
-                      type="date"
-                      disabled={isSessionLocked}
-                      value={currentSku.expDateActual || ''}
-                      onChange={(e) => updateItemField(idx, 'expDateActual', e.target.value)}
-                      className={`w-full p-1.5 border-2 rounded-lg text-slate-900 font-mono text-xs font-bold outline-none shadow-xs ${isSessionLocked ? 'bg-slate-100 border-slate-300 opacity-60' : 'bg-white border-cyan-400'}`}
-                    />
-                  </div>
-                </div>
+                {/* ACCORDION HEADER (SELALU KELIHATAN & RINGKAS) */}
+                <div
+                  onClick={() => setExpandedSku(isExpanded ? null : currentSku.sku)}
+                  className="p-3.5 cursor-pointer flex items-center justify-between gap-3 select-none hover:bg-slate-50/80 transition-colors"
+                >
+                  <div className="flex items-start gap-2.5 min-w-0 flex-1">
+                    <div className={`mt-0.5 w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${
+                      isCounted
+                        ? 'bg-emerald-100 text-emerald-700'
+                        : currentSku.isUnmappedFound
+                          ? 'bg-amber-100 text-amber-700'
+                          : 'bg-slate-100 text-slate-400'
+                    }`}>
+                      <span className="material-symbols-outlined text-[18px]">
+                        {isCounted ? 'check_circle' : 'radio_button_unchecked'}
+                      </span>
+                    </div>
 
-                {currentSku.allSystemEds.length > 0 && (
-                  <div className="pt-2 border-t border-cyan-200/60 space-y-1">
-                    <span className="text-[10px] font-bold text-slate-600 block">
-                      Variasi ED System di Rak Ini ({currentSku.batchCount} Batch):
-                    </span>
-                    <div className="flex flex-wrap gap-1.5">
-                      {currentSku.allSystemEds.map((edDate, edIdx) => (
-                        <span key={edIdx} className="px-2 py-0.5 bg-white border border-cyan-300 text-cyan-900 font-mono text-[10px] font-bold rounded-md shadow-xs flex items-center gap-1">
-                          <span>📅</span>
-                          <span>{formatDateDisplay(edDate)}</span>
+                    <div className="min-w-0 flex-1 space-y-0.5">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className={`text-[10px] font-mono font-black uppercase px-1.5 py-0.5 rounded ${
+                          currentSku.isUnmappedFound
+                            ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                            : 'bg-slate-100 text-slate-700'
+                        }`}>
+                          {currentSku.isUnmappedFound ? '📦 TEMUAN' : currentSku.sku}
                         </span>
-                      ))}
+                        <span className="text-[10px] font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">
+                          {currentSku.uom}
+                        </span>
+                      </div>
+                      <h3 className="font-headline-sm text-slate-900 font-bold text-xs sm:text-sm leading-snug line-clamp-2">
+                        {currentSku.name}
+                      </h3>
+                      <p className="text-[11px] text-slate-500 truncate">
+                        {currentSku.category} {currentSku.upc ? `• UPC: ${currentSku.upc}` : ''}
+                      </p>
                     </div>
                   </div>
-                )}
-              </div>
 
-              {/* INPUT KONDISI BAIK (QTY GOOD) */}
-              <div className="bg-slate-50 border border-slate-200 p-space-md rounded-xl space-y-space-sm">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-cyan-400"></span><span className="font-headline-sm text-slate-900 font-bold">Kondisi Baik (Qty Good)</span></div>
-                  <span className="font-label-sm text-slate-500 font-semibold">{currentSku.uom}</span>
-                </div>
-                <div className="flex items-center gap-space-sm">
-                  <button type="button" disabled={isSessionLocked} onClick={() => adjustQty(idx, 'good', -1)} className={`w-14 h-14 bg-white border border-slate-300 text-slate-800 rounded-xl flex items-center justify-center text-xl shrink-0 cursor-pointer ${isSessionLocked ? 'opacity-50 cursor-not-allowed' : ''}`}><span className="material-symbols-outlined">remove</span></button>
-                  <div className="flex-1 h-14 border-2 border-cyan-400 rounded-xl flex items-center justify-center bg-white">
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      disabled={isSessionLocked}
-                      value={currentSku.qtyGood}
-                      onChange={(e) => handleInputText(idx, 'qtyGood', e.target.value)}
-                      placeholder="0"
-                      className={`w-full text-center font-bold text-2xl outline-none ${isSessionLocked ? 'bg-slate-100 opacity-60' : 'bg-white'}`}
-                    />
+                  <div className="flex items-center gap-2 shrink-0">
+                    {isCounted ? (
+                      <div className="text-right">
+                        <span className="px-2.5 py-1 bg-emerald-100 border border-emerald-300 text-emerald-900 text-xs font-black rounded-lg inline-flex items-center gap-1">
+                          <span>✓ {totalCounted}</span>
+                          <span className="text-[10px] font-normal">{currentSku.uom}</span>
+                        </span>
+                        {numBad > 0 && (
+                          <span className="block text-[9px] font-bold text-amber-700 mt-0.5">
+                            ⚠️ {numBad} Rusak
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="px-2 py-1 bg-slate-100 text-slate-500 text-[10px] font-bold rounded-lg border border-slate-200">
+                        Belum Dihitung
+                      </span>
+                    )}
+
+                    <span className={`material-symbols-outlined text-slate-400 transition-transform ${isExpanded ? 'rotate-180 text-cyan-600' : ''}`}>
+                      expand_more
+                    </span>
                   </div>
-                  <button type="button" disabled={isSessionLocked} onClick={() => adjustQty(idx, 'good', 1)} className={`w-14 h-14 rounded-xl flex items-center justify-center text-xl shrink-0 cursor-pointer transition-all ${isSessionLocked ? 'bg-slate-400 opacity-50 cursor-not-allowed text-white' : 'bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-black shadow-md active:scale-95'}`}><span className="material-symbols-outlined">add</span></button>
                 </div>
-              </div>
 
-              {/* BAD STOCK DETECTED DENGAN TOMBOL CHIP KATEOGORI */}
-              <div className="bg-amber-50/70 border border-amber-200 p-space-md rounded-xl space-y-space-sm">
-                <div className="flex items-center justify-between">
-                  <span className="font-body-lg text-amber-900 font-bold">Bad Stock Detected?</span>
-                  <button type="button" disabled={isSessionLocked} onClick={() => toggleBadStock(idx)} className={`min-h-11 min-w-11 px-3 py-1 rounded-full text-xs font-bold cursor-pointer ${isSessionLocked ? 'opacity-50 cursor-not-allowed' : ''} ${currentSku.isBadStock ? 'bg-amber-500 text-slate-950' : 'bg-slate-200 text-slate-600'}`}>{currentSku.isBadStock ? 'ON' : 'OFF'}</button>
-                </div>
-                {currentSku.isBadStock && (
-                  <div className="pt-2 space-y-3 border-t border-amber-200">
-                    <div>
-                      <label className="text-xs font-bold text-amber-900 block mb-1">Jumlah Rusak (Qty Bad):</label>
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        disabled={isSessionLocked}
-                        value={currentSku.qtyBad}
-                        onChange={(e) => handleInputText(idx, 'qtyBad', e.target.value)}
-                        placeholder="0"
-                        className={`w-full p-2 border border-amber-300 rounded-lg text-center font-bold text-lg ${isSessionLocked ? 'bg-slate-100 opacity-60' : 'bg-white'}`}
-                      />
+                {/* EXPANDED CONTENT: FORM HITUNG HANYA MUNCUL SAAT DI-KLIK */}
+                {isExpanded && (
+                  <div className="px-3.5 pb-3.5 pt-1 space-y-3.5 border-t border-slate-100 animate-in fade-in duration-150">
+                    {/* EXPIRED DATE FEFO DENGAN FORMAT DD/MM/YYYY */}
+                    <div className="bg-cyan-50/60 border border-cyan-200 p-space-sm rounded-xl space-y-2">
+                      <div className="flex justify-between items-center">
+                        <span className="font-label-sm text-cyan-950 font-bold flex items-center gap-1">
+                          <span className="material-symbols-outlined text-[16px] text-cyan-700">event</span> Expired Date System (FEFO)
+                        </span>
+                        <button
+                          type="button"
+                          disabled={isSessionLocked}
+                          onClick={() => handleSetSameExpAsSystem(idx)}
+                          className={`px-2.5 py-1 text-white rounded-lg text-[10px] font-bold cursor-pointer ${isSessionLocked ? 'bg-slate-400 opacity-50 cursor-not-allowed' : 'bg-emerald-600 active:scale-95'}`}
+                        >
+                          Sama dgn System
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div>
+                          <label className="text-[10px] text-slate-500 font-bold block uppercase mb-0.5">ED System Terdekat</label>
+                          <input type="text" readOnly value={formatDateDisplay(currentSku.expDateSystem)} className="w-full p-2 bg-white/80 border border-slate-200 rounded-lg text-slate-600 font-mono text-xs font-bold outline-none" />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-cyan-800 font-bold block uppercase mb-0.5">ED Actual (Fisik)</label>
+                          <input
+                            type="date"
+                            disabled={isSessionLocked}
+                            value={currentSku.expDateActual || ''}
+                            onChange={(e) => updateItemField(idx, 'expDateActual', e.target.value)}
+                            className={`w-full p-1.5 border-2 rounded-lg text-slate-900 font-mono text-xs font-bold outline-none shadow-xs ${isSessionLocked ? 'bg-slate-100 border-slate-300 opacity-60' : 'bg-white border-cyan-400'}`}
+                          />
+                        </div>
+                      </div>
+
+                      {currentSku.allSystemEds.length > 0 && (
+                        <div className="pt-2 border-t border-cyan-200/60 space-y-1">
+                          <span className="text-[10px] font-bold text-slate-600 block">
+                            Variasi ED System di Rak Ini ({currentSku.batchCount} Batch):
+                          </span>
+                          <div className="flex flex-wrap gap-1.5">
+                            {currentSku.allSystemEds.map((edDate, edIdx) => (
+                              <span key={edIdx} className="px-2 py-0.5 bg-white border border-cyan-300 text-cyan-900 font-mono text-[10px] font-bold rounded-md shadow-xs flex items-center gap-1">
+                                <span>📅</span>
+                                <span>{formatDateDisplay(edDate)}</span>
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
 
-                    <div>
-                      <label className="text-xs font-bold text-amber-900 block mb-1.5">Pilih Kategori Kerusakan (Bisa lebih dari 1):</label>
-                      <div className="flex flex-wrap gap-1.5">
-                        {availableCategories.map((cat, cIdx) => {
-                          const isSelected = (currentSku.selectedCategories || []).includes(cat);
-                          return (
-                            <button
-                              key={cIdx}
-                              type="button"
-                              disabled={isSessionLocked}
-                              onClick={() => toggleCategoryChip(idx, cat)}
-                              className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${isSelected ? 'bg-amber-500 text-slate-950 border-amber-600 shadow-xs' : 'bg-white text-slate-700 border-amber-200 hover:bg-amber-100/50'}`}
-                            >
-                              {isSelected ? '✓ ' : ''}{cat}
-                            </button>
-                          );
-                        })}
+                    {/* INPUT KONDISI BAIK (QTY GOOD) */}
+                    <div className="bg-slate-50 border border-slate-200 p-space-md rounded-xl space-y-space-sm">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-cyan-400"></span><span className="font-headline-sm text-slate-900 font-bold">Kondisi Baik (Qty Good)</span></div>
+                        <span className="font-label-sm text-slate-500 font-semibold">{currentSku.uom}</span>
+                      </div>
+                      <div className="flex items-center gap-space-sm">
+                        <button type="button" disabled={isSessionLocked} onClick={() => adjustQty(idx, 'good', -1)} className={`w-14 h-14 bg-white border border-slate-300 text-slate-800 rounded-xl flex items-center justify-center text-xl shrink-0 cursor-pointer ${isSessionLocked ? 'opacity-50 cursor-not-allowed' : ''}`}><span className="material-symbols-outlined">remove</span></button>
+                        <div className="flex-1 h-14 border-2 border-cyan-400 rounded-xl flex items-center justify-center bg-white">
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            disabled={isSessionLocked}
+                            value={currentSku.qtyGood}
+                            onChange={(e) => handleInputText(idx, 'qtyGood', e.target.value)}
+                            placeholder="0"
+                            className={`w-full text-center font-bold text-2xl outline-none ${isSessionLocked ? 'bg-slate-100 opacity-60' : 'bg-white'}`}
+                          />
+                        </div>
+                        <button type="button" disabled={isSessionLocked} onClick={() => adjustQty(idx, 'good', 1)} className={`w-14 h-14 rounded-xl flex items-center justify-center text-xl shrink-0 cursor-pointer transition-all ${isSessionLocked ? 'bg-slate-400 opacity-50 cursor-not-allowed text-white' : 'bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-black shadow-md active:scale-95'}`}><span className="material-symbols-outlined">add</span></button>
                       </div>
                     </div>
+
+                    {/* BAD STOCK DETECTED DENGAN TOMBOL CHIP KATEGORI */}
+                    <div className="bg-amber-50/70 border border-amber-200 p-space-md rounded-xl space-y-space-sm">
+                      <div className="flex items-center justify-between">
+                        <span className="font-body-lg text-amber-900 font-bold">Bad Stock Detected?</span>
+                        <button type="button" disabled={isSessionLocked} onClick={() => toggleBadStock(idx)} className={`min-h-11 min-w-11 px-3 py-1 rounded-full text-xs font-bold cursor-pointer ${isSessionLocked ? 'opacity-50 cursor-not-allowed' : ''} ${currentSku.isBadStock ? 'bg-amber-500 text-slate-950' : 'bg-slate-200 text-slate-600'}`}>{currentSku.isBadStock ? 'ON' : 'OFF'}</button>
+                      </div>
+                      {currentSku.isBadStock && (
+                        <div className="pt-2 space-y-3 border-t border-amber-200">
+                          <div>
+                            <label className="text-xs font-bold text-amber-900 block mb-1">Jumlah Rusak (Qty Bad):</label>
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              disabled={isSessionLocked}
+                              value={currentSku.qtyBad}
+                              onChange={(e) => handleInputText(idx, 'qtyBad', e.target.value)}
+                              placeholder="0"
+                              className={`w-full p-2 border border-amber-300 rounded-lg text-center font-bold text-lg ${isSessionLocked ? 'bg-slate-100 opacity-60' : 'bg-white'}`}
+                            />
+                          </div>
+
+                          <div>
+                            <label className="text-xs font-bold text-amber-900 block mb-1.5">Pilih Kategori Kerusakan (Bisa lebih dari 1):</label>
+                            <div className="flex flex-wrap gap-1.5">
+                              {availableCategories.map((cat, cIdx) => {
+                                const isSelected = (currentSku.selectedCategories || []).includes(cat);
+                                return (
+                                  <button
+                                    key={cIdx}
+                                    type="button"
+                                    disabled={isSessionLocked}
+                                    onClick={() => toggleCategoryChip(idx, cat)}
+                                    className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${isSelected ? 'bg-amber-500 text-slate-950 border-amber-600 shadow-xs' : 'bg-white text-slate-700 border-amber-200 hover:bg-amber-100/50'}`}
+                                  >
+                                    {isSelected ? '✓ ' : ''}{cat}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* TOMBOL TUTUP CARD CEPAT */}
+                    <div className="pt-1 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => setExpandedSku(null)}
+                        className="text-xs font-bold text-cyan-700 hover:text-cyan-800 flex items-center gap-1 cursor-pointer py-1.5 px-3 rounded-xl bg-cyan-50 hover:bg-cyan-100 transition-colors"
+                      >
+                        <span>Selesai Edit Item Ini</span>
+                        <span className="material-symbols-outlined text-[16px]">expand_less</span>
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
+            );
+          })}
 
-            </div>
-          ))}
-
-          {/* FORM ITEM TAK TERDAFTAR / TEMUAN LAIN (BATCH NO DIHAPUS) */}
-          <div className="bg-white rounded-xl p-space-md shadow-xs border border-slate-200 space-y-space-md">
-            <div className="flex items-center justify-between cursor-pointer" onClick={() => setUnmappedDrawerOpen(!unmappedDrawerOpen)}>
-              <h3 className="font-headline-sm text-slate-900 font-bold">Item Tak Terdaftar / Temuan Lain</h3>
-              <span className="material-symbols-outlined">{unmappedDrawerOpen ? 'expand_less' : 'expand_more'}</span>
+          {/* FORM ITEM TAK TERDAFTAR / TEMUAN LAIN (ACCORDION COLLAPSIBLE) */}
+          <div className={`bg-white rounded-2xl shadow-xs border transition-all overflow-hidden ${unmappedDrawerOpen ? 'border-amber-400 ring-2 ring-amber-400/20' : 'border-dashed border-2 border-amber-300/80 bg-amber-50/30 hover:bg-amber-50/60'}`}>
+            <div
+              className="p-3.5 flex items-center justify-between cursor-pointer select-none"
+              onClick={() => setUnmappedDrawerOpen(!unmappedDrawerOpen)}
+            >
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center shrink-0">
+                  <span className="material-symbols-outlined text-[20px]">add_box</span>
+                </div>
+                <div>
+                  <h3 className="font-headline-sm text-slate-900 font-bold text-xs sm:text-sm">
+                    {unmappedDrawerOpen ? 'Form Input Item Temuan Fisik' : 'Temukan Barang Tak Terdaftar? Klik di Sini'}
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    {unmappedDrawerOpen ? 'Isi barcode, foto fisik, dan jumlah temuan' : '+ Tambah item baru yang tidak ada dalam daftar sistem'}
+                  </p>
+                </div>
+              </div>
+              <span className={`material-symbols-outlined text-slate-400 transition-transform ${unmappedDrawerOpen ? 'rotate-180 text-amber-600' : ''}`}>
+                expand_more
+              </span>
             </div>
             {unmappedDrawerOpen && (
-              <div className="space-y-3 pt-2">
+              <div className="p-3.5 pt-3 space-y-3 border-t border-amber-200/80 bg-white">
                 <div className="flex gap-2">
                   <input type="text" disabled={isSessionLocked} value={unmappedBarcode} onChange={(e) => setUnmappedBarcode(e.target.value)} placeholder="Scan/Ketik Barcode/UPC..." className={`flex-1 h-11 border border-slate-300 px-3 rounded-lg text-sm font-mono font-bold ${isSessionLocked ? 'bg-slate-100 opacity-60' : 'bg-white'}`} />
                   <button type="button" disabled={isSessionLocked} onClick={triggerNativeBarcodeScan} className={`px-3 min-h-11 rounded-lg flex items-center gap-1 text-xs cursor-pointer transition-all ${isSessionLocked ? 'bg-slate-400 opacity-50 cursor-not-allowed text-white' : 'bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-bold shadow-xs active:scale-95'}`}>
