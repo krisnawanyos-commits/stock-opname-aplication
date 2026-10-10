@@ -911,14 +911,14 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
 
                     <div className="min-w-0 flex-1 space-y-0.5">
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className={`text-xs font-mono font-black uppercase px-2 py-0.5 rounded-md tracking-wide ${
+                        <span className={`text-xs font-mono font-bold uppercase px-2 py-0.5 rounded-md tracking-wide ${
                           currentSku.isUnmappedFound
                             ? 'bg-amber-100 text-amber-950 border border-amber-300'
-                            : 'bg-slate-900 text-cyan-300 shadow-2xs'
+                            : 'bg-cyan-50 text-cyan-800 border border-cyan-200'
                         }`}>
                           {currentSku.isUnmappedFound ? '📦 TEMUAN' : currentSku.sku}
                         </span>
-                        <span className="text-xs font-black uppercase bg-cyan-100 text-cyan-950 border border-cyan-300 px-2 py-0.5 rounded-md">
+                        <span className="text-xs font-bold uppercase bg-cyan-50 text-cyan-800 border border-cyan-200 px-2 py-0.5 rounded-md">
                           {currentSku.uom}
                         </span>
                       </div>
