@@ -80,6 +80,8 @@ interface MasterSKUItem {
     previousCounter?: string;
     lastSwapBatchId?: string;
     isLocked?: boolean;
+    counterPendamping?: string;
+    partner?: string;
 }
 
 interface LocationOption {
@@ -201,6 +203,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
     const [credentialsModalText, setCredentialsModalText] = useState<string | null>(null);
     const [auditLogs, setAuditLogs] = useState<any[]>([]);
+    const [counterPartnersMap, setCounterPartnersMap] = useState<{ [counter: string]: string }>({});
 
     // UPLOAD PROGRESS & CANCEL REF
     const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number; stepMessage?: string } | null>(null);
@@ -338,9 +341,20 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             }, 250);
         });
 
+        const unsubPartners = onSnapshot(collection(db, "counter_partners"), (snap) => {
+            const map: { [c: string]: string } = {};
+            snap.docs.forEach(d => {
+                const data = d.data();
+                if (data.counter && data.partner) {
+                    map[data.counter.toLowerCase().trim()] = data.partner;
+                }
+            });
+            setCounterPartnersMap(map);
+        });
+
         return () => { 
             if (catalogTimer) clearTimeout(catalogTimer);
-            unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); unsubOwner(); unsubBadStock(); unsubAudit(); unsubCatalog(); 
+            unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); unsubOwner(); unsubBadStock(); unsubAudit(); unsubCatalog(); unsubPartners();
         };
     }, []);
 
@@ -962,7 +976,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         }
 
         const project = activeProject;
-        const printWindow = window.open('', '_blank', 'width=950,height=750');
+        const printWindow = window.open('', '_blank', 'width=1150,height=950');
         if (!printWindow) {
             triggerNotification("Gagal membuka jendela cetak. Pastikan izin pop-up browser aktif.");
             return;
@@ -996,8 +1010,8 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     <td style="font-size: 8.5px; word-break: break-word;">${item.Description || '-'}</td>
                     <td style="text-align: center; font-size: 8px;">${item.expiredDateSystem || item.expiredDateActual || '-'}</td>
                     <td style="text-align: center; font-weight: 600;">${item.satuanHitung || 'PCS'}</td>
-                    <td style="height: 26px; min-width: 65px; background-color: #fafafa;"></td>
-                    <td style="height: 26px; min-width: 50px;"></td>
+                    <td style="height: 25px; min-width: 65px; background-color: #fafafa;"></td>
+                    <td style="height: 25px; min-width: 50px;"></td>
                 </tr>
             `).join('');
 
@@ -1069,42 +1083,114 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             <head>
                 <title>Countsheet SO - ${selectedCounter ? selectedCounter.toUpperCase() : 'All Counters'} - R${roundNumber}</title>
                 <style>
-                    @page { size: A4 portrait; margin: 8mm 6mm 10mm 6mm; }
-                    * { box-sizing: border-box; }
+                    @page { 
+                        size: A4 portrait; 
+                        margin: 8mm 6mm 8mm 6mm; 
+                    }
+                    * { 
+                        box-sizing: border-box; 
+                    }
                     body {
                         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
-                        font-size: 10px;
+                        font-size: 9.5px;
                         color: #0f172a;
                         margin: 0;
                         padding: 0;
-                        background: #fff;
+                        background: #f1f5f9;
+                        -webkit-font-smoothing: antialiased;
+                    }
+
+                    /* Top Toolbar (Screen Only) */
+                    .screen-toolbar {
+                        position: sticky;
+                        top: 0;
+                        z-index: 999;
+                        background: #0f172a;
+                        color: #fff;
+                        padding: 10px 24px;
+                        box-shadow: 0 4px 15px rgba(0,0,0,0.18);
+                    }
+                    .toolbar-content {
+                        max-width: 950px;
+                        margin: 0 auto;
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                        gap: 15px;
+                    }
+                    .toolbar-title {
+                        font-size: 13px;
+                        font-weight: 800;
+                        letter-spacing: -0.2px;
+                    }
+                    .toolbar-hint {
+                        font-size: 10px;
+                        color: #94a3b8;
+                        margin-left: 10px;
+                    }
+                    .toolbar-actions {
+                        display: flex;
+                        gap: 8px;
+                    }
+                    .btn-print {
+                        background: #2563eb;
+                        color: #fff;
+                        border: none;
+                        padding: 7px 16px;
+                        font-size: 12px;
+                        font-weight: 800;
+                        border-radius: 8px;
+                        cursor: pointer;
+                        display: inline-flex;
+                        align-items: center;
+                        gap: 6px;
+                        box-shadow: 0 2px 6px rgba(37,99,235,0.3);
+                    }
+                    .btn-print:hover { background: #1d4ed8; }
+                    .btn-close {
+                        background: #334155;
+                        color: #cbd5e1;
+                        border: none;
+                        padding: 7px 14px;
+                        font-size: 12px;
+                        font-weight: 700;
+                        border-radius: 8px;
+                        cursor: pointer;
+                    }
+                    .btn-close:hover { background: #475569; color: #fff; }
+
+                    /* Page Canvas */
+                    .pages-wrapper {
+                        padding: 20px 10px 40px 10px;
                     }
                     .sheet-page {
-                        page-break-after: always;
-                        break-after: page;
-                        padding-bottom: 20px;
+                        width: 210mm;
+                        min-height: 297mm;
+                        margin: 0 auto 25px auto;
+                        background: #fff;
+                        box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+                        border-radius: 4px;
+                        padding: 12mm 10mm;
+                        box-sizing: border-box;
                     }
-                    .sheet-page:last-child {
-                        page-break-after: auto;
-                        break-after: auto;
-                    }
+
                     .header-container {
                         display: flex;
                         justify-content: space-between;
                         align-items: flex-start;
                         border-bottom: 2px solid #0f172a;
-                        padding-bottom: 8px;
-                        margin-bottom: 8px;
+                        padding-bottom: 6px;
+                        margin-bottom: 6px;
                     }
                     .doc-title {
                         font-size: 13px;
                         font-weight: 900;
-                        margin: 0 0 4px 0;
+                        margin: 0 0 3px 0;
                         letter-spacing: -0.2px;
                         text-transform: uppercase;
                     }
                     .sub-meta {
-                        font-size: 9.5px;
+                        font-size: 9px;
                         color: #475569;
                     }
                     .header-right {
@@ -1114,12 +1200,12 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     }
                     .counter-badge {
                         border: 1.5px solid #0f172a;
-                        padding: 4px 8px;
+                        padding: 3px 8px;
                         border-radius: 6px;
                         text-align: right;
                     }
                     .badge-label {
-                        font-size: 8px;
+                        font-size: 7.5px;
                         font-weight: bold;
                         color: #64748b;
                         display: block;
@@ -1133,28 +1219,37 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                         background: #0f172a;
                         color: #fff;
                         font-weight: 900;
-                        font-size: 10px;
-                        padding: 5px 8px;
+                        font-size: 9.5px;
+                        padding: 4px 8px;
                         border-radius: 6px;
                     }
                     .notice-bar {
                         background: #f8fafc;
                         border: 1px dashed #cbd5e1;
-                        padding: 5px 8px;
+                        padding: 4px 8px;
                         border-radius: 6px;
-                        font-size: 8.5px;
+                        font-size: 8px;
                         color: #334155;
-                        margin-bottom: 8px;
+                        margin-bottom: 6px;
                     }
                     .count-table {
                         width: 100%;
                         border-collapse: collapse;
-                        margin-top: 4px;
+                        margin-top: 2px;
+                        page-break-inside: auto;
+                    }
+                    .count-table thead {
+                        display: table-header-group;
+                    }
+                    .count-table tr {
+                        page-break-inside: avoid !important;
+                        break-inside: avoid !important;
                     }
                     .count-table th, .count-table td {
                         border: 1px solid #334155;
                         padding: 3.5px 4.5px;
-                        font-size: 8.5px;
+                        font-size: 8px;
+                        line-height: 1.15;
                     }
                     .count-table th {
                         background-color: #f1f5f9;
@@ -1162,48 +1257,90 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                         color: #0f172a;
                     }
                     .sig-container {
-                        margin-top: 25px;
+                        margin-top: 20px;
+                        margin-bottom: 8px;
                         display: flex;
                         justify-content: space-around;
-                        max-width: 560px;
+                        max-width: 520px;
                         margin-left: auto;
                         margin-right: auto;
-                        gap: 80px;
+                        gap: 60px;
+                        page-break-inside: avoid !important;
+                        break-inside: avoid !important;
                     }
                     .sig-box {
                         flex: 1;
                         text-align: center;
+                        min-width: 160px;
                     }
                     .sig-title {
-                        font-size: 9.5px;
+                        font-size: 9px;
                         font-weight: bold;
                         color: #475569;
-                        margin-bottom: 45px;
+                        margin-bottom: 28px;
                     }
                     .sig-line {
                         border-bottom: 1px solid #475569;
                         margin-bottom: 4px;
                     }
                     .sig-name {
-                        font-size: 10px;
+                        font-size: 9.5px;
                         font-weight: bold;
                         color: #0f172a;
                     }
+
                     @media print {
-                        body { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+                        .no-print {
+                            display: none !important;
+                        }
+                        body {
+                            background: #fff !important;
+                            margin: 0 !important;
+                            padding: 0 !important;
+                            print-color-adjust: exact;
+                            -webkit-print-color-adjust: exact;
+                        }
+                        .pages-wrapper {
+                            padding: 0 !important;
+                        }
+                        .sheet-page {
+                            width: 100% !important;
+                            min-height: auto !important;
+                            margin: 0 !important;
+                            padding: 0 !important;
+                            box-shadow: none !important;
+                            border-radius: 0 !important;
+                            page-break-after: always;
+                            break-after: page;
+                        }
+                        .sheet-page:last-child {
+                            page-break-after: auto;
+                            break-after: auto;
+                        }
                     }
                 </style>
             </head>
             <body>
-                ${pagesHtml}
+                <div class="no-print screen-toolbar">
+                    <div class="toolbar-content">
+                        <div>
+                            <span class="toolbar-title">📄 Preview Countsheet Stock Opname</span>
+                            <span class="toolbar-hint">Format siap cetak A4. Pada dialog cetak: pilih <b>Paper size: A4</b> & <b>Margins: Default/None</b></span>
+                        </div>
+                        <div class="toolbar-actions">
+                            <button onclick="window.print()" class="btn-print">🖨️ Cetak / Simpan PDF</button>
+                            <button onclick="window.close()" class="btn-close">✕ Tutup</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="pages-wrapper">
+                    ${pagesHtml}
+                </div>
             </body>
             </html>
         `);
         printWindow.document.close();
         printWindow.focus();
-        setTimeout(() => {
-            printWindow.print();
-        }, 350);
     };
 
     // FITUR EXPORT COUNTSHEET BLIND KE EXCEL (.XLSX)
@@ -1262,6 +1399,9 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             const goodQty = isCounted ? (item.qtyGood !== undefined ? item.qtyGood : actualQty) : '-';
             const badQty = isCounted ? (item.qtyBad !== undefined ? item.qtyBad : 0) : '-';
 
+            const cleanCounter = (item.counter || '').toLowerCase().trim();
+            const pendampingName = item.counterPendamping || item.partner || counterPartnersMap[cleanCounter] || '-';
+
             return {
                 'NO': idx + 1,
                 'ZONE': item.Zone || '-',
@@ -1277,7 +1417,9 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 'FISIK KONDISI BAIK (GOOD)': goodQty,
                 'FISIK KONDISI RUSAK (BAD)': badQty,
                 'STATUS FISIK': isCounted ? 'Sudah Dihitung' : 'Pending',
-                'RONDE TERAKHIR': `Ronde ${item.currentRound || 1}`
+                'RONDE TERAKHIR': `Ronde ${item.currentRound || 1}`,
+                'NAMA COUNTER': item.counter || '-',
+                'COUNTER PENDAMPING (WH)': pendampingName
             };
         });
 

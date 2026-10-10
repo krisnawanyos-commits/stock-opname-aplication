@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { db } from './firebase';
-import { doc, onSnapshot, collection, query, where } from 'firebase/firestore';
+import { doc, onSnapshot, collection, query, where, setDoc } from 'firebase/firestore';
 import Step1Login from './components/Step1Login';
 import Step2TeamSetup from './components/Step2TeamSetup';
 import Step3CountsheetList from './components/Step3CountsheetList';
@@ -275,8 +275,21 @@ export default function App() {
         <Step2TeamSetup
           sessionData={sessionData}
           onLogout={handleRequestLogout}
-          onSaveTeam={(updatedData) => {
+          onSaveTeam={async (updatedData) => {
             setSessionData(updatedData);
+            try {
+              if (updatedData.primaryCounter) {
+                const cleanUser = updatedData.primaryCounter.toLowerCase().trim();
+                const partnerVal = updatedData.partners?.[0] || '';
+                await setDoc(doc(db, "counter_partners", cleanUser), {
+                  counter: cleanUser,
+                  partner: partnerVal,
+                  updatedAt: new Date().toISOString()
+                }, { merge: true });
+              }
+            } catch (err) {
+              console.error("Error saving counter partner to db:", err);
+            }
             setCurrentStep(3);
           }}
         />

@@ -621,6 +621,8 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
           const existingTaskRef = doc(db, "master_tasks", docId);
           batch.set(existingTaskRef, {
             counter: cleanCounter,
+            counterPendamping: sessionData.partners?.[0] || '',
+            partner: sessionData.partners?.[0] || '',
             isCounted: true,
             QTY_ACTUAL: i === 0 ? skuTotalSubmitted : 0,
             QTY_GOOD: i === 0 ? finalGoodQty : 0,
@@ -646,6 +648,8 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       SKUBrand: unmBrand,
       Location: rack.rackNumber,
       counter: cleanCounter,
+      counterPendamping: sessionData.partners?.[0] || '',
+      partner: sessionData.partners?.[0] || '',
       currentRound: 1,
       Qty: 0,
       QTY_ACTUAL: totalSubmitted,
@@ -717,6 +721,8 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
           const taskRef = doc(db, "master_tasks", docId);
           batch.set(taskRef, {
             counter: cleanCounter,
+            counterPendamping: sessionData.partners?.[0] || '',
+            partner: sessionData.partners?.[0] || '',
             isCounted: true,
             QTY_ACTUAL: i === 0 ? totalSubmitted : 0,
             QTY_GOOD: i === 0 ? finalGoodQty : 0,
@@ -738,6 +744,8 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
           upc1: skuItem.upc,
           upc2: skuItem.upc2 || '-',
           counterPic: cleanCounter,
+          counterPendamping: sessionData.partners?.[0] || '-',
+          partner: sessionData.partners?.[0] || '-',
           round: currentRoundNum,
           qtyGood: finalGoodQty,
           qtyBad: finalBadQty,
