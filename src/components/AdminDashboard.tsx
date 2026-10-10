@@ -2165,7 +2165,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
     // 6. BRAND ACCURACY (Single-pass Grouping O(N))
     const brandAccuracyList = useMemo(() => {
-        const brandGroupMap = new Map<string, Map<string, { SKU: string; Qty: number; countedQty: number; isCounted: boolean }>>();
+        const brandGroupMap = new Map<string, Map<string, { SKU: string; Qty: number; countedTargetQty: number; countedQty: number; isCounted: boolean }>>();
 
         for (let i = 0; i < masterDataList.length; i++) {
             const item = masterDataList[i];
@@ -2181,12 +2181,14 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 skuMap.set(item.SKU, {
                     SKU: item.SKU,
                     Qty: item.Qty || 0,
-                    countedQty: item.countedQty || 0,
+                    countedTargetQty: item.isCounted ? (item.Qty || 0) : 0,
+                    countedQty: item.isCounted ? (item.countedQty || 0) : 0,
                     isCounted: !!item.isCounted
                 });
             } else {
                 existing.Qty += (item.Qty || 0);
                 if (item.isCounted) {
+                    existing.countedTargetQty += (item.Qty || 0);
                     existing.countedQty += (item.countedQty || 0);
                     existing.isCounted = true;
                 }
@@ -2203,7 +2205,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
             const aggregatedSKUList = Array.from(skuMap.values());
             const countedSKUs = aggregatedSKUList.filter(m => m.isCounted);
-            const diffCount = countedSKUs.filter(m => m.countedQty !== m.Qty).length;
+            const diffCount = countedSKUs.filter(m => m.countedQty !== m.countedTargetQty).length;
 
             let accuracyPct = 0;
             const isFullyUncounted = countedSKUs.length === 0;
@@ -2233,12 +2235,28 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
     // 7. FINANCIAL VARIANCE & RECONCILIATION SUMMARY (Memoized)
     const matchRecoveryCount = useMemo(() => masterDataList.filter(m => m.isCounted && (m.countedQty ?? m.Qty) === m.Qty).length, [masterDataList]);
-    const varianceRecoveryCount = useMemo(() => masterDataList.filter(m => m.isCounted && (m.countedQty ?? m.Qty) !== m.Qty).length, [masterDataList]);
-    const totalFinancialVarianceValue = useMemo(() => masterDataList.reduce((acc, m) => acc + (m.isCounted ? (((m.countedQty ?? m.Qty) - m.Qty) * (m.unitPrice || 0)) : 0), 0), [masterDataList]);
+    const varianceRecoveryCount = useMemo(() => masterDataList.filter(m => {
+        if (m.isCounted) return (m.countedQty ?? m.Qty) !== m.Qty;
+        return m.currentRound > 1 && m.round1Actual !== undefined && m.round1Actual !== m.Qty;
+    }).length, [masterDataList]);
+    const totalFinancialVarianceValue = useMemo(() => masterDataList.reduce((acc, m) => {
+        if (m.isCounted) {
+            return acc + (((m.countedQty ?? m.Qty) - m.Qty) * (m.unitPrice || 0));
+        }
+        if (m.currentRound > 1 && m.round1Actual !== undefined && m.round1Actual !== m.Qty) {
+            return acc + ((m.round1Actual - m.Qty) * (m.unitPrice || 0));
+        }
+        return acc;
+    }, 0), [masterDataList]);
 
     // 8. DISCREPANCY TABLE LIST & PAGINATION (Pencegah Freeze Layar Rekapitulasi)
     const filteredDiscrepancies = useMemo(() => {
-        return masterDataList.filter(i => i.isCounted && ((i.countedQty || 0) - i.Qty) !== 0);
+        return masterDataList.filter(i => {
+            if (i.isCounted) {
+                return ((i.countedQty || 0) - i.Qty) !== 0;
+            }
+            return i.currentRound > 1 && i.round1Actual !== undefined && i.round1Actual !== i.Qty;
+        });
     }, [masterDataList]);
 
     const totalReconPages = Math.ceil(filteredDiscrepancies.length / ITEMS_PER_PAGE) || 1;
@@ -4318,15 +4336,44 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                 </tr>
                                             ) : (
                                                 paginatedDiscrepancies.map((item, i) => {
-                                                    const diff = (item.countedQty || 0) - item.Qty;
+                                                    const isRoundPending = !item.isCounted && item.currentRound > 1;
+                                                    const effectiveActual = item.isCounted ? (item.countedQty ?? 0) : (item.round1Actual ?? 0);
+                                                    const diff = effectiveActual - item.Qty;
                                                     const val = diff * (item.unitPrice || 0);
                                                     return (
                                                         <tr key={item.id || `${item.SKU}_${i}`} className="hover:bg-slate-50">
-                                                            <td className="p-4 font-mono font-bold text-indigo-600">{item.SKU}</td>
+                                                            <td className="p-4">
+                                                                <div className="flex items-center gap-2 flex-wrap">
+                                                                    <span className="font-mono font-bold text-indigo-600">{item.SKU}</span>
+                                                                    {isRoundPending ? (
+                                                                        <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-amber-50 text-amber-800 border border-amber-200">
+                                                                            🔄 Ronde {item.currentRound} ({item.counter})
+                                                                        </span>
+                                                                    ) : (
+                                                                        <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-red-50 text-red-700 border border-red-200">
+                                                                            Selisih
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                                {item.Description && <div className="text-[11px] text-slate-400 truncate max-w-xs">{item.Description}</div>}
+                                                            </td>
                                                             <td className="p-4 text-center text-slate-500">{item.Qty}</td>
-                                                            <td className="p-4 text-center font-bold text-emerald-600">{item.qtyGood ?? item.countedQty}</td>
-                                                            <td className="p-4 text-center font-bold text-red-600">{item.qtyBad ?? 0}</td>
-                                                            <td className="p-4 text-center font-black">{item.countedQty}</td>
+                                                            <td className="p-4 text-center font-bold text-emerald-600">
+                                                                {isRoundPending ? '-' : (item.qtyGood ?? item.countedQty)}
+                                                            </td>
+                                                            <td className="p-4 text-center font-bold text-red-600">
+                                                                {isRoundPending ? '-' : (item.qtyBad ?? 0)}
+                                                            </td>
+                                                            <td className="p-4 text-center font-black">
+                                                                {isRoundPending ? (
+                                                                    <div>
+                                                                        <span>{effectiveActual}</span>
+                                                                        <span className="block text-[9px] font-bold text-amber-600">(R1 Act)</span>
+                                                                    </div>
+                                                                ) : (
+                                                                    item.countedQty
+                                                                )}
+                                                            </td>
                                                             <td className="p-4 text-center text-red-600 font-black">{diff > 0 ? `+${diff}` : diff}</td>
                                                             <td className="p-4 text-right font-mono text-amber-700 font-bold bg-amber-50/20">Rp {val.toLocaleString('id-ID')}</td>
                                                             <td className="p-4 text-right bg-indigo-50/10">

@@ -911,14 +911,14 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
 
                     <div className="min-w-0 flex-1 space-y-0.5">
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className={`text-[10px] font-mono font-black uppercase px-1.5 py-0.5 rounded ${
+                        <span className={`text-xs font-mono font-black uppercase px-2 py-0.5 rounded-md tracking-wide ${
                           currentSku.isUnmappedFound
-                            ? 'bg-amber-100 text-amber-900 border border-amber-300'
-                            : 'bg-slate-100 text-slate-700'
+                            ? 'bg-amber-100 text-amber-950 border border-amber-300'
+                            : 'bg-slate-900 text-cyan-300 shadow-2xs'
                         }`}>
                           {currentSku.isUnmappedFound ? '📦 TEMUAN' : currentSku.sku}
                         </span>
-                        <span className="text-[10px] font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">
+                        <span className="text-xs font-black uppercase bg-cyan-100 text-cyan-950 border border-cyan-300 px-2 py-0.5 rounded-md">
                           {currentSku.uom}
                         </span>
                       </div>
@@ -936,7 +936,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                       <div className="text-right">
                         <span className="px-2.5 py-1 bg-emerald-100 border border-emerald-300 text-emerald-900 text-xs font-black rounded-lg inline-flex items-center gap-1">
                           <span>✓ {totalCounted}</span>
-                          <span className="text-[10px] font-normal">{currentSku.uom}</span>
+                          <span className="text-[11px] font-extrabold uppercase">{currentSku.uom}</span>
                         </span>
                         {numBad > 0 && (
                           <span className="block text-[9px] font-bold text-amber-700 mt-0.5">
@@ -1011,8 +1011,8 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                     {/* INPUT KONDISI BAIK (QTY GOOD) */}
                     <div className="bg-slate-50 border border-slate-200 p-space-md rounded-xl space-y-space-sm">
                       <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-cyan-400"></span><span className="font-headline-sm text-slate-900 font-bold">Kondisi Baik (Qty Good)</span></div>
-                        <span className="font-label-sm text-slate-500 font-semibold">{currentSku.uom}</span>
+                        <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-cyan-400"></span><span className="font-headline-sm text-slate-900 font-bold text-xs sm:text-sm">Kondisi Baik (Qty Good)</span></div>
+                        <span className="px-2 py-0.5 rounded-md bg-cyan-100 text-cyan-950 border border-cyan-300 font-black text-xs uppercase">{currentSku.uom}</span>
                       </div>
                       <div className="flex items-center gap-space-sm">
                         <button type="button" disabled={isSessionLocked} onClick={() => adjustQty(idx, 'good', -1)} className={`w-14 h-14 bg-white border border-slate-300 text-slate-800 rounded-xl flex items-center justify-center text-xl shrink-0 cursor-pointer ${isSessionLocked ? 'opacity-50 cursor-not-allowed' : ''}`}><span className="material-symbols-outlined">remove</span></button>
@@ -1040,7 +1040,10 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                       {currentSku.isBadStock && (
                         <div className="pt-2 space-y-3 border-t border-amber-200">
                           <div>
-                            <label className="text-xs font-bold text-amber-900 block mb-1">Jumlah Rusak (Qty Bad):</label>
+                            <label className="text-xs font-bold text-amber-900 flex items-center justify-between mb-1">
+                              <span>Jumlah Rusak (Qty Bad):</span>
+                              <span className="px-2 py-0.5 rounded-md bg-amber-200/80 text-amber-950 font-black text-[11px] uppercase">{currentSku.uom}</span>
+                            </label>
                             <input
                               type="text"
                               inputMode="numeric"
