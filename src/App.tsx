@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { db } from './firebase';
 import { doc, onSnapshot, collection, query, where } from 'firebase/firestore';
 import Step1Login from './components/Step1Login';
@@ -73,6 +73,36 @@ export default function App() {
 
   // STATE UNTUK POP-UP MODAL LOGOUT APLIKASI
   const [showLogoutModal, setShowLogoutModal] = useState<boolean>(false);
+  const showLogoutModalRef = useRef<boolean>(showLogoutModal);
+
+  useEffect(() => {
+    showLogoutModalRef.current = showLogoutModal;
+  }, [showLogoutModal]);
+
+  // PROTEKSI TOMBOL BACK HP AGAR TIDAK LANGSUNG KELUAR DARI COUNTSHEET LIST (STEP 3)
+  useEffect(() => {
+    if (currentStep !== 3 && currentStep !== 'admin_demo') return;
+
+    if (!window.history.state?.inCountsheetList) {
+      window.history.pushState({ inCountsheetList: true }, '');
+    }
+
+    const handlePopState = () => {
+      if (showLogoutModalRef.current) {
+        window.history.pushState({ inCountsheetList: true }, '');
+        setShowLogoutModal(false);
+        return;
+      }
+
+      window.history.pushState({ inCountsheetList: true }, '');
+      setShowLogoutModal(true);
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [currentStep]);
 
   // LISTEN ROLE REAL-TIME DARI FIRESTORE UNTUK USER AKTIF
   useEffect(() => {

@@ -66,6 +66,92 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
   });
   const [isDirty, setIsDirty] = useState<boolean>(false);
 
+  const isDirtyRef = useRef<boolean>(isDirty);
+  const modalOpenRef = useRef<boolean>(modal.isOpen);
+  const isHandledBackRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    isDirtyRef.current = isDirty;
+  }, [isDirty]);
+
+  useEffect(() => {
+    modalOpenRef.current = modal.isOpen;
+  }, [modal.isOpen]);
+
+  // Helper navigasi mundur aman yang menyelaraskan browser history
+  const triggerSafeBack = () => {
+    if (window.history.state?.inRackDetail) {
+      isHandledBackRef.current = true;
+      window.history.back();
+      setTimeout(() => {
+        if (isHandledBackRef.current) {
+          isHandledBackRef.current = false;
+          onBackToList();
+        }
+      }, 200);
+    } else {
+      onBackToList();
+    }
+  };
+
+  // INTERSEPSI TOMBOL BACK FISIK HP & GESTURE SWIPE BACK
+  useEffect(() => {
+    // Daftarkan entry history untuk halaman detail rak ini jika belum ada
+    if (!window.history.state?.inRackDetail) {
+      window.history.pushState({ inRackDetail: true, rackNumber: rack.rackNumber }, '');
+    } else {
+      window.history.replaceState({ inRackDetail: true, rackNumber: rack.rackNumber }, '');
+    }
+
+    const handlePopState = () => {
+      // Jika navigasi mundur dipicu secara terprogram (misal tombol in-app / modal confirm)
+      if (isHandledBackRef.current) {
+        isHandledBackRef.current = false;
+        onBackToList();
+        return;
+      }
+
+      // Jika modal sedang terbuka dan user memencet Back HP lagi: cukup tutup modalnya
+      if (modalOpenRef.current) {
+        window.history.pushState({ inRackDetail: true, rackNumber: rack.rackNumber }, '');
+        setModal(prev => ({ ...prev, isOpen: false }));
+        return;
+      }
+
+      // Jika ada perubahan/hitungan yang belum tersimpan
+      if (isDirtyRef.current) {
+        // Karena browser baru saja pop 1 langkah, push kembali state agar tidak langsung keluar jika batal
+        window.history.pushState({ inRackDetail: true, rackNumber: rack.rackNumber }, '');
+
+        setModal({
+          isOpen: true,
+          type: 'warning',
+          title: 'Hasil Hitung Belum Disimpan!',
+          message: `Kamu memiliki inputan di Rak ${rack.rackNumber} yang belum disimpan ke Cloud. Jika keluar sekarang, inputan kamu akan hilang. Yakin ingin keluar?`,
+          showCancel: true,
+          cancelText: 'Tetap di Rak Ini',
+          confirmText: 'Keluar Tanpa Simpan',
+          onConfirm: () => {
+            setIsDirty(false);
+            isDirtyRef.current = false;
+            triggerSafeBack();
+          },
+          onCancel: () => {
+            // User membatalkan keluar, tetap berada di rak saat ini
+          }
+        });
+      } else {
+        // Data aman / belum ada inputan kotor, langsung kembali ke Countsheet List
+        onBackToList();
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [rack.rackNumber, onBackToList]);
+
   // Proteksi tab close/refresh saat ada inputan belum disimpan
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -447,12 +533,13 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
         confirmText: 'Keluar Tanpa Simpan',
         onConfirm: () => {
           setIsDirty(false);
-          onBackToList();
+          isDirtyRef.current = false;
+          triggerSafeBack();
         }
       });
       return;
     }
-    onBackToList();
+    triggerSafeBack();
   };
 
   const handleSafeLogout = () => {
@@ -696,7 +783,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
           if (nextRackItem && onSelectNextRack) {
             onSelectNextRack(nextRackItem);
           } else {
-            onBackToList();
+            triggerSafeBack();
           }
         },
       });
