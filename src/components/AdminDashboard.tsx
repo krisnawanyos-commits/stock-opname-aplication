@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { db } from '../firebase';
 import {
     collection, onSnapshot, doc, setDoc, deleteDoc, writeBatch, getDocs, query, orderBy, limit
@@ -237,8 +238,21 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
     const [badStockCategories, setBadStockCategories] = useState<string[]>(['Dus Penyok', 'Kemasan Bocor', 'Segel Rusak', 'Basah / Lembab', 'Barang Expired']);
     const [newCategoryInput, setNewCategoryInput] = useState<string>('');
 
-    // DROPDOWN MENU KONTROL PIC COUNTER
-    const [activeActionCounter, setActiveActionCounter] = useState<string | null>(null);
+    // DROPDOWN MENU KONTROL PIC COUNTER (FIXED VIEWPORT POPUP)
+    const [menuAnchor, setMenuAnchor] = useState<{
+        counter: string;
+        top: number;
+        right: number;
+        isDropup: boolean;
+    } | null>(null);
+
+    useEffect(() => {
+        const handleScroll = () => {
+            if (menuAnchor) setMenuAnchor(null);
+        };
+        window.addEventListener('scroll', handleScroll, true);
+        return () => window.removeEventListener('scroll', handleScroll, true);
+    }, [menuAnchor]);
 
     useEffect(() => {
         setOrderedTabs(ALL_AVAILABLE_TABS.filter(tab => tab.roles.includes(effectiveRole)));
@@ -3656,35 +3670,52 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                                                     ⚠️ {cData.errorCount} Selisih
                                                                                 </span>
                                                                             )}
-                                                                            {/* DROPDOWN KONTROL AKSI COUNTER */}
+                                                                            {/* DROPDOWN KONTROL AKSI COUNTER (FIXED POPUP) */}
                                                                             <div className="relative">
                                                                                 <button
                                                                                     onClick={(e) => {
                                                                                         e.stopPropagation();
-                                                                                        setActiveActionCounter(activeActionCounter === cName ? null : cName);
+                                                                                        if (menuAnchor?.counter === cName) {
+                                                                                            setMenuAnchor(null);
+                                                                                        } else {
+                                                                                            const rect = e.currentTarget.getBoundingClientRect();
+                                                                                            const dropdownHeight = 260;
+                                                                                            const spaceBelow = window.innerHeight - rect.bottom;
+                                                                                            const isDropup = spaceBelow < dropdownHeight && rect.top > dropdownHeight;
+                                                                                            setMenuAnchor({
+                                                                                                counter: cName,
+                                                                                                top: isDropup ? rect.top - 6 : rect.bottom + 6,
+                                                                                                right: Math.max(16, window.innerWidth - rect.right),
+                                                                                                isDropup
+                                                                                            });
+                                                                                        }
                                                                                     }}
                                                                                     className={`px-2.5 py-1.5 rounded-lg text-[10px] font-black inline-flex items-center space-x-1 transition-all cursor-pointer ${
-                                                                                        activeActionCounter === cName
+                                                                                        menuAnchor?.counter === cName
                                                                                             ? 'bg-cyan-500 text-slate-950 shadow-xs'
                                                                                             : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 shadow-2xs'
                                                                                     }`}
                                                                                 >
                                                                                     <Settings className="w-3 h-3 text-cyan-600" />
                                                                                     <span>Kelola</span>
-                                                                                    <ChevronDown className={`w-3 h-3 transition-transform ${activeActionCounter === cName ? 'rotate-180' : ''}`} />
+                                                                                    <ChevronDown className={`w-3 h-3 transition-transform ${menuAnchor?.counter === cName ? 'rotate-180' : ''}`} />
                                                                                 </button>
 
-                                                                                {activeActionCounter === cName && (
+                                                                                {menuAnchor?.counter === cName && createPortal(
                                                                                     <>
                                                                                         <div
-                                                                                            className="fixed inset-0 z-40"
-                                                                                            onClick={(e) => { e.stopPropagation(); setActiveActionCounter(null); }}
+                                                                                            className="fixed inset-0 z-50 bg-transparent"
+                                                                                            onClick={(e) => { e.stopPropagation(); setMenuAnchor(null); }}
                                                                                         />
-                                                                                        <div className={`absolute right-0 w-64 bg-white rounded-2xl shadow-2xl border border-slate-200 p-2 z-50 space-y-1 animate-in fade-in zoom-in-95 duration-150 ${
-                                                                                            idx > filteredCounterNames.length - 3 && filteredCounterNames.length > 2
-                                                                                                ? 'bottom-full mb-1.5'
-                                                                                                : 'top-full mt-1.5'
-                                                                                        }`}>
+                                                                                        <div
+                                                                                            className={`fixed w-64 max-w-[calc(100vw-32px)] bg-white rounded-2xl shadow-2xl border border-slate-200 p-2 z-50 space-y-1 animate-in fade-in zoom-in-95 duration-150 ${
+                                                                                                menuAnchor.isDropup ? '-translate-y-full' : ''
+                                                                                            }`}
+                                                                                            style={{
+                                                                                                top: `${menuAnchor.top}px`,
+                                                                                                right: `${menuAnchor.right}px`
+                                                                                            }}
+                                                                                        >
                                                                                             <div className="px-3 py-1.5 text-[10px] font-extrabold text-slate-400 uppercase tracking-wider border-b border-slate-100 mb-1 flex items-center justify-between">
                                                                                                 <span>Aksi PIC: <b className="text-slate-900">{cName}</b></span>
                                                                                                 <span className="font-mono text-cyan-600">Ronde {cMaxRound}</span>
@@ -3694,7 +3725,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                                                                 <button
                                                                                                     onClick={(e) => {
                                                                                                         e.stopPropagation();
-                                                                                                        setActiveActionCounter(null);
+                                                                                                        setMenuAnchor(null);
                                                                                                         handleOpenDeployModal(cName);
                                                                                                     }}
                                                                                                     disabled={cMaxRound >= 3}
@@ -3719,7 +3750,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                                                             <button
                                                                                                 onClick={(e) => {
                                                                                                     e.stopPropagation();
-                                                                                                    setActiveActionCounter(null);
+                                                                                                    setMenuAnchor(null);
                                                                                                     handleOpenReassignModal(cName);
                                                                                                 }}
                                                                                                 className="w-full text-left px-3 py-2 rounded-xl text-xs font-bold flex items-center space-x-2.5 hover:bg-cyan-50 text-slate-700 hover:text-cyan-800 transition-all cursor-pointer"
@@ -3737,7 +3768,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                                                                 <button
                                                                                                     onClick={(e) => {
                                                                                                         e.stopPropagation();
-                                                                                                        setActiveActionCounter(null);
+                                                                                                        setMenuAnchor(null);
                                                                                                         setTransferSourceCounter(cName);
                                                                                                     }}
                                                                                                     className="w-full text-left px-3 py-2 rounded-xl text-xs font-bold flex items-center space-x-2.5 hover:bg-cyan-50 text-slate-700 hover:text-cyan-800 transition-all cursor-pointer"
@@ -3757,7 +3788,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                                                                     <button
                                                                                                         onClick={(e) => {
                                                                                                             e.stopPropagation();
-                                                                                                            setActiveActionCounter(null);
+                                                                                                            setMenuAnchor(null);
                                                                                                             handleToggleCounterLock(cName, isLocked);
                                                                                                         }}
                                                                                                         className={`w-full text-left px-3 py-2 rounded-xl text-xs font-bold flex items-center space-x-2.5 transition-all cursor-pointer ${
@@ -3781,7 +3812,8 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                                                                 </div>
                                                                                             )}
                                                                                         </div>
-                                                                                    </>
+                                                                                    </>,
+                                                                                    document.body
                                                                                 )}
                                                                             </div>
                                                                             <button
