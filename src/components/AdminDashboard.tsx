@@ -987,12 +987,17 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             const rowsHtml = tasks.map((item, tIdx) => `
                 <tr>
                     <td style="text-align: center; font-weight: bold;">${tIdx + 1}</td>
+                    <td style="text-align: center; font-weight: 600;">${item.Zone || '-'}</td>
                     <td style="font-weight: bold; font-family: monospace;">${item.Location || '-'}</td>
+                    <td style="text-align: center; font-weight: 600;">${item.level || '-'}</td>
                     <td style="font-weight: bold; font-family: monospace;">${item.SKU}</td>
-                    <td>${item.Description || '-'}</td>
-                    <td style="text-align: center;">${item.satuanHitung || 'PCS'}</td>
-                    <td style="height: 28px; min-width: 80px; background-color: #fafafa;"></td>
-                    <td style="height: 28px; min-width: 60px;"></td>
+                    <td style="font-family: monospace; font-size: 8px;">${item.UPC1 || '-'}</td>
+                    <td style="font-family: monospace; font-size: 8px;">${item.UPC2 || '-'}</td>
+                    <td style="font-size: 8.5px; word-break: break-word;">${item.Description || '-'}</td>
+                    <td style="text-align: center; font-size: 8px;">${item.expiredDateSystem || item.expiredDateActual || '-'}</td>
+                    <td style="text-align: center; font-weight: 600;">${item.satuanHitung || 'PCS'}</td>
+                    <td style="height: 26px; min-width: 65px; background-color: #fafafa;"></td>
+                    <td style="height: 26px; min-width: 50px;"></td>
                 </tr>
             `).join('');
 
@@ -1023,17 +1028,22 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     <table class="count-table">
                         <thead>
                             <tr>
-                                <th style="width: 35px; text-align: center;">NO</th>
-                                <th style="width: 90px;">LOKASI / RAK</th>
-                                <th style="width: 120px;">BARCODE / SKU</th>
+                                <th style="width: 24px; text-align: center;">NO</th>
+                                <th style="width: 44px; text-align: center;">ZONE</th>
+                                <th style="width: 70px;">LOKASI / RAK</th>
+                                <th style="width: 34px; text-align: center;">LEVEL</th>
+                                <th style="width: 90px;">BARCODE / SKU</th>
+                                <th style="width: 72px;">UPC 1</th>
+                                <th style="width: 72px;">UPC 2</th>
                                 <th>DESKRIPSI PRODUK</th>
-                                <th style="width: 60px; text-align: center;">UOM</th>
-                                <th style="width: 100px; text-align: center; background-color: #e2e8f0;">FISIK AKTUAL</th>
-                                <th style="width: 80px; text-align: center;">PARAF / KET</th>
+                                <th style="width: 62px; text-align: center;">EXP DATE</th>
+                                <th style="width: 36px; text-align: center;">UOM</th>
+                                <th style="width: 75px; text-align: center; background-color: #e2e8f0;">FISIK AKTUAL</th>
+                                <th style="width: 55px; text-align: center;">PARAF / KET</th>
                             </tr>
                         </thead>
                         <tbody>
-                            ${rowsHtml.length > 0 ? rowsHtml : '<tr><td colspan="7" style="text-align: center; padding: 20px;">Tidak ada item task untuk PIC ini di ronde ini.</td></tr>'}
+                            ${rowsHtml.length > 0 ? rowsHtml : '<tr><td colspan="12" style="text-align: center; padding: 20px;">Tidak ada item task untuk PIC ini di ronde ini.</td></tr>'}
                         </tbody>
                     </table>
 
@@ -1044,12 +1054,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                             <div class="sig-name">${cName}</div>
                         </div>
                         <div class="sig-box">
-                            <div class="sig-title">Auditor Lapangan (Vendor)</div>
-                            <div class="sig-line"></div>
-                            <div class="sig-name">(........................................)</div>
-                        </div>
-                        <div class="sig-box">
-                            <div class="sig-title">Supervisor / Koordinator SO</div>
+                            <div class="sig-title">Counter Vendor</div>
                             <div class="sig-line"></div>
                             <div class="sig-name">(........................................)</div>
                         </div>
@@ -1064,11 +1069,11 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             <head>
                 <title>Countsheet SO - ${selectedCounter ? selectedCounter.toUpperCase() : 'All Counters'} - R${roundNumber}</title>
                 <style>
-                    @page { size: A4 portrait; margin: 12mm 12mm 15mm 12mm; }
+                    @page { size: A4 portrait; margin: 8mm 6mm 10mm 6mm; }
                     * { box-sizing: border-box; }
                     body {
                         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
-                        font-size: 11px;
+                        font-size: 10px;
                         color: #0f172a;
                         margin: 0;
                         padding: 0;
@@ -1092,14 +1097,14 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                         margin-bottom: 8px;
                     }
                     .doc-title {
-                        font-size: 14px;
+                        font-size: 13px;
                         font-weight: 900;
                         margin: 0 0 4px 0;
                         letter-spacing: -0.2px;
                         text-transform: uppercase;
                     }
                     .sub-meta {
-                        font-size: 10px;
+                        font-size: 9.5px;
                         color: #475569;
                     }
                     .header-right {
@@ -1120,7 +1125,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                         display: block;
                     }
                     .badge-name {
-                        font-size: 12px;
+                        font-size: 11px;
                         font-weight: 900;
                         color: #0f172a;
                     }
@@ -1128,18 +1133,18 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                         background: #0f172a;
                         color: #fff;
                         font-weight: 900;
-                        font-size: 11px;
-                        padding: 6px 10px;
+                        font-size: 10px;
+                        padding: 5px 8px;
                         border-radius: 6px;
                     }
                     .notice-bar {
                         background: #f8fafc;
                         border: 1px dashed #cbd5e1;
-                        padding: 6px 10px;
+                        padding: 5px 8px;
                         border-radius: 6px;
-                        font-size: 9.5px;
+                        font-size: 8.5px;
                         color: #334155;
-                        margin-bottom: 10px;
+                        margin-bottom: 8px;
                     }
                     .count-table {
                         width: 100%;
@@ -1148,8 +1153,8 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     }
                     .count-table th, .count-table td {
                         border: 1px solid #334155;
-                        padding: 5px 7px;
-                        font-size: 10px;
+                        padding: 3.5px 4.5px;
+                        font-size: 8.5px;
                     }
                     .count-table th {
                         background-color: #f1f5f9;
@@ -1157,10 +1162,13 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                         color: #0f172a;
                     }
                     .sig-container {
-                        margin-top: 30px;
+                        margin-top: 25px;
                         display: flex;
-                        justify-content: space-between;
-                        gap: 20px;
+                        justify-content: space-around;
+                        max-width: 560px;
+                        margin-left: auto;
+                        margin-right: auto;
+                        gap: 80px;
                     }
                     .sig-box {
                         flex: 1;
@@ -1219,10 +1227,14 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             'NO': idx + 1,
             'RONDE': roundNumber,
             'PIC COUNTER': item.counter,
-            'LOKASI / RAK': item.Location,
+            'ZONE': item.Zone || '-',
+            'LOKASI / RAK': item.Location || '-',
+            'LEVEL': item.level || '-',
             'BARCODE / SKU': item.SKU,
-            'UPC 1': item.UPC1 || item.SKU,
-            'DESKRIPSI PRODUK': item.Description,
+            'UPC 1': item.UPC1 || '-',
+            'UPC 2': item.UPC2 || '-',
+            'DESKRIPSI PRODUK': item.Description || '-',
+            'EXPIRED DATE': item.expiredDateSystem || item.expiredDateActual || '-',
             'SATUAN (UOM)': item.satuanHitung || 'PCS',
             'HASIL FISIK (TULIS TANGAN / SCAN)': '',
             'PARAF / CATATAN': ''
@@ -1234,6 +1246,47 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         const filename = `Countsheet_Blind_R${roundNumber}_${selectedCounter ? selectedCounter.toUpperCase() : 'SEMUA_COUNTER'}_${activeProject?.sessionCode || 'SO'}.xlsx`;
         XLSX.writeFile(wb, filename);
         triggerNotification(`📥 File Countsheet (.xlsx) berhasil diunduh: ${filename}`);
+    };
+
+    // FITUR EXPORT HITUNGAN FISIK INTERNAL UNTUK NEGO / SHARING DENGAN VENDOR
+    // (SYSTEM QTY & HARGA 100% DISEMBUNYIKAN UNTUK MENJAGA INTEGRITAS AUDIT & KERAHASIAAN)
+    const handleExportInternalCountsForVendorXLSX = () => {
+        if (!masterDataList || masterDataList.length === 0) {
+            triggerNotification("Tidak ada data hasil hitungan untuk diexport!");
+            return;
+        }
+
+        const exportData = masterDataList.map((item, idx) => {
+            const isCounted = !!item.isCounted;
+            const actualQty = isCounted ? (item.countedQty !== undefined ? item.countedQty : (item.QTY_ACTUAL ?? 0)) : 0;
+            const goodQty = isCounted ? (item.qtyGood !== undefined ? item.qtyGood : actualQty) : '-';
+            const badQty = isCounted ? (item.qtyBad !== undefined ? item.qtyBad : 0) : '-';
+
+            return {
+                'NO': idx + 1,
+                'ZONE': item.Zone || '-',
+                'LOKASI / RAK': item.Location || '-',
+                'LEVEL': item.level || '-',
+                'BARCODE / SKU': item.SKU,
+                'UPC 1': item.UPC1 || '-',
+                'UPC 2': item.UPC2 || '-',
+                'DESKRIPSI PRODUK': item.Description || '-',
+                'EXPIRED DATE': item.expiredDateSystem || item.expiredDateActual || '-',
+                'SATUAN (UOM)': item.satuanHitung || 'PCS',
+                'QTY FISIK INTERNAL': isCounted ? actualQty : 'Belum Dihitung',
+                'FISIK KONDISI BAIK (GOOD)': goodQty,
+                'FISIK KONDISI RUSAK (BAD)': badQty,
+                'STATUS FISIK': isCounted ? 'Sudah Dihitung' : 'Pending',
+                'RONDE TERAKHIR': `Ronde ${item.currentRound || 1}`
+            };
+        });
+
+        const ws = XLSX.utils.json_to_sheet(exportData);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Fisik_Internal_For_Vendor");
+        const filename = `Data_Fisik_Internal_Share_Vendor_${activeProject?.sessionCode || 'SO'}_${new Date().toISOString().split('T')[0]}.xlsx`;
+        XLSX.writeFile(wb, filename);
+        triggerNotification(`🔒 File Hitungan Fisik Internal (.xlsx) berhasil diexport! Target WMS System Qty & Harga 100% AMAN disembunyikan.`);
     };
 
     // FITUR IMPORT HASIL HITUNGAN VENDOR (.XLSX / .CSV)
@@ -4924,6 +4977,16 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                     </div>
 
                                     <div className="flex flex-wrap items-center gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={handleExportInternalCountsForVendorXLSX}
+                                            className="px-3 py-2 bg-slate-900 hover:bg-black text-amber-300 rounded-xl text-xs font-bold flex items-center space-x-1.5 shadow-md cursor-pointer transition-all border border-slate-700"
+                                            title="Export data hitungan fisik internal untuk dibagikan ke Vendor (Target Qty WMS & Harga 100% AMAN disembunyikan)"
+                                        >
+                                            <FileSpreadsheet className="w-3.5 h-3.5 text-amber-400" />
+                                            <span>Share Fisik ke Vendor (.xlsx)</span>
+                                        </button>
+
                                         <button
                                             type="button"
                                             onClick={() => vendorFileInputRef.current?.click()}
