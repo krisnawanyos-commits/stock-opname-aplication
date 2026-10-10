@@ -14,7 +14,8 @@ import {
     Download, Scale, PlayCircle, ArrowLeft, AlertTriangle,
     LogOut, Contact, Eye, EyeOff, UserCheck, Clock, Store, Link2, KeyRound,
     Mail, Edit2, Smartphone, Lock, Unlock, Repeat, Copy, Tag, RefreshCw, HardDrive, Loader2, AlertCircle, X,
-    ChevronLeft, ChevronRight, ChevronDown, Settings, Bell, LayoutDashboard, ArrowRightLeft
+    ChevronLeft, ChevronRight, ChevronDown, Settings, Bell, LayoutDashboard, ArrowRightLeft,
+    Printer, Shuffle, FileDown
 } from 'lucide-react';
 import type { UserRole } from '../types';
 
@@ -78,6 +79,7 @@ interface MasterSKUItem {
     round3Counter?: string;
     previousCounter?: string;
     lastSwapBatchId?: string;
+    isLocked?: boolean;
 }
 
 interface LocationOption {
@@ -211,7 +213,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         sourceCounter: string;
         sourceRound: number;
         sourceDisputeCount: number;
-        mode: 'KEEP' | 'SWAP';
+        mode: 'KEEP' | 'SWAP' | 'ASSIGN';
         targetCounter: string;
         searchQuery: string;
     }>({
@@ -224,6 +226,8 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         searchQuery: ''
     });
     const [isDeploySubmitting, setIsDeploySubmitting] = useState<boolean>(false);
+    const vendorFileInputRef = useRef<HTMLInputElement>(null);
+    const [isVendorImporting, setIsVendorImporting] = useState<boolean>(false);
     const [lastSwapEvent, setLastSwapEvent] = useState<{
         swapId: string;
         sourceCounter: string;
@@ -741,15 +745,62 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                         });
                     }
                 });
-            } else {
-                const targetTasks = masterDataList.filter(m => m.counter === targetCounter);
-                const targetDispute = targetTasks.filter(item => {
+            } else if (mode === 'ASSIGN') {
+                // ASSIGN MODE: Hanya memindahkan task selisih sourceCounter ke targetCounter. Task targetCounter tidak disentuh.
+                sourceTasks.forEach(item => {
+                    if (!item.id) return;
+                    const ref = doc(db, "master_tasks", item.id);
                     const act = item.countedQty ?? item.Qty;
                     const isR2MatchR1 = (sourceRound === 2 && item.round1Actual !== undefined && act === item.round1Actual);
-                    return item.isCounted && act !== item.Qty && !isR2MatchR1;
-                });
 
-                // Source dispute items -> move to targetCounter
+                    if (item.isCounted && act !== item.Qty && !isR2MatchR1) {
+                        updates.push({
+                            ref,
+                            data: {
+                                counter: targetCounter,
+                                currentRound: nextRound,
+                                QTY_ACTUAL: null,
+                                QTY_GOOD: null,
+                                QTY_BAD: null,
+                                isCounted: false,
+                                [`round${sourceRound}Actual`]: act,
+                                [`round${sourceRound}Counter`]: sourceCounter,
+                                previousCounter: sourceCounter,
+                                lastSwapBatchId: swapBatchId,
+                                updatedAt: timestampNow
+                            }
+                        });
+
+                        const logId = `${activeProject.sessionCode}_ASSIGN_R${nextRound}_${sourceCounter}_TO_${targetCounter}_${item.SKU}_${item.Location}`;
+                        auditEntries.push({
+                            ref: doc(db, "audit_logs", logId),
+                            data: {
+                                timestamp: timestampNow,
+                                rackLocation: item.Location,
+                                ownerSku: item.Owner || 'DDI',
+                                sku: item.SKU,
+                                description: item.Description,
+                                upc1: item.UPC1 || '-',
+                                upc2: item.UPC2 || '-',
+                                counterPic: targetCounter,
+                                round: nextRound,
+                                qtyGood: 0,
+                                qtyBad: 0,
+                                totalFinalSubmitted: 0,
+                                edActual: '-',
+                                remarks: `[CROSS ASSIGN R${nextRound}] Selisih dari ${sourceCounter} ditugaskan ke ${targetCounter} untuk audit independen`
+                            }
+                        });
+                    } else {
+                        updates.push({
+                            ref,
+                            data: { isLocked: true, updatedAt: timestampNow }
+                        });
+                    }
+                });
+            } else {
+                // SWAP MODE (2-Arah)
+                // 1. Pindahkan selisih sourceTasks ke targetCounter
                 sourceTasks.forEach(item => {
                     if (!item.id) return;
                     const ref = doc(db, "master_tasks", item.id);
@@ -802,58 +853,63 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     }
                 });
 
-                // Target dispute items -> move to sourceCounter
-                targetTasks.forEach(item => {
-                    if (!item.id) return;
-                    const ref = doc(db, "master_tasks", item.id);
+                // 2. Periksa tugas targetCounter
+                const targetTasks = masterDataList.filter(m => m.counter === targetCounter);
+                const targetDisputeInNextRound = targetTasks.filter(item => item.currentRound === nextRound && !item.isCounted);
+                const targetDisputeInSourceRound = targetTasks.filter(item => {
                     const act = item.countedQty ?? item.Qty;
                     const isR2MatchR1 = (sourceRound === 2 && item.round1Actual !== undefined && act === item.round1Actual);
+                    return item.isCounted && act !== item.Qty && !isR2MatchR1;
+                });
 
-                    if (item.isCounted && act !== item.Qty && !isR2MatchR1) {
+                if (targetDisputeInNextRound.length > 0) {
+                    // Partner sudah di nextRound: tukar task dispute nextRound miliknya ke sourceCounter
+                    targetDisputeInNextRound.forEach(item => {
+                        if (!item.id) return;
+                        const ref = doc(db, "master_tasks", item.id);
                         updates.push({
                             ref,
                             data: {
                                 counter: sourceCounter,
-                                currentRound: nextRound,
-                                QTY_ACTUAL: null,
-                                QTY_GOOD: null,
-                                QTY_BAD: null,
-                                isCounted: false,
-                                [`round${sourceRound}Actual`]: act,
-                                [`round${sourceRound}Counter`]: targetCounter,
                                 previousCounter: targetCounter,
                                 lastSwapBatchId: swapBatchId,
                                 updatedAt: timestampNow
                             }
                         });
+                    });
+                } else if (targetDisputeInSourceRound.length > 0) {
+                    // Partner masih di sourceRound: naikkan dan tukar ke sourceCounter
+                    targetTasks.forEach(item => {
+                        if (!item.id) return;
+                        const ref = doc(db, "master_tasks", item.id);
+                        const act = item.countedQty ?? item.Qty;
+                        const isR2MatchR1 = (sourceRound === 2 && item.round1Actual !== undefined && act === item.round1Actual);
 
-                        const logId = `${activeProject.sessionCode}_SWAP_R${nextRound}_${targetCounter}_TO_${sourceCounter}_${item.SKU}_${item.Location}`;
-                        auditEntries.push({
-                            ref: doc(db, "audit_logs", logId),
-                            data: {
-                                timestamp: timestampNow,
-                                rackLocation: item.Location,
-                                ownerSku: item.Owner || 'DDI',
-                                sku: item.SKU,
-                                description: item.Description,
-                                upc1: item.UPC1 || '-',
-                                upc2: item.UPC2 || '-',
-                                counterPic: sourceCounter,
-                                round: nextRound,
-                                qtyGood: 0,
-                                qtyBad: 0,
-                                totalFinalSubmitted: 0,
-                                edActual: '-',
-                                remarks: `[MUTUAL SWAP R${nextRound}] Dari ${targetCounter} dipindahkan ke ${sourceCounter} karena selisih R${sourceRound}`
-                            }
-                        });
-                    } else {
-                        updates.push({
-                            ref,
-                            data: { isLocked: true, updatedAt: timestampNow }
-                        });
-                    }
-                });
+                        if (item.isCounted && act !== item.Qty && !isR2MatchR1) {
+                            updates.push({
+                                ref,
+                                data: {
+                                    counter: sourceCounter,
+                                    currentRound: nextRound,
+                                    QTY_ACTUAL: null,
+                                    QTY_GOOD: null,
+                                    QTY_BAD: null,
+                                    isCounted: false,
+                                    [`round${sourceRound}Actual`]: act,
+                                    [`round${sourceRound}Counter`]: targetCounter,
+                                    previousCounter: targetCounter,
+                                    lastSwapBatchId: swapBatchId,
+                                    updatedAt: timestampNow
+                                }
+                            });
+                        } else if (item.currentRound === sourceRound) {
+                            updates.push({
+                                ref,
+                                data: { isLocked: true, updatedAt: timestampNow }
+                            });
+                        }
+                    });
+                }
 
                 setLastSwapEvent({
                     swapId: swapBatchId,
@@ -861,7 +917,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     targetCounter,
                     round: nextRound,
                     sourceItemIds: sourceDispute.map(d => d.id!),
-                    targetItemIds: targetDispute.map(d => d.id!),
+                    targetItemIds: (targetDisputeInNextRound.length > 0 ? targetDisputeInNextRound : targetDisputeInSourceRound).map(d => d.id!),
                     timestamp: timestampNow
                 });
             }
@@ -884,7 +940,9 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
             setDeployModal(prev => ({ ...prev, isOpen: false }));
             if (mode === 'SWAP' && targetCounter) {
-                triggerNotification(`🚀 SWAP BERHASIL! Ronde ${nextRound}: ${sourceCounter} ⇄ ${targetCounter} saling bertukar task.`);
+                triggerNotification(`🚀 SWAP 2-ARAH BERHASIL! Ronde ${nextRound}: ${sourceCounter} ⇄ ${targetCounter} saling bertukar task.`);
+            } else if (mode === 'ASSIGN' && targetCounter) {
+                triggerNotification(`🚀 PENUGASAN BERHASIL! Selisih ${sourceCounter} dialihkan ke ${targetCounter} untuk Ronde ${nextRound}.`);
             } else {
                 triggerNotification(`🚀 Ronde ${nextRound} Berhasil Dideploy untuk ${sourceCounter}!`);
             }
@@ -894,6 +952,432 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         } finally {
             setIsDeploySubmitting(false);
         }
+    };
+
+    // FITUR CETAK COUNTSHEET LAPANGAN (BLIND COUNT - SYSTEM QTY & HARGA 100% DISEMBUNYIKAN)
+    const handlePrintCountsheet = (selectedCounter?: string, roundNumber: number = 1) => {
+        if (!masterDataList || masterDataList.length === 0) {
+            triggerNotification("Tidak ada data SKU untuk dicetak!");
+            return;
+        }
+
+        const project = activeProject;
+        const printWindow = window.open('', '_blank', 'width=950,height=750');
+        if (!printWindow) {
+            triggerNotification("Gagal membuka jendela cetak. Pastikan izin pop-up browser aktif.");
+            return;
+        }
+
+        const countersToPrint = selectedCounter
+            ? [selectedCounter]
+            : Array.from(new Set(masterDataList.map(m => m.counter))).filter(Boolean).sort();
+
+        let pagesHtml = '';
+
+        countersToPrint.forEach(cName => {
+            let tasks = masterDataList.filter(m => m.counter === cName);
+            if (roundNumber > 1) {
+                tasks = tasks.filter(m => m.currentRound === roundNumber || (m.currentRound >= roundNumber && !m.isLocked));
+            }
+
+            if (tasks.length === 0 && selectedCounter) return;
+
+            tasks.sort((a, b) => (a.Location || '').localeCompare(b.Location || '') || (a.SKU || '').localeCompare(b.SKU || ''));
+
+            const rowsHtml = tasks.map((item, tIdx) => `
+                <tr>
+                    <td style="text-align: center; font-weight: bold;">${tIdx + 1}</td>
+                    <td style="font-weight: bold; font-family: monospace;">${item.Location || '-'}</td>
+                    <td style="font-weight: bold; font-family: monospace;">${item.SKU}</td>
+                    <td>${item.Description || '-'}</td>
+                    <td style="text-align: center;">${item.satuanHitung || 'PCS'}</td>
+                    <td style="height: 28px; min-width: 80px; background-color: #fafafa;"></td>
+                    <td style="height: 28px; min-width: 60px;"></td>
+                </tr>
+            `).join('');
+
+            pagesHtml += `
+                <div class="sheet-page">
+                    <div class="header-container">
+                        <div class="header-left">
+                            <h2 class="doc-title">LEMBAR KERJA STOCK OPNAME (${roundNumber === 1 ? 'BLIND COUNT' : `RECOUNT RONDE ${roundNumber}`})</h2>
+                            <div class="sub-meta">
+                                <span><b>Sesi:</b> ${project?.sessionCode || 'SO-360'}</span> | 
+                                <span><b>Lokasi:</b> ${project?.locationName || 'Gudang Utama'}</span> | 
+                                <span><b>Tanggal:</b> ${project?.opnameDate || new Date().toISOString().split('T')[0]}</span>
+                            </div>
+                        </div>
+                        <div class="header-right">
+                            <div class="counter-badge">
+                                <span class="badge-label">PETUGAS / PIC:</span>
+                                <span class="badge-name">${cName.toUpperCase()}</span>
+                            </div>
+                            <div class="round-badge">RONDE ${roundNumber}</div>
+                        </div>
+                    </div>
+
+                    <div class="notice-bar">
+                        ⚠️ <b>PERHATIAN AUDIT:</b> Lakukan penghitungan fisik murni (Blind Count). Tulis angka hasil hitungan fisik secara teliti dan bubuhkan paraf.
+                    </div>
+
+                    <table class="count-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 35px; text-align: center;">NO</th>
+                                <th style="width: 90px;">LOKASI / RAK</th>
+                                <th style="width: 120px;">BARCODE / SKU</th>
+                                <th>DESKRIPSI PRODUK</th>
+                                <th style="width: 60px; text-align: center;">UOM</th>
+                                <th style="width: 100px; text-align: center; background-color: #e2e8f0;">FISIK AKTUAL</th>
+                                <th style="width: 80px; text-align: center;">PARAF / KET</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${rowsHtml.length > 0 ? rowsHtml : '<tr><td colspan="7" style="text-align: center; padding: 20px;">Tidak ada item task untuk PIC ini di ronde ini.</td></tr>'}
+                        </tbody>
+                    </table>
+
+                    <div class="sig-container">
+                        <div class="sig-box">
+                            <div class="sig-title">Petugas Penghitung (Internal)</div>
+                            <div class="sig-line"></div>
+                            <div class="sig-name">${cName}</div>
+                        </div>
+                        <div class="sig-box">
+                            <div class="sig-title">Auditor Lapangan (Vendor)</div>
+                            <div class="sig-line"></div>
+                            <div class="sig-name">(........................................)</div>
+                        </div>
+                        <div class="sig-box">
+                            <div class="sig-title">Supervisor / Koordinator SO</div>
+                            <div class="sig-line"></div>
+                            <div class="sig-name">(........................................)</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+
+        printWindow.document.write(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Countsheet SO - ${selectedCounter ? selectedCounter.toUpperCase() : 'All Counters'} - R${roundNumber}</title>
+                <style>
+                    @page { size: A4 portrait; margin: 12mm 12mm 15mm 12mm; }
+                    * { box-sizing: border-box; }
+                    body {
+                        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+                        font-size: 11px;
+                        color: #0f172a;
+                        margin: 0;
+                        padding: 0;
+                        background: #fff;
+                    }
+                    .sheet-page {
+                        page-break-after: always;
+                        break-after: page;
+                        padding-bottom: 20px;
+                    }
+                    .sheet-page:last-child {
+                        page-break-after: auto;
+                        break-after: auto;
+                    }
+                    .header-container {
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: flex-start;
+                        border-bottom: 2px solid #0f172a;
+                        padding-bottom: 8px;
+                        margin-bottom: 8px;
+                    }
+                    .doc-title {
+                        font-size: 14px;
+                        font-weight: 900;
+                        margin: 0 0 4px 0;
+                        letter-spacing: -0.2px;
+                        text-transform: uppercase;
+                    }
+                    .sub-meta {
+                        font-size: 10px;
+                        color: #475569;
+                    }
+                    .header-right {
+                        display: flex;
+                        align-items: center;
+                        gap: 8px;
+                    }
+                    .counter-badge {
+                        border: 1.5px solid #0f172a;
+                        padding: 4px 8px;
+                        border-radius: 6px;
+                        text-align: right;
+                    }
+                    .badge-label {
+                        font-size: 8px;
+                        font-weight: bold;
+                        color: #64748b;
+                        display: block;
+                    }
+                    .badge-name {
+                        font-size: 12px;
+                        font-weight: 900;
+                        color: #0f172a;
+                    }
+                    .round-badge {
+                        background: #0f172a;
+                        color: #fff;
+                        font-weight: 900;
+                        font-size: 11px;
+                        padding: 6px 10px;
+                        border-radius: 6px;
+                    }
+                    .notice-bar {
+                        background: #f8fafc;
+                        border: 1px dashed #cbd5e1;
+                        padding: 6px 10px;
+                        border-radius: 6px;
+                        font-size: 9.5px;
+                        color: #334155;
+                        margin-bottom: 10px;
+                    }
+                    .count-table {
+                        width: 100%;
+                        border-collapse: collapse;
+                        margin-top: 4px;
+                    }
+                    .count-table th, .count-table td {
+                        border: 1px solid #334155;
+                        padding: 5px 7px;
+                        font-size: 10px;
+                    }
+                    .count-table th {
+                        background-color: #f1f5f9;
+                        font-weight: 800;
+                        color: #0f172a;
+                    }
+                    .sig-container {
+                        margin-top: 30px;
+                        display: flex;
+                        justify-content: space-between;
+                        gap: 20px;
+                    }
+                    .sig-box {
+                        flex: 1;
+                        text-align: center;
+                    }
+                    .sig-title {
+                        font-size: 9.5px;
+                        font-weight: bold;
+                        color: #475569;
+                        margin-bottom: 45px;
+                    }
+                    .sig-line {
+                        border-bottom: 1px solid #475569;
+                        margin-bottom: 4px;
+                    }
+                    .sig-name {
+                        font-size: 10px;
+                        font-weight: bold;
+                        color: #0f172a;
+                    }
+                    @media print {
+                        body { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+                    }
+                </style>
+            </head>
+            <body>
+                ${pagesHtml}
+            </body>
+            </html>
+        `);
+        printWindow.document.close();
+        printWindow.focus();
+        setTimeout(() => {
+            printWindow.print();
+        }, 350);
+    };
+
+    // FITUR EXPORT COUNTSHEET BLIND KE EXCEL (.XLSX)
+    const handleExportCountsheetXLSX = (selectedCounter?: string, roundNumber: number = 1) => {
+        if (!masterDataList || masterDataList.length === 0) {
+            triggerNotification("Tidak ada data SKU untuk diexport!");
+            return;
+        }
+
+        let tasks = selectedCounter
+            ? masterDataList.filter(m => m.counter === selectedCounter)
+            : [...masterDataList];
+
+        if (roundNumber > 1) {
+            tasks = tasks.filter(m => m.currentRound === roundNumber || (m.currentRound >= roundNumber && !m.isLocked));
+        }
+
+        tasks.sort((a, b) => (a.counter || '').localeCompare(b.counter || '') || (a.Location || '').localeCompare(b.Location || ''));
+
+        const exportRows = tasks.map((item, idx) => ({
+            'NO': idx + 1,
+            'RONDE': roundNumber,
+            'PIC COUNTER': item.counter,
+            'LOKASI / RAK': item.Location,
+            'BARCODE / SKU': item.SKU,
+            'UPC 1': item.UPC1 || item.SKU,
+            'DESKRIPSI PRODUK': item.Description,
+            'SATUAN (UOM)': item.satuanHitung || 'PCS',
+            'HASIL FISIK (TULIS TANGAN / SCAN)': '',
+            'PARAF / CATATAN': ''
+        }));
+
+        const ws = XLSX.utils.json_to_sheet(exportRows);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, `Countsheet_R${roundNumber}`);
+        const filename = `Countsheet_Blind_R${roundNumber}_${selectedCounter ? selectedCounter.toUpperCase() : 'SEMUA_COUNTER'}_${activeProject?.sessionCode || 'SO'}.xlsx`;
+        XLSX.writeFile(wb, filename);
+        triggerNotification(`📥 File Countsheet (.xlsx) berhasil diunduh: ${filename}`);
+    };
+
+    // FITUR IMPORT HASIL HITUNGAN VENDOR (.XLSX / .CSV)
+    const handleImportVendorXLSX = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file || !activeProject) return;
+
+        setIsVendorImporting(true);
+        const reader = new FileReader();
+        reader.onload = async (evt) => {
+            try {
+                const data = evt.target?.result;
+                const workbook = XLSX.read(data, { type: 'array' });
+                const firstSheet = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[firstSheet];
+                const json = XLSX.utils.sheet_to_json(worksheet) as any[];
+
+                if (json.length === 0) {
+                    triggerNotification("File Excel vendor kosong!");
+                    setIsVendorImporting(false);
+                    return;
+                }
+
+                const vendorDataMap: { [sku: string]: number } = {};
+                json.forEach(row => {
+                    const sku = String(row['SKU'] ?? row['SKU BARANG'] ?? row['Barcode'] ?? row['BARCODE'] ?? row['Item'] ?? row['Kode'] ?? '').trim();
+                    const rawQty = row['Qty Vendor'] ?? row['QTY VENDOR'] ?? row['Vendor Qty'] ?? row['Third Party Qty'] ?? row['Hitungan Vendor'] ?? row['Qty'] ?? row['QTY'] ?? row['Actual'] ?? row['Fisik'];
+                    if (sku && rawQty !== undefined) {
+                        const parsed = parseInt(String(rawQty).replace(/[^0-9-]/g, ''), 10);
+                        if (!isNaN(parsed)) {
+                            vendorDataMap[sku.toLowerCase()] = parsed;
+                        }
+                    }
+                });
+
+                const skuKeys = Object.keys(vendorDataMap);
+                if (skuKeys.length === 0) {
+                    triggerNotification("Kolom SKU atau Qty Vendor tidak ditemukan dalam file!");
+                    setIsVendorImporting(false);
+                    return;
+                }
+
+                const updates: { ref: any; data: any }[] = [];
+                masterDataList.forEach(item => {
+                    if (!item.id || !item.SKU) return;
+                    const cleanSku = item.SKU.toLowerCase().trim();
+                    const cleanUpc1 = (item.UPC1 || '').toLowerCase().trim();
+
+                    let matchedQty: number | undefined;
+                    if (vendorDataMap[cleanSku] !== undefined) {
+                        matchedQty = vendorDataMap[cleanSku];
+                    } else if (cleanUpc1 && vendorDataMap[cleanUpc1] !== undefined) {
+                        matchedQty = vendorDataMap[cleanUpc1];
+                    }
+
+                    if (matchedQty !== undefined) {
+                        updates.push({
+                            ref: doc(db, "master_tasks", item.id),
+                            data: {
+                                thirdPartyQty: matchedQty,
+                                updatedAt: new Date().toISOString()
+                            }
+                        });
+                    }
+                });
+
+                if (updates.length === 0) {
+                    triggerNotification("Tidak ada SKU di file vendor yang cocok dengan master task proyek ini.");
+                    setIsVendorImporting(false);
+                    return;
+                }
+
+                const CHUNK_SIZE = 400;
+                for (let i = 0; i < updates.length; i += CHUNK_SIZE) {
+                    const chunk = updates.slice(i, i + CHUNK_SIZE);
+                    const b = writeBatch(db);
+                    chunk.forEach(op => b.update(op.ref, op.data));
+                    await b.commit();
+                }
+
+                triggerNotification(`✅ Berhasil mencocokkan ${updates.length} hitungan SKU dari Vendor!`);
+            } catch (err: any) {
+                console.error("Vendor Import Error:", err);
+                triggerNotification(`Gagal import file vendor: ${err.message || String(err)}`);
+            } finally {
+                setIsVendorImporting(false);
+                if (vendorFileInputRef.current) vendorFileInputRef.current.value = '';
+            }
+        };
+        reader.readAsArrayBuffer(file);
+    };
+
+    // FITUR EXPORT REKONSILIASI KOMPARASI DENGAN VENDOR (SELECTIVE UNIT PRICE MASKING)
+    const handleExportVendorComparisonXLSX = () => {
+        if (!masterDataList || masterDataList.length === 0) {
+            triggerNotification("Tidak ada data untuk diexport!");
+            return;
+        }
+
+        const exportData = masterDataList.map((item, idx) => {
+            const sysQty = item.Qty || 0;
+            const isCounted = !!item.isCounted;
+            const effectiveActual = isCounted ? (item.countedQty ?? sysQty) : (item.round1Actual ?? sysQty);
+            const vendorQty = item.thirdPartyQty;
+
+            const diffSys = effectiveActual - sysQty;
+            const diffVendor = vendorQty !== undefined ? (effectiveActual - vendorQty) : '-';
+
+            const hasDiscrepancy = diffSys !== 0 || (vendorQty !== undefined && vendorQty !== effectiveActual);
+            const unitPrice = item.unitPrice || 0;
+            const valDiscrepancy = diffSys * unitPrice;
+
+            let statusRecon = 'MATCH (SEPAKAT)';
+            if (vendorQty !== undefined && vendorQty !== effectiveActual) {
+                statusRecon = 'DISPUTE VENDOR (BEDA HITUNGAN)';
+            } else if (diffSys !== 0) {
+                statusRecon = 'VARIANCE WMS (BEDA DENGAN SISTEM)';
+            }
+
+            return {
+                'NO': idx + 1,
+                'LOKASI RAK': item.Location,
+                'BARCODE / SKU': item.SKU,
+                'DESKRIPSI PRODUK': item.Description,
+                'PIC COUNTER INTERNAL': item.counter,
+                'QTY SISTEM (WMS)': sysQty,
+                'QTY FISIK INTERNAL': isCounted ? effectiveActual : 'Pending',
+                'QTY FISIK VENDOR': vendorQty !== undefined ? vendorQty : 'Belum Ada',
+                'SELISIH INT VS VENDOR': diffVendor,
+                'SELISIH FISIK VS SISTEM': isCounted ? diffSys : '-',
+                'STATUS REKONSILIASI': statusRecon,
+                // MASKING HARGA: Hanya dibuka untuk SKU yang berselisih
+                'HARGA SATUAN (RP)': hasDiscrepancy ? unitPrice : '*** (Protected)',
+                'VALUASI SELISIH FISIK (RP)': hasDiscrepancy ? (isCounted ? valDiscrepancy : 0) : '-',
+                'RONDE SAAT INI': `Ronde ${item.currentRound}`
+            };
+        });
+
+        const ws = XLSX.utils.json_to_sheet(exportData);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Rekonsiliasi_Vendor_3Way");
+        const filename = `Rekonsiliasi_Auditor_Vendor_${activeProject?.sessionCode || 'SO'}_${new Date().toISOString().split('T')[0]}.xlsx`;
+        XLSX.writeFile(wb, filename);
+        triggerNotification(`📊 Laporan Rekonsiliasi Vendor (.xlsx) berhasil diunduh!`);
     };
 
     const handleRevertLastSwap = async () => {
@@ -984,9 +1468,14 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             const unitPrice = item.unitPrice || 0;
             const valDiscrepancy = diff * unitPrice;
 
+            const vendorQty = item.thirdPartyQty;
+            const diffVendor = vendorQty !== undefined && isCounted ? (actQty - vendorQty) : '-';
+            const isDiscrepant = isCounted && (diff !== 0 || (vendorQty !== undefined && vendorQty !== actQty));
+
             let statusSelisih = 'Uncounted / Pending';
             if (isCounted) {
-                if (diff === 0) statusSelisih = 'Match';
+                if (diff === 0 && (vendorQty === undefined || vendorQty === actQty)) statusSelisih = 'Match';
+                else if (vendorQty !== undefined && vendorQty !== actQty) statusSelisih = 'Dispute Vendor';
                 else if (diff < 0) statusSelisih = 'Shortage';
                 else statusSelisih = 'Overage';
             }
@@ -1014,12 +1503,15 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 'QTY GOOD': isCounted ? goodQty : '-',
                 'QTY BAD': isCounted ? badQty : '-',
                 'TOTAL QTY ACTUAL': isCounted ? actQty : '-',
+                'QTY VENDOR (3RD PARTY)': vendorQty !== undefined ? vendorQty : '-',
+                'SELISIH INT VS VENDOR': diffVendor,
                 'SELISIH QTY': isCounted ? diff : '-',
                 'STATUS SELISIH': statusSelisih,
-                'HARGA SATUAN (RP)': item.unitPrice || 0,
-                'VALUASI SELISIH (RP)': isCounted ? valDiscrepancy : 0,
+                // Selective Price Masking
+                'HARGA SATUAN (RP)': isDiscrepant ? (item.unitPrice || 0) : '*** (Protected)',
+                'VALUASI SELISIH (RP)': isDiscrepant ? (isCounted ? valDiscrepancy : 0) : '-',
                 'QTY FINAL RECOVERY': overrideQty,
-                'VALUASI FINAL (RP)': finalValuation,
+                'VALUASI FINAL (RP)': isDiscrepant ? finalValuation : '-',
                 'CATATAN (REMARKS)': item.Remarks || ''
             };
         });
@@ -2729,209 +3221,255 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                             <label className="text-xs font-bold text-slate-700 block uppercase tracking-wider">
                                 Metode Penugasan Ronde {deployModal.sourceRound + 1}:
                             </label>
-                            <div className="grid grid-cols-2 gap-3">
-                                <div
-                                    onClick={() => setDeployModal(prev => ({ ...prev, mode: 'SWAP' }))}
-                                    className={`p-3.5 rounded-2xl border-2 cursor-pointer transition-all ${
-                                        deployModal.mode === 'SWAP'
-                                            ? 'border-cyan-400 bg-cyan-50/50 shadow-xs'
-                                            : 'border-slate-200 bg-white hover:bg-slate-50'
-                                    }`}
-                                >
-                                    <div className="flex items-center justify-between">
-                                        <span className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                                            <Repeat className="w-3.5 h-3.5 text-cyan-600" />
-                                            <span>Swap 2 Arah</span>
-                                        </span>
-                                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
-                                            SOP Audit
-                                        </span>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
+                                    <div
+                                        onClick={() => setDeployModal(prev => ({ ...prev, mode: 'SWAP' }))}
+                                        className={`p-3 rounded-2xl border-2 cursor-pointer transition-all ${
+                                            deployModal.mode === 'SWAP'
+                                                ? 'border-cyan-400 bg-cyan-50/50 shadow-xs'
+                                                : 'border-slate-200 bg-white hover:bg-slate-50'
+                                        }`}
+                                    >
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                                                <Repeat className="w-3.5 h-3.5 text-cyan-600" />
+                                                <span>Swap 2 Arah</span>
+                                            </span>
+                                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                                                Mutual
+                                            </span>
+                                        </div>
+                                        <p className="text-[10px] text-slate-500 mt-1 leading-snug">
+                                            Saling bertukar tugas selisih dengan partner pilihan.
+                                        </p>
                                     </div>
-                                    <p className="text-[11px] text-slate-500 mt-1 leading-snug">
-                                        Tukar tugas selisih dengan counter lain yang sudah 100% selesai.
-                                    </p>
-                                </div>
 
-                                <div
-                                    onClick={() => setDeployModal(prev => ({ ...prev, mode: 'KEEP' }))}
-                                    className={`p-3.5 rounded-2xl border-2 cursor-pointer transition-all ${
-                                        deployModal.mode === 'KEEP'
-                                            ? 'border-cyan-400 bg-cyan-50/50 shadow-xs'
-                                            : 'border-slate-200 bg-white hover:bg-slate-50'
-                                    }`}
-                                >
-                                    <div className="flex items-center justify-between">
-                                        <span className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                                            <UserCheck className="w-3.5 h-3.5 text-slate-600" />
-                                            <span>Tetap di {deployModal.sourceCounter}</span>
-                                        </span>
+                                    <div
+                                        onClick={() => setDeployModal(prev => ({ ...prev, mode: 'ASSIGN' }))}
+                                        className={`p-3 rounded-2xl border-2 cursor-pointer transition-all ${
+                                            deployModal.mode === 'ASSIGN'
+                                                ? 'border-cyan-400 bg-cyan-50/50 shadow-xs'
+                                                : 'border-slate-200 bg-white hover:bg-slate-50'
+                                        }`}
+                                    >
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                                                <ArrowRightLeft className="w-3.5 h-3.5 text-indigo-600" />
+                                                <span>Alihkan Selisih</span>
+                                            </span>
+                                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-800">
+                                                Estafet
+                                            </span>
+                                        </div>
+                                        <p className="text-[10px] text-slate-500 mt-1 leading-snug">
+                                            Serahkan selisih ke partner (ideal untuk 3 counter / ganjil).
+                                        </p>
                                     </div>
-                                    <p className="text-[11px] text-slate-500 mt-1 leading-snug">
-                                        {deployModal.sourceCounter} menghitung ulang task selisih miliknya sendiri.
-                                    </p>
+
+                                    <div
+                                        onClick={() => setDeployModal(prev => ({ ...prev, mode: 'KEEP' }))}
+                                        className={`p-3 rounded-2xl border-2 cursor-pointer transition-all ${
+                                            deployModal.mode === 'KEEP'
+                                                ? 'border-cyan-400 bg-cyan-50/50 shadow-xs'
+                                                : 'border-slate-200 bg-white hover:bg-slate-50'
+                                        }`}
+                                    >
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                                                <UserCheck className="w-3.5 h-3.5 text-slate-600" />
+                                                <span>Tetap Sendiri</span>
+                                            </span>
+                                        </div>
+                                        <p className="text-[10px] text-slate-500 mt-1 leading-snug">
+                                            {deployModal.sourceCounter} menghitung ulang task selisih miliknya.
+                                        </p>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
 
-                        {/* If SWAP Mode: Target Counter Selection with Search Box */}
-                        {deployModal.mode === 'SWAP' && (
-                            <div className="space-y-3 pt-1">
-                                <div className="flex items-center justify-between">
-                                    <label className="text-xs font-bold text-slate-700 block uppercase tracking-wider">
-                                        Pilih Counter Partner untuk Bertukar:
-                                    </label>
-                                    <span className="text-[10px] font-bold text-slate-500">
-                                        Wajib selesai Ronde {deployModal.sourceRound} (100%)
-                                    </span>
-                                </div>
+                            {/* If SWAP or ASSIGN Mode: Target Counter Selection with Search Box & Random Pick */}
+                            {(deployModal.mode === 'SWAP' || deployModal.mode === 'ASSIGN') && (
+                                <div className="space-y-3 pt-1">
+                                    <div className="flex items-center justify-between">
+                                        <label className="text-xs font-bold text-slate-700 block uppercase tracking-wider">
+                                            {deployModal.mode === 'SWAP' ? 'Pilih Partner untuk Bertukar:' : 'Pilih Partner Penerima Tugas:'}
+                                        </label>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                const eligibleCandidates = filteredCounterNames.filter(cName => {
+                                                    if (cName === deployModal.sourceCounter) return false;
+                                                    const cData = counterGroups[cName];
+                                                    const cTasks = masterDataList.filter(m => m.counter === cName);
+                                                    const cRound = cTasks.length > 0 ? Math.max(...cTasks.map(t => t.currentRound || 1)) : 1;
+                                                    const isAlreadyInNextRound = cRound === deployModal.sourceRound + 1;
+                                                    const isSameRoundDone = (cRound === deployModal.sourceRound) && (cData && cData.total > 0 && cData.counted === cData.total);
+                                                    return isAlreadyInNextRound || isSameRoundDone;
+                                                });
+                                                if (eligibleCandidates.length > 0) {
+                                                    const randomIndex = Math.floor(Math.random() * eligibleCandidates.length);
+                                                    const chosen = eligibleCandidates[randomIndex];
+                                                    setDeployModal(prev => ({ ...prev, targetCounter: chosen }));
+                                                    triggerNotification(`🎲 Terpilih acak: ${chosen}`);
+                                                } else {
+                                                    triggerNotification("Tidak ada partner lain yang memenuhi syarat.");
+                                                }
+                                            }}
+                                            className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-[10px] font-extrabold flex items-center gap-1 transition-all cursor-pointer"
+                                            title="Pilih partner secara acak dari yang tersedia"
+                                        >
+                                            <Shuffle className="w-3 h-3" />
+                                            <span>🎲 Pasangkan Acak</span>
+                                        </button>
+                                    </div>
 
-                                {/* Search Box */}
-                                <div className="relative">
-                                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                                    <input
-                                        type="text"
-                                        value={deployModal.searchQuery}
-                                        onChange={(e) => setDeployModal(prev => ({ ...prev, searchQuery: e.target.value }))}
-                                        placeholder="Cari nama counter..."
-                                        className="cipher-input w-full pl-9 pr-3 py-2 rounded-xl text-xs font-bold outline-none"
-                                    />
-                                </div>
+                                    {/* Search Box */}
+                                    <div className="relative">
+                                        <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                                        <input
+                                            type="text"
+                                            value={deployModal.searchQuery}
+                                            onChange={(e) => setDeployModal(prev => ({ ...prev, searchQuery: e.target.value }))}
+                                            placeholder="Cari nama counter..."
+                                            className="cipher-input w-full pl-9 pr-3 py-2 rounded-xl text-xs font-bold outline-none"
+                                        />
+                                    </div>
 
-                                {/* Counter Candidate List */}
-                                <div className="max-h-48 overflow-y-auto space-y-2 pr-1 scrollbar-thin">
-                                    {filteredCounterNames
-                                        .filter(cName => cName !== deployModal.sourceCounter)
-                                        .filter(cName => cName.toLowerCase().includes(deployModal.searchQuery.toLowerCase()))
-                                        .map((cName) => {
-                                            const cData = counterGroups[cName];
-                                            const cTasks = masterDataList.filter(m => m.counter === cName);
-                                            const cRound = cTasks.length > 0 ? Math.max(...cTasks.map(t => t.currentRound || 1)) : 1;
-                                            const isRoundMatch = cRound === deployModal.sourceRound;
-                                            const is100Pct = cData && cData.total > 0 && cData.counted === cData.total;
-                                            const isEligible = isRoundMatch && is100Pct;
-                                            const isSelected = deployModal.targetCounter === cName;
+                                    {/* Counter Candidate List */}
+                                    <div className="max-h-48 overflow-y-auto space-y-2 pr-1 scrollbar-thin">
+                                        {filteredCounterNames
+                                            .filter(cName => cName !== deployModal.sourceCounter)
+                                            .filter(cName => cName.toLowerCase().includes(deployModal.searchQuery.toLowerCase()))
+                                            .map((cName) => {
+                                                const cData = counterGroups[cName];
+                                                const cTasks = masterDataList.filter(m => m.counter === cName);
+                                                const cRound = cTasks.length > 0 ? Math.max(...cTasks.map(t => t.currentRound || 1)) : 1;
+                                                const isAlreadyInNextRound = cRound === deployModal.sourceRound + 1;
+                                                const isSameRoundDone = (cRound === deployModal.sourceRound) && (cData && cData.total > 0 && cData.counted === cData.total);
+                                                const isEligible = isAlreadyInNextRound || isSameRoundDone;
+                                                const isSelected = deployModal.targetCounter === cName;
 
-                                            return (
-                                                <div
-                                                    key={cName}
-                                                    onClick={() => {
-                                                        if (isEligible) {
-                                                            setDeployModal(prev => ({ ...prev, targetCounter: cName }));
-                                                        }
-                                                    }}
-                                                    className={`p-3 rounded-2xl border transition-all flex items-center justify-between ${
-                                                        !isEligible
-                                                            ? 'bg-slate-100/60 border-slate-200 opacity-60 cursor-not-allowed'
-                                                            : isSelected
-                                                                ? 'bg-cyan-50 border-cyan-400 shadow-xs cursor-pointer'
-                                                                : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50 cursor-pointer'
-                                                    }`}
-                                                >
-                                                    <div className="flex items-center space-x-3">
-                                                        <div className="w-8 h-8 rounded-xl bg-slate-900 text-white text-xs font-black flex items-center justify-center uppercase shrink-0">
-                                                            {cName.slice(0, 2)}
-                                                        </div>
-                                                        <div>
-                                                            <div className="flex items-center space-x-2">
-                                                                <span className="text-xs font-black text-slate-900 capitalize">{cName}</span>
-                                                                <span className="text-[9px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
-                                                                    Ronde {cRound}
-                                                                </span>
+                                                return (
+                                                    <div
+                                                        key={cName}
+                                                        onClick={() => {
+                                                            if (isEligible) {
+                                                                setDeployModal(prev => ({ ...prev, targetCounter: cName }));
+                                                            }
+                                                        }}
+                                                        className={`p-3 rounded-2xl border transition-all flex items-center justify-between ${
+                                                            !isEligible
+                                                                ? 'bg-slate-100/60 border-slate-200 opacity-60 cursor-not-allowed'
+                                                                : isSelected
+                                                                    ? 'bg-cyan-50 border-cyan-400 shadow-xs cursor-pointer'
+                                                                    : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50 cursor-pointer'
+                                                        }`}
+                                                    >
+                                                        <div className="flex items-center space-x-3">
+                                                            <div className="w-8 h-8 rounded-xl bg-slate-900 text-white text-xs font-black flex items-center justify-center uppercase shrink-0">
+                                                                {cName.slice(0, 2)}
                                                             </div>
-                                                            <p className="text-[10px] text-slate-500">
-                                                                {cData ? `${cData.counted} / ${cData.total} SKU (${cData.errorCount} Selisih)` : '0 SKU'}
-                                                            </p>
+                                                            <div>
+                                                                <div className="flex items-center space-x-2">
+                                                                    <span className="text-xs font-black text-slate-900 capitalize">{cName}</span>
+                                                                    <span className="text-[9px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
+                                                                        Ronde {cRound}
+                                                                    </span>
+                                                                </div>
+                                                                <p className="text-[10px] text-slate-500">
+                                                                    {cData ? `${cData.counted} / ${cData.total} SKU (${cData.errorCount} Selisih)` : '0 SKU'}
+                                                                </p>
+                                                            </div>
+                                                        </div>
+
+                                                        <div>
+                                                            {isSelected ? (
+                                                                <span className="text-[10px] font-bold text-cyan-800 bg-cyan-200/80 px-2.5 py-1 rounded-lg">
+                                                                    ✓ Terpilih
+                                                                </span>
+                                                            ) : isAlreadyInNextRound ? (
+                                                                <span className="text-[10px] font-bold text-cyan-800 bg-cyan-50 border border-cyan-200 px-2 py-0.5 rounded-md">
+                                                                    Siap di R{cRound}
+                                                                </span>
+                                                            ) : isSameRoundDone ? (
+                                                                <span className="text-[10px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md">
+                                                                    Selesai R{cRound}
+                                                                </span>
+                                                            ) : (
+                                                                <span className="text-[10px] font-bold text-rose-700 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-md">
+                                                                    Belum 100% (R{cRound})
+                                                                </span>
+                                                            )}
                                                         </div>
                                                     </div>
+                                                );
+                                            })}
 
-                                                    <div>
-                                                        {!isRoundMatch ? (
-                                                            <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md">
-                                                                Beda Ronde (R{cRound})
-                                                            </span>
-                                                        ) : !is100Pct ? (
-                                                            <span className="text-[10px] font-bold text-rose-700 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-md">
-                                                                Belum 100% ({cData ? Math.round((cData.counted / cData.total) * 100) : 0}%)
-                                                            </span>
-                                                        ) : isSelected ? (
-                                                            <span className="text-[10px] font-bold text-cyan-800 bg-cyan-200/80 px-2.5 py-1 rounded-lg">
-                                                                ✓ Terpilih
-                                                            </span>
-                                                        ) : (
-                                                            <span className="text-[10px] font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 px-2.5 py-1 rounded-lg">
-                                                                Pilih Partner
-                                                            </span>
-                                                        )}
-                                                    </div>
+                                        {filteredCounterNames.filter(cName => cName !== deployModal.sourceCounter).length === 0 && (
+                                            <p className="text-xs text-slate-400 text-center py-4">
+                                                Tidak ada counter lain yang terdaftar.
+                                            </p>
+                                        )}
+                                    </div>
+
+                                    {/* Preview comparison card */}
+                                    {deployModal.targetCounter && (
+                                        <div className="p-3.5 bg-cyan-50/70 border border-cyan-200 rounded-2xl space-y-2">
+                                            <span className="text-[10px] font-bold text-cyan-800 uppercase tracking-wider block">
+                                                {deployModal.mode === 'SWAP' ? 'Ringkasan Pertukaran 2 Arah (Mutual Swap):' : 'Ringkasan Pengalihan Tugas Selisih (Estafet):'}
+                                            </span>
+                                            <div className="flex items-center justify-between text-xs font-bold text-slate-800">
+                                                <div className="text-center flex-1">
+                                                    <span className="block text-slate-500 font-normal text-[10px]">Tugas Selisih Dari</span>
+                                                    <span className="capitalize font-black text-cyan-950">{deployModal.sourceCounter}</span>
+                                                    <span className="block text-rose-600 font-mono text-[11px] font-black">{deployModal.sourceDisputeCount} SKU</span>
                                                 </div>
-                                            );
-                                        })}
-
-                                    {filteredCounterNames.filter(cName => cName !== deployModal.sourceCounter).length === 0 && (
-                                        <p className="text-xs text-slate-400 text-center py-4">
-                                            Tidak ada counter lain yang terdaftar.
-                                        </p>
+                                                <div className="p-2 bg-white rounded-full shadow-xs text-cyan-600 shrink-0">
+                                                    {deployModal.mode === 'SWAP' ? <Repeat className="w-4 h-4" /> : <ArrowRightLeft className="w-4 h-4" />}
+                                                </div>
+                                                <div className="text-center flex-1">
+                                                    <span className="block text-slate-500 font-normal text-[10px]">Ditugaskan Ke</span>
+                                                    <span className="capitalize font-black text-cyan-950">{deployModal.targetCounter}</span>
+                                                    <span className="block text-slate-500 font-mono text-[11px] font-bold">
+                                                        {deployModal.mode === 'SWAP' ? `${counterGroups[deployModal.targetCounter]?.errorCount || 0} SKU` : 'Pemeriksa Baru'}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                            <p className="text-[10px] text-cyan-900/80 text-center leading-snug">
+                                                Barang yang sudah cocok (match) tetap terkunci dan tidak ikut bertukar.
+                                            </p>
+                                        </div>
                                     )}
                                 </div>
+                            )}
 
-                                {/* Preview comparison card */}
-                                {deployModal.targetCounter && (
-                                    <div className="p-3.5 bg-cyan-50/70 border border-cyan-200 rounded-2xl space-y-2">
-                                        <span className="text-[10px] font-bold text-cyan-800 uppercase tracking-wider block">
-                                            Ringkasan Pertukaran 2 Arah (Mutual Swap):
-                                        </span>
-                                        <div className="flex items-center justify-between text-xs font-bold text-slate-800">
-                                            <div className="text-center flex-1">
-                                                <span className="block text-slate-500 font-normal text-[10px]">Tugas Selisih Dari</span>
-                                                <span className="capitalize font-black text-cyan-950">{deployModal.sourceCounter}</span>
-                                                <span className="block text-rose-600 font-mono text-[11px] font-black">{deployModal.sourceDisputeCount} SKU</span>
-                                            </div>
-                                            <div className="p-2 bg-white rounded-full shadow-xs text-cyan-600 shrink-0">
-                                                <Repeat className="w-4 h-4" />
-                                            </div>
-                                            <div className="text-center flex-1">
-                                                <span className="block text-slate-500 font-normal text-[10px]">Ditukar Ke</span>
-                                                <span className="capitalize font-black text-cyan-950">{deployModal.targetCounter}</span>
-                                                <span className="block text-rose-600 font-mono text-[11px] font-black">
-                                                    {counterGroups[deployModal.targetCounter]?.errorCount || 0} SKU
-                                                </span>
-                                            </div>
-                                        </div>
-                                        <p className="text-[10px] text-cyan-900/80 text-center leading-snug">
-                                            Barang yang sudah cocok (match) di masing-masing counter tetap terkunci dan tidak ikut bertukar.
-                                        </p>
-                                    </div>
-                                )}
+                            {/* Modal Actions */}
+                            <div className="flex justify-end space-x-3 pt-3 border-t border-slate-100">
+                                <button
+                                    onClick={() => setDeployModal(prev => ({ ...prev, isOpen: false }))}
+                                    disabled={isDeploySubmitting}
+                                    className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold cursor-pointer disabled:opacity-50"
+                                >
+                                    Batal
+                                </button>
+                                <button
+                                    onClick={handleExecuteDeploy}
+                                    disabled={isDeploySubmitting || ((deployModal.mode === 'SWAP' || deployModal.mode === 'ASSIGN') && !deployModal.targetCounter)}
+                                    className="px-6 py-2.5 bg-cyan-400 hover:bg-cyan-300 disabled:opacity-50 text-slate-950 rounded-xl text-xs font-black shadow-md flex items-center space-x-2 cursor-pointer transition-all"
+                                >
+                                    {isDeploySubmitting ? (
+                                        <>
+                                            <Loader2 className="w-4 h-4 animate-spin text-slate-950" />
+                                            <span>Menyimpan ke Cloud...</span>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <PlayCircle className="w-4 h-4 text-slate-950" />
+                                            <span>Deploy Ronde {deployModal.sourceRound + 1} Sekarang</span>
+                                        </>
+                                    )}
+                                </button>
                             </div>
-                        )}
-
-                        {/* Modal Actions */}
-                        <div className="flex justify-end space-x-3 pt-3 border-t border-slate-100">
-                            <button
-                                onClick={() => setDeployModal(prev => ({ ...prev, isOpen: false }))}
-                                disabled={isDeploySubmitting}
-                                className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold cursor-pointer disabled:opacity-50"
-                            >
-                                Batal
-                            </button>
-                            <button
-                                onClick={handleExecuteDeploy}
-                                disabled={isDeploySubmitting || (deployModal.mode === 'SWAP' && !deployModal.targetCounter)}
-                                className="px-6 py-2.5 bg-cyan-400 hover:bg-cyan-300 disabled:opacity-50 text-slate-950 rounded-xl text-xs font-black shadow-md flex items-center space-x-2 cursor-pointer transition-all"
-                            >
-                                {isDeploySubmitting ? (
-                                    <>
-                                        <Loader2 className="w-4 h-4 animate-spin text-slate-950" />
-                                        <span>Menyimpan ke Cloud...</span>
-                                    </>
-                                ) : (
-                                    <>
-                                        <PlayCircle className="w-4 h-4 text-slate-950" />
-                                        <span>Deploy Ronde {deployModal.sourceRound + 1} Sekarang</span>
-                                    </>
-                                )}
-                            </button>
-                        </div>
                     </div>
                 </div>
             )}
@@ -3603,7 +4141,25 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                                 <p className="text-[11px] text-slate-400 font-medium">Monitoring Real-Time PIC Counter Lapangan</p>
                                                             </div>
                                                         </div>
-                                                        <div className="flex items-center gap-2 w-full sm:w-auto">
+                                                        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handlePrintCountsheet(undefined, 1)}
+                                                                className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-[11px] font-bold flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer shrink-0"
+                                                                title="Cetak Countsheet Fisik Ronde 1 untuk semua counter (Page-break otomatis per counter)"
+                                                            >
+                                                                <Printer className="w-3.5 h-3.5 text-slate-600" />
+                                                                <span>Cetak R1 (Semua)</span>
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleExportCountsheetXLSX(undefined, 1)}
+                                                                className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-[11px] font-bold flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer shrink-0"
+                                                                title="Download file Excel Countsheet Blind Ronde 1"
+                                                            >
+                                                                <FileDown className="w-3.5 h-3.5 text-slate-600" />
+                                                                <span>Excel R1</span>
+                                                            </button>
                                                             <button
                                                                 type="button"
                                                                 onClick={() => handleOpenReassignModal()}
@@ -3613,7 +4169,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                                 <ArrowRightLeft className="w-3.5 h-3.5" />
                                                                 <span>Oper Sisa Rak</span>
                                                             </button>
-                                                            <div className="relative w-full sm:w-56">
+                                                            <div className="relative w-full sm:w-48">
                                                                 <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
                                                                 <input
                                                                     type="text"
@@ -3779,6 +4335,40 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                                                                 <div className="flex-1 min-w-0">
                                                                                                     <div className="text-xs font-bold leading-tight">Oper Sisa Rak Pending</div>
                                                                                                     <div className="text-[10px] text-slate-400 font-normal">Pindahkan rak belum beres</div>
+                                                                                                </div>
+                                                                                            </button>
+
+                                                                                            <button
+                                                                                                onClick={(e) => {
+                                                                                                    e.stopPropagation();
+                                                                                                    setMenuAnchor(null);
+                                                                                                    handlePrintCountsheet(cName, cMaxRound);
+                                                                                                }}
+                                                                                                className="w-full text-left px-3 py-2 rounded-xl text-xs font-bold flex items-center space-x-2.5 hover:bg-slate-100 text-slate-700 transition-all cursor-pointer"
+                                                                                            >
+                                                                                                <div className="w-7 h-7 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center shrink-0">
+                                                                                                    <Printer className="w-3.5 h-3.5" />
+                                                                                                </div>
+                                                                                                <div className="flex-1 min-w-0">
+                                                                                                    <div className="text-xs font-bold leading-tight">Cetak Countsheet R{cMaxRound}</div>
+                                                                                                    <div className="text-[10px] text-slate-400 font-normal">Blind Count ({cName})</div>
+                                                                                                </div>
+                                                                                            </button>
+
+                                                                                            <button
+                                                                                                onClick={(e) => {
+                                                                                                    e.stopPropagation();
+                                                                                                    setMenuAnchor(null);
+                                                                                                    handleExportCountsheetXLSX(cName, cMaxRound);
+                                                                                                }}
+                                                                                                className="w-full text-left px-3 py-2 rounded-xl text-xs font-bold flex items-center space-x-2.5 hover:bg-slate-100 text-slate-700 transition-all cursor-pointer"
+                                                                                            >
+                                                                                                <div className="w-7 h-7 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center shrink-0">
+                                                                                                    <FileDown className="w-3.5 h-3.5" />
+                                                                                                </div>
+                                                                                                <div className="flex-1 min-w-0">
+                                                                                                    <div className="text-xs font-bold leading-tight">Excel Countsheet R{cMaxRound}</div>
+                                                                                                    <div className="text-[10px] text-slate-400 font-normal">Format Blind .xlsx</div>
                                                                                                 </div>
                                                                                             </button>
 
@@ -4314,23 +4904,77 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                             </div>
 
                             <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xl space-y-4">
-                                <div className="flex justify-between items-center border-b pb-3">
+                                <input
+                                    type="file"
+                                    ref={vendorFileInputRef}
+                                    accept=".xlsx, .xls, .csv"
+                                    onChange={handleImportVendorXLSX}
+                                    className="hidden"
+                                />
+
+                                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b pb-3">
                                     <div>
-                                        <h3 className="text-base font-black text-slate-900 flex items-center"><Scale className="w-5 h-5 mr-2 text-indigo-600" />Laporan Selisih & Override Recovery</h3>
-                                        <p className="text-xs text-slate-500 font-medium mt-0.5">Monitoring variansi stok fisik vs sistem WMS untuk SPV & Owner</p>
+                                        <h3 className="text-base font-black text-slate-900 flex items-center">
+                                            <Scale className="w-5 h-5 mr-2 text-indigo-600" />
+                                            Rekonsiliasi 3-Way & Audit Vendor
+                                        </h3>
+                                        <p className="text-xs text-slate-500 font-medium mt-0.5">
+                                            Komparasi stok WMS Sistem vs Fisik Internal vs Auditor Vendor (Harga satuan terproteksi otomatis)
+                                        </p>
                                     </div>
 
-                                    <button onClick={handleExportReconXLSX} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center space-x-2 shadow-md cursor-pointer">
-                                        <FileSpreadsheet className="w-4 h-4" />
-                                        <span>Download Recon (.xlsx)</span>
-                                    </button>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => vendorFileInputRef.current?.click()}
+                                            disabled={isVendorImporting}
+                                            className="px-3 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl text-xs font-bold flex items-center space-x-1.5 shadow-2xs cursor-pointer transition-all disabled:opacity-50"
+                                            title="Upload file Excel dari Auditor Vendor untuk mencocokkan hitungan"
+                                        >
+                                            <Upload className="w-3.5 h-3.5 text-indigo-600" />
+                                            <span>{isVendorImporting ? 'Mengimpor Vendor...' : 'Import Data Vendor (.xlsx)'}</span>
+                                        </button>
+
+                                        <button
+                                            type="button"
+                                            onClick={handleExportVendorComparisonXLSX}
+                                            className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center space-x-1.5 shadow-md cursor-pointer transition-all"
+                                            title="Download format komparasi 3-Way khusus Auditor Vendor (Masking harga aktif)"
+                                        >
+                                            <FileSpreadsheet className="w-3.5 h-3.5" />
+                                            <span>Export Rekon Vendor (.xlsx)</span>
+                                        </button>
+
+                                        <button
+                                            type="button"
+                                            onClick={handleExportReconXLSX}
+                                            className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center space-x-1.5 shadow-md cursor-pointer transition-all"
+                                        >
+                                            <FileSpreadsheet className="w-3.5 h-3.5" />
+                                            <span>Download Recon (.xlsx)</span>
+                                        </button>
+                                    </div>
                                 </div>
+
                                 <div className="overflow-x-auto border rounded-2xl">
-                                    <table className="w-full text-left text-sm"><thead className="bg-slate-50 font-black text-slate-600 border-b"><tr><th className="p-4">SKU BARANG</th><th className="p-4 text-center">WMS QTY</th><th className="p-4 text-center">QTY GOOD</th><th className="p-4 text-center text-red-600">QTY BAD</th><th className="p-4 text-center">ACTUAL QTY</th><th className="p-4 text-center">SELISIH</th><th className="p-4 text-right bg-amber-50">VALUASI (Rp)</th><th className="p-4 text-right bg-indigo-50">OVERRIDE RECOVERY</th></tr></thead>
+                                    <table className="w-full text-left text-sm">
+                                        <thead className="bg-slate-50 font-black text-slate-600 border-b">
+                                            <tr>
+                                                <th className="p-3.5">SKU BARANG</th>
+                                                <th className="p-3.5 text-center">WMS SYS</th>
+                                                <th className="p-3.5 text-center">FISIK (INT)</th>
+                                                <th className="p-3.5 text-center bg-indigo-50/70 text-indigo-900">VENDOR (3RD)</th>
+                                                <th className="p-3.5 text-center">SELISIH SYS</th>
+                                                <th className="p-3.5 text-center bg-amber-50/70 text-amber-900">SELISIH VENDOR</th>
+                                                <th className="p-3.5 text-right bg-slate-100/60">HARGA SATUAN</th>
+                                                <th className="p-3.5 text-right bg-amber-50">VALUASI SELISIH</th>
+                                                <th className="p-3.5 text-right bg-indigo-50">OVERRIDE RECOVERY</th>
+                                            </tr>
+                                        </thead>
                                         <tbody className="divide-y divide-slate-100 font-medium">
                                             {paginatedDiscrepancies.length === 0 ? (
                                                 <tr>
-                                                    <td colSpan={8} className="p-8 text-center text-slate-400 font-bold">
+                                                    <td colSpan={9} className="p-8 text-center text-slate-400 font-bold">
                                                         Tidak ada selisih stok (Seluruh item terhitung cocok / belum ada variansi).
                                                     </td>
                                                 </tr>
@@ -4340,31 +4984,34 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                     const effectiveActual = item.isCounted ? (item.countedQty ?? 0) : (item.round1Actual ?? 0);
                                                     const diff = effectiveActual - item.Qty;
                                                     const val = diff * (item.unitPrice || 0);
+
+                                                    const vendorQty = item.thirdPartyQty;
+                                                    const diffVendor = vendorQty !== undefined && item.isCounted ? (effectiveActual - vendorQty) : null;
+                                                    const isDiscrepant = item.isCounted && (diff !== 0 || (vendorQty !== undefined && vendorQty !== effectiveActual));
+
                                                     return (
                                                         <tr key={item.id || `${item.SKU}_${i}`} className="hover:bg-slate-50">
-                                                            <td className="p-4">
+                                                            <td className="p-3.5">
                                                                 <div className="flex items-center gap-2 flex-wrap">
                                                                     <span className="font-mono font-bold text-indigo-600">{item.SKU}</span>
                                                                     {isRoundPending ? (
                                                                         <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-amber-50 text-amber-800 border border-amber-200">
                                                                             🔄 Ronde {item.currentRound} ({item.counter})
                                                                         </span>
-                                                                    ) : (
+                                                                    ) : diff !== 0 ? (
                                                                         <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-red-50 text-red-700 border border-red-200">
-                                                                            Selisih
+                                                                            Selisih WMS
+                                                                        </span>
+                                                                    ) : (
+                                                                        <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                                                            Match WMS
                                                                         </span>
                                                                     )}
                                                                 </div>
                                                                 {item.Description && <div className="text-[11px] text-slate-400 truncate max-w-xs">{item.Description}</div>}
                                                             </td>
-                                                            <td className="p-4 text-center text-slate-500">{item.Qty}</td>
-                                                            <td className="p-4 text-center font-bold text-emerald-600">
-                                                                {isRoundPending ? '-' : (item.qtyGood ?? item.countedQty)}
-                                                            </td>
-                                                            <td className="p-4 text-center font-bold text-red-600">
-                                                                {isRoundPending ? '-' : (item.qtyBad ?? 0)}
-                                                            </td>
-                                                            <td className="p-4 text-center font-black">
+                                                            <td className="p-3.5 text-center text-slate-500 font-mono font-bold">{item.Qty}</td>
+                                                            <td className="p-3.5 text-center font-black">
                                                                 {isRoundPending ? (
                                                                     <div>
                                                                         <span>{effectiveActual}</span>
@@ -4374,9 +5021,45 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                                     item.countedQty
                                                                 )}
                                                             </td>
-                                                            <td className="p-4 text-center text-red-600 font-black">{diff > 0 ? `+${diff}` : diff}</td>
-                                                            <td className="p-4 text-right font-mono text-amber-700 font-bold bg-amber-50/20">Rp {val.toLocaleString('id-ID')}</td>
-                                                            <td className="p-4 text-right bg-indigo-50/10">
+                                                            {/* Kolom Hitungan Vendor */}
+                                                            <td className="p-3.5 text-center font-bold text-indigo-700 bg-indigo-50/20 font-mono">
+                                                                {vendorQty !== undefined ? vendorQty : <span className="text-slate-300">-</span>}
+                                                            </td>
+                                                            <td className="p-3.5 text-center font-black font-mono">
+                                                                {diff === 0 ? (
+                                                                    <span className="text-emerald-600 text-xs">0</span>
+                                                                ) : (
+                                                                    <span className="text-red-600">{diff > 0 ? `+${diff}` : diff}</span>
+                                                                )}
+                                                            </td>
+                                                            {/* Kolom Selisih Fisik vs Vendor */}
+                                                            <td className="p-3.5 text-center font-bold bg-amber-50/20">
+                                                                {diffVendor !== null ? (
+                                                                    diffVendor === 0 ? (
+                                                                        <span className="text-emerald-600 text-xs font-black">✓ Match</span>
+                                                                    ) : (
+                                                                        <span className="text-rose-600 text-xs font-black font-mono">{diffVendor > 0 ? `+${diffVendor}` : diffVendor}</span>
+                                                                    )
+                                                                ) : (
+                                                                    <span className="text-slate-300 text-xs">-</span>
+                                                                )}
+                                                            </td>
+                                                            {/* Selective Price Masking */}
+                                                            <td className="p-3.5 text-right font-mono text-xs">
+                                                                {isDiscrepant ? (
+                                                                    <span className="font-bold text-amber-700">Rp {(item.unitPrice || 0).toLocaleString('id-ID')}</span>
+                                                                ) : (
+                                                                    <span className="text-slate-400 font-bold" title="Harga satuan dilindungi untuk SKU yang sudah cocok">*** (Protected)</span>
+                                                                )}
+                                                            </td>
+                                                            <td className="p-3.5 text-right font-mono text-xs font-bold bg-amber-50/20">
+                                                                {isDiscrepant ? (
+                                                                    <span className="text-red-600">Rp {val.toLocaleString('id-ID')}</span>
+                                                                ) : (
+                                                                    <span className="text-slate-400">-</span>
+                                                                )}
+                                                            </td>
+                                                            <td className="p-3.5 text-right bg-indigo-50/10">
                                                                 {effectiveRole === 'owner' ? (
                                                                     <div className="flex items-center justify-end space-x-2">
                                                                         <input type="number" placeholder="Qty Final" className="w-24 px-3 py-1.5 bg-white border border-slate-300 rounded-xl text-xs font-bold font-mono outline-none" onKeyDown={(e) => { if (e.key === 'Enter') handleSaveRecoveryOverride(item.SKU, parseInt((e.target as HTMLInputElement).value, 10)); }} />
