@@ -18,6 +18,7 @@ import {
     Printer, Shuffle, FileDown
 } from 'lucide-react';
 import type { UserRole } from '../types';
+import NetworkStatusBadge from './NetworkStatusBadge';
 
 interface AdminDashboardProps {
     onBackToApp: () => void;
@@ -3696,6 +3697,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                             </div>
                         </div>
                         <div className="flex items-center space-x-3 w-full md:w-auto relative z-10">
+                            <NetworkStatusBadge />
                             {onSwitchToCounterView && (
                                 <button
                                     onClick={onSwitchToCounterView}
@@ -4235,6 +4237,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                 </div>
                             )}
 
+                            <NetworkStatusBadge />
                             {onSwitchToCounterView && (
                                 <button
                                     onClick={onSwitchToCounterView}

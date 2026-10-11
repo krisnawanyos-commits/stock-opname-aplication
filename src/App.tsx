@@ -1,13 +1,14 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { db } from './firebase';
 import { doc, onSnapshot, collection, query, where, setDoc } from 'firebase/firestore';
 import Step1Login from './components/Step1Login';
 import Step2TeamSetup from './components/Step2TeamSetup';
 import Step3CountsheetList from './components/Step3CountsheetList';
 import Step4CountDetail from './components/Step4CountDetail';
-import AdminDashboard from './components/AdminDashboard';
 import type { SessionData, RackItem, UserRole } from './types';
-import { AlertTriangle, LogOut } from 'lucide-react';
+import { AlertTriangle, LogOut, Loader2 } from 'lucide-react';
+
+const AdminDashboard = lazy(() => import('./components/AdminDashboard'));
 
 const STORAGE_KEYS = {
   STEP: 'stock_opname_step',
@@ -256,18 +257,27 @@ export default function App() {
 
       {/* DASHBOARD ADMIN / SUPERVISOR / OWNER */}
       {currentStep === 'admin' && (
-        <AdminDashboard
-          onBackToApp={handleRequestLogout}
-          onSwitchToCounterView={() => {
-            setSessionData(prev => ({
-              ...prev,
-              primaryCounter: currentUser?.username || 'bambang'
-            }));
-            setCurrentStep('admin_demo');
-          }}
-          currentUserRole={currentUser?.role || 'owner'}
-          currentUserEmail={currentUser?.username === 'owner' ? 'yos.krisnawan@anymindgroup.com' : ''}
-        />
+        <Suspense
+          fallback={
+            <div className="min-h-screen bg-[#0F172A] flex flex-col items-center justify-center gap-3 text-slate-300">
+              <Loader2 className="w-8 h-8 text-cyan-400 animate-spin" />
+              <p className="text-xs font-mono tracking-wider font-bold uppercase">Memuat Enterprise Dashboard...</p>
+            </div>
+          }
+        >
+          <AdminDashboard
+            onBackToApp={handleRequestLogout}
+            onSwitchToCounterView={() => {
+              setSessionData(prev => ({
+                ...prev,
+                primaryCounter: currentUser?.username || 'bambang'
+              }));
+              setCurrentStep('admin_demo');
+            }}
+            currentUserRole={currentUser?.role || 'owner'}
+            currentUserEmail={currentUser?.username === 'owner' ? 'yos.krisnawan@anymindgroup.com' : ''}
+          />
+        </Suspense>
       )}
 
       {/* STEP 2: SETUP TIM PENDAMPING WAREHOUSE */}

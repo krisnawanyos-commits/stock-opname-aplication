@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import type { SessionData } from '../types';
+import { Users, LogOut, Info, ArrowRight, ShieldCheck, UserCheck } from 'lucide-react';
+import NetworkStatusBadge from './NetworkStatusBadge';
 
 interface Step2TeamSetupProps {
   sessionData: SessionData;
@@ -26,75 +28,95 @@ export default function Step2TeamSetup({ sessionData, onSaveTeam, onLogout }: St
   };
 
   return (
-    <div className="min-h-screen bg-slate-900 font-sans flex flex-col justify-center items-center p-4">
-      <div className="w-full max-w-sm bg-white rounded-3xl p-6 shadow-2xl space-y-6">
+    <div className="relative min-h-screen bg-[#F4F6F9] font-sans flex flex-col justify-center items-center p-4 overflow-hidden select-none">
+      {/* Background Grid Pattern */}
+      <div 
+        className="absolute inset-0 pointer-events-none opacity-40"
+        style={{
+          backgroundImage: `linear-gradient(to right, #e2e8f0 1px, transparent 1px), linear-gradient(to bottom, #e2e8f0 1px, transparent 1px)`,
+          backgroundSize: '36px 36px'
+        }}
+      />
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-140 h-140 bg-cyan-400/10 rounded-full blur-[140px] pointer-events-none" />
+
+      <div className="relative z-10 w-full max-w-sm bg-white rounded-3xl p-6 sm:p-7 shadow-[0_20px_60px_rgba(15,23,42,0.08)] border border-slate-200/90 space-y-6">
         <div className="flex justify-between items-center border-b border-slate-100 pb-3">
           <div className="flex items-center space-x-3">
-            <div className="p-2.5 bg-indigo-50 text-indigo-600 rounded-2xl">
-              <span className="material-symbols-outlined text-[20px]">groups</span>
+            <div className="p-2.5 bg-cyan-50 text-cyan-600 rounded-2xl border border-cyan-200">
+              <Users className="w-5 h-5 text-cyan-600" />
             </div>
             <div>
               <h2 className="text-base font-black text-slate-900">Setup Tim Opname</h2>
-              <p className="text-xs text-slate-500 font-medium truncate max-w-50">{sessionData.sessionName}</p>
+              <p className="text-xs text-slate-500 font-medium truncate max-w-44">{sessionData.sessionName}</p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={onLogout}
-            className="p-2 text-slate-400 hover:text-slate-700 rounded-xl"
-            title="Keluar"
-          >
-            <span className="material-symbols-outlined text-[20px]">logout</span>
-          </button>
+          <div className="flex items-center gap-1.5">
+            <NetworkStatusBadge />
+            <button
+              type="button"
+              onClick={onLogout}
+              className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors"
+              title="Keluar"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
-        <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl space-y-1">
+        <div className="p-4 bg-amber-50/80 border border-amber-200/90 rounded-2xl space-y-1.5">
           <div className="flex items-center space-x-1.5 text-amber-900 font-bold text-xs">
-            <span className="material-symbols-outlined text-[16px]">info</span>
+            <Info className="w-4 h-4 text-amber-700 shrink-0" />
             <span>Keterangan Tim Pendamping</span>
           </div>
-          <p className="text-[11px] text-amber-800/80 font-medium leading-relaxed">
+          <p className="text-[11px] text-amber-800 font-medium leading-relaxed">
             Sebelum memulai perhitungan rak, mohon lengkapi nama petugas pendamping dari tim warehouse (WH).
           </p>
         </div>
 
         <form onSubmit={handleSave} className="space-y-4">
-          <div className="space-y-1">
-            <label className="text-xs font-extrabold text-slate-700 block uppercase">Counter Utama (SO)</label>
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-extrabold text-slate-600 uppercase tracking-wider flex items-center gap-1.5">
+              <ShieldCheck className="w-3.5 h-3.5 text-cyan-600" />
+              Counter Utama (SO)
+            </label>
             <input
               type="text"
               value={sessionData.primaryCounter}
               disabled
-              className="w-full h-12 px-4 bg-slate-100 border border-slate-200 rounded-2xl text-sm font-black text-slate-800 outline-none capitalize cursor-not-allowed"
+              className="w-full h-12 px-4 bg-slate-100 border border-slate-200 rounded-xl text-sm font-black text-slate-800 outline-none capitalize cursor-not-allowed"
             />
           </div>
 
-          <div className="space-y-1">
-            <label className="text-xs font-extrabold text-slate-700 block uppercase">Tim Pendamping (Warehouse / WH)</label>
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-extrabold text-slate-600 uppercase tracking-wider flex items-center gap-1.5">
+              <UserCheck className="w-3.5 h-3.5 text-cyan-600" />
+              Tim Pendamping (Warehouse / WH)
+            </label>
             <input
               type="text"
               value={partnerName}
               onChange={(e) => setPartnerName(e.target.value)}
               placeholder="Masukkan nama petugas WH..."
-              className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500/30 transition-all"
+              className="w-full h-12 px-4 bg-white border border-slate-300 rounded-xl text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-cyan-400 transition-all"
               required
             />
           </div>
 
           <button
             type="submit"
-            className="w-full h-12 bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] text-white rounded-2xl text-sm font-black shadow-lg shadow-indigo-600/30 transition-all cursor-pointer flex items-center justify-center space-x-2 mt-2"
+            className="w-full h-12 bg-cyan-400 hover:bg-cyan-300 active:scale-[0.98] text-slate-950 rounded-xl text-sm font-extrabold shadow-lg shadow-cyan-400/25 transition-all cursor-pointer flex items-center justify-center space-x-2 mt-2"
           >
             <span>Lanjut ke Countsheet (Step 3)</span>
-            <span className="material-symbols-outlined text-[18px]">arrow_forward</span>
+            <ArrowRight className="w-4 h-4" />
           </button>
         </form>
+
         <div className="pt-3 border-t border-slate-100 text-center space-y-0.5">
           <p className="text-[11px] font-black text-slate-700 uppercase tracking-wider">
             Noctus Count™
           </p>
           <p className="text-[10px] text-slate-400 font-medium">
-            Developed by <span className="font-bold text-indigo-600">Noctus</span>
+            Developed by <span className="font-bold text-cyan-700">Noctus</span>
           </p>
         </div>
       </div>

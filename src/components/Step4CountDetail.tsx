@@ -3,6 +3,14 @@ import { db } from '../firebase';
 import { collection, onSnapshot, query, where, doc, writeBatch, getDocs, limit } from 'firebase/firestore';
 import type { SessionData, RackItem, CustomModalState, UnmappedItem } from '../types';
 import CustomModal from './CustomModal';
+import BarcodeScannerModal from './BarcodeScannerModal';
+import NetworkStatusBadge from './NetworkStatusBadge';
+import { compressImage } from '../utils/imageCompressor';
+import { playScanSuccessBeep, playErrorBuzzer, triggerHapticFeedback } from '../utils/soundAndHaptics';
+import { 
+  ChevronLeft, LogOut, Users, MapPin, Calendar, Minus, Plus, ChevronDown, 
+  ChevronUp, Camera, Scan, PlusCircle, Trash2, Loader2, CheckCircle2, Lock 
+} from 'lucide-react';
 
 interface Step4CountDetailProps {
   sessionData: SessionData;
@@ -49,7 +57,6 @@ const formatDateDisplay = (dateStr: string) => {
 
 export default function Step4CountDetail({ sessionData, rack, onBackToList, onLogout, onSelectNextRack }: Step4CountDetailProps) {
   const cameraInputRef = useRef<HTMLInputElement>(null);
-  const barcodeScanInputRef = useRef<HTMLInputElement>(null);
 
   const [skuList, setSkuList] = useState<GroupedSKUItem[]>([]);
   const [matchedMasterSKU, setMatchedMasterSKU] = useState<any | null>(null);
@@ -57,6 +64,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
   const [isSessionLocked, setIsSessionLocked] = useState<boolean>(false);
   const [unmappedDrawerOpen, setUnmappedDrawerOpen] = useState<boolean>(false);
   const [expandedSku, setExpandedSku] = useState<string | null>(null);
+  const [isScannerOpen, setIsScannerOpen] = useState<boolean>(false);
   const [isLoadingSave, setIsLoadingSave] = useState<boolean>(false);
 
   // MASTER KATEGORI BAD STOCK DARI OWNER
@@ -564,22 +572,52 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
   };
 
   const triggerNativeCamera = () => { if (cameraInputRef.current) cameraInputRef.current.click(); };
-  const triggerNativeBarcodeScan = () => { if (barcodeScanInputRef.current) barcodeScanInputRef.current.click(); };
+  const triggerNativeBarcodeScan = () => { setIsScannerOpen(true); };
 
-  const handlePhotoCaptured = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handlePhotoCaptured = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => setUnmappedPhotoUrl(reader.result as string);
-      reader.readAsDataURL(file);
+      try {
+        const compressedBase64 = await compressImage(file, 960, 960, 0.65);
+        setUnmappedPhotoUrl(compressedBase64);
+      } catch (err) {
+        console.error('Failed to compress photo, falling back to raw:', err);
+        const reader = new FileReader();
+        reader.onloadend = () => setUnmappedPhotoUrl(reader.result as string);
+        reader.readAsDataURL(file);
+      }
     }
   };
 
-  const handleBarcodeCaptured = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const randomBarcode = '899' + Math.floor(1000000000 + Math.random() * 9000000000);
-      setUnmappedBarcode(randomBarcode);
+  const handleBarcodeDetected = (scannedCode: string) => {
+    const cleanCode = scannedCode.trim();
+    if (!cleanCode) return;
+
+    // 1. Cek apakah barcode ini cocok dengan SKU / UPC di rak ini
+    const foundItem = skuList.find(
+      (item) =>
+        item.sku.toLowerCase() === cleanCode.toLowerCase() ||
+        (item.upc && item.upc.toLowerCase() === cleanCode.toLowerCase()) ||
+        (item.upc2 && item.upc2.toLowerCase() === cleanCode.toLowerCase())
+    );
+
+    if (foundItem) {
+      // Ditemukan di rak! Expand kartu SKU dan scroll ke sana
+      setExpandedSku(foundItem.sku);
+      playScanSuccessBeep();
+      triggerHapticFeedback('success');
+      setTimeout(() => {
+        const el = document.getElementById(`sku-card-${foundItem.sku}`);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 100);
+    } else {
+      // Tidak terdaftar di rak -> Buka form item temuan (unmapped) dan isi barcodenya
+      setUnmappedDrawerOpen(true);
+      setUnmappedBarcode(cleanCode);
+      playScanSuccessBeep();
+      triggerHapticFeedback('warning');
     }
   };
 
@@ -799,6 +837,8 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       });
     } catch (err) {
       console.error("Firestore Save Error:", err);
+      playErrorBuzzer();
+      triggerHapticFeedback('error');
       setModal({ isOpen: true, type: 'error', title: 'Gagal Menyimpan', message: 'Periksa koneksi internet kamu.' });
     } finally {
       setIsLoadingSave(false);
@@ -811,28 +851,35 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     <div className="bg-slate-50 text-slate-900 font-body-md text-body-md flex flex-col min-h-screen">
       <CustomModal modal={modal} onClose={() => setModal((prev) => ({ ...prev, isOpen: false }))} />
 
+      <BarcodeScannerModal
+        isOpen={isScannerOpen}
+        onClose={() => setIsScannerOpen(false)}
+        onDetected={handleBarcodeDetected}
+        title="Scan Barcode Barang (HP)"
+      />
+
       <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handlePhotoCaptured} />
-      <input ref={barcodeScanInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleBarcodeCaptured} />
 
       {/* HEADER HP COUNTER (RELATIVE - TIDAK IKUT TURUN SAAT SCROLLING) */}
       <header className="relative w-full z-10 bg-white border-b border-slate-200/90 pt-safe shadow-xs shrink-0">
         <div className="py-3 px-margin flex flex-col justify-center gap-space-xs max-w-md mx-auto">
           <div className="flex items-center justify-between">
             <button type="button" onClick={handleSafeBackToList} className="min-h-11 min-w-11 -ml-2 px-2 flex items-center gap-1 text-slate-800 hover:text-cyan-600 transition-colors cursor-pointer font-bold">
-              <span className="material-symbols-outlined text-[20px]">chevron_left</span>
+              <ChevronLeft className="w-5 h-5" />
               <span className="font-label-md uppercase tracking-wider font-bold text-xs">Countsheet List</span>
             </button>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
+              <NetworkStatusBadge />
               <span className="px-2.5 py-1 rounded-full bg-cyan-50 text-cyan-900 font-mono text-[11px] uppercase font-bold border border-cyan-300">
                 Round {currentDisplayRound}
               </span>
               <button
                 type="button"
                 onClick={handleSafeLogout}
-                className="px-3 py-1 bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                className="px-2.5 py-1 bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
               >
-                <span className="material-symbols-outlined text-[16px]">logout</span>
-                <span>Keluar</span>
+                <LogOut className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Keluar</span>
               </button>
             </div>
           </div>
@@ -843,7 +890,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
 
           <div className="flex items-center justify-between gap-space-sm pt-0.5">
             <div className="flex items-center gap-1.5 text-slate-600 font-label-sm text-xs truncate">
-              <span className="material-symbols-outlined text-[16px] text-cyan-600 shrink-0">group</span>
+              <Users className="w-3.5 h-3.5 text-cyan-600 shrink-0" />
               <span className="truncate">Counter Active: <b className="text-slate-900 font-mono">{sessionData.primaryCounter}</b></span>
             </div>
           </div>
@@ -855,16 +902,32 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
         <div className="flex flex-col w-full pb-12 space-y-4">
 
           <div className="flex items-center justify-between pb-1">
-            <h2 className="font-headline-sm font-bold text-slate-800 flex items-center gap-1">
-              <span className="material-symbols-outlined text-emerald-600">pin_drop</span> BIN: {rack.rackNumber}
+            <h2 className="font-headline-sm font-bold text-slate-800 flex items-center gap-1.5">
+              <MapPin className="w-4 h-4 text-emerald-600" />
+              <span>BIN: {rack.rackNumber}</span>
             </h2>
             <div className="flex items-center gap-2">
               <span className={`text-[10px] font-bold px-2.5 py-1 rounded-md border ${isSessionLocked ? 'bg-red-50 text-red-700 border-red-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>
-                {isSessionLocked ? '🔒 Sesi Terkunci (Pusat)' : '🟢 Sesi Terbuka'}
+                {isSessionLocked ? '🔒 Sesi Terkunci' : '🟢 Sesi Terbuka'}
               </span>
               <span className="text-xs font-bold text-slate-500 bg-slate-200 px-2.5 py-1 rounded-full">{skuList.length} SKU</span>
             </div>
           </div>
+
+          {/* TOMBOL SCAN BARCODE KAMERA HP (VIEWFINDER LIVE) */}
+          <button
+            type="button"
+            disabled={isSessionLocked}
+            onClick={() => setIsScannerOpen(true)}
+            className={`w-full py-3 px-4 rounded-xl font-black text-xs flex items-center justify-center gap-2 cursor-pointer shadow-md transition-all active:scale-[0.99] ${
+              isSessionLocked
+                ? 'bg-slate-300 text-slate-500 cursor-not-allowed opacity-60'
+                : 'bg-linear-to-r from-cyan-400 to-sky-400 hover:from-cyan-300 hover:to-sky-300 text-slate-950 shadow-cyan-400/20'
+            }`}
+          >
+            <Scan className="w-4 h-4" />
+            <span>Scan Barcode Kamera (Cari / Tambah SKU)</span>
+          </button>
 
           {/* RENDER KARTU SKU MASTER WMS & TEMUAN (ACCORDION COMPACT MODE) */}
           {skuList.map((currentSku, idx) => {
@@ -878,6 +941,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             return (
               <div
                 key={currentSku.sku}
+                id={`sku-card-${currentSku.sku}`}
                 className={`bg-white rounded-2xl shadow-xs border transition-all overflow-hidden ${
                   isExpanded
                     ? 'border-cyan-400 ring-2 ring-cyan-400/20 shadow-md'
@@ -912,9 +976,11 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                           ? 'bg-amber-100 text-amber-700'
                           : 'bg-slate-100 text-slate-400'
                     }`}>
-                      <span className="material-symbols-outlined text-[18px]">
-                        {isCounted ? 'check_circle' : 'radio_button_unchecked'}
-                      </span>
+                      {isCounted ? (
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                      ) : (
+                        <div className="w-3.5 h-3.5 rounded-full border-2 border-slate-300" />
+                      )}
                     </div>
 
                     <div className="min-w-0 flex-1 space-y-0.5">
@@ -958,9 +1024,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                       </span>
                     )}
 
-                    <span className={`material-symbols-outlined text-slate-400 transition-transform ${isExpanded ? 'rotate-180 text-cyan-600' : ''}`}>
-                      expand_more
-                    </span>
+                    <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${isExpanded ? 'rotate-180 text-cyan-600' : ''}`} />
                   </div>
                 </div>
 
@@ -970,8 +1034,9 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                     {/* EXPIRED DATE FEFO DENGAN FORMAT DD/MM/YYYY */}
                     <div className="bg-cyan-50/60 border border-cyan-200 p-space-sm rounded-xl space-y-2">
                       <div className="flex justify-between items-center">
-                        <span className="font-label-sm text-cyan-950 font-bold flex items-center gap-1">
-                          <span className="material-symbols-outlined text-[16px] text-cyan-700">event</span> Expired Date System (FEFO)
+                        <span className="font-label-sm text-cyan-950 font-bold flex items-center gap-1.5">
+                          <Calendar className="w-3.5 h-3.5 text-cyan-700" />
+                          <span>Expired Date System (FEFO)</span>
                         </span>
                         <button
                           type="button"
@@ -1023,7 +1088,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                         <span className="px-2 py-0.5 rounded-md bg-cyan-100 text-cyan-950 border border-cyan-300 font-black text-xs uppercase">{currentSku.uom}</span>
                       </div>
                       <div className="flex items-center gap-space-sm">
-                        <button type="button" disabled={isSessionLocked} onClick={() => adjustQty(idx, 'good', -1)} className={`w-14 h-14 bg-white border border-slate-300 text-slate-800 rounded-xl flex items-center justify-center text-xl shrink-0 cursor-pointer ${isSessionLocked ? 'opacity-50 cursor-not-allowed' : ''}`}><span className="material-symbols-outlined">remove</span></button>
+                        <button type="button" disabled={isSessionLocked} onClick={() => adjustQty(idx, 'good', -1)} className={`w-14 h-14 bg-white border border-slate-300 text-slate-800 rounded-xl flex items-center justify-center text-xl shrink-0 cursor-pointer ${isSessionLocked ? 'opacity-50 cursor-not-allowed' : ''}`}><Minus className="w-5 h-5" /></button>
                         <div className="flex-1 h-14 border-2 border-cyan-400 rounded-xl flex items-center justify-center bg-white">
                           <input
                             type="text"
@@ -1035,7 +1100,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                             className={`w-full text-center font-bold text-2xl outline-none ${isSessionLocked ? 'bg-slate-100 opacity-60' : 'bg-white'}`}
                           />
                         </div>
-                        <button type="button" disabled={isSessionLocked} onClick={() => adjustQty(idx, 'good', 1)} className={`w-14 h-14 rounded-xl flex items-center justify-center text-xl shrink-0 cursor-pointer transition-all ${isSessionLocked ? 'bg-slate-400 opacity-50 cursor-not-allowed text-white' : 'bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-black shadow-md active:scale-95'}`}><span className="material-symbols-outlined">add</span></button>
+                        <button type="button" disabled={isSessionLocked} onClick={() => adjustQty(idx, 'good', 1)} className={`w-14 h-14 rounded-xl flex items-center justify-center text-xl shrink-0 cursor-pointer transition-all ${isSessionLocked ? 'bg-slate-400 opacity-50 cursor-not-allowed text-white' : 'bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-black shadow-md active:scale-95'}`}><Plus className="w-5 h-5" /></button>
                       </div>
                     </div>
 
@@ -1094,7 +1159,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                         className="text-xs font-bold text-cyan-700 hover:text-cyan-800 flex items-center gap-1 cursor-pointer py-1.5 px-3 rounded-xl bg-cyan-50 hover:bg-cyan-100 transition-colors"
                       >
                         <span>Selesai Edit Item Ini</span>
-                        <span className="material-symbols-outlined text-[16px]">expand_less</span>
+                        <ChevronUp className="w-4 h-4" />
                       </button>
                     </div>
                   </div>
@@ -1111,7 +1176,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             >
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center shrink-0">
-                  <span className="material-symbols-outlined text-[20px]">add_box</span>
+                  <PlusCircle className="w-5 h-5 text-amber-800" />
                 </div>
                 <div>
                   <h3 className="font-headline-sm text-slate-900 font-bold text-xs sm:text-sm">
@@ -1122,16 +1187,15 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                   </p>
                 </div>
               </div>
-              <span className={`material-symbols-outlined text-slate-400 transition-transform ${unmappedDrawerOpen ? 'rotate-180 text-amber-600' : ''}`}>
-                expand_more
-              </span>
+              <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${unmappedDrawerOpen ? 'rotate-180 text-amber-600' : ''}`} />
             </div>
             {unmappedDrawerOpen && (
               <div className="p-3.5 pt-3 space-y-3 border-t border-amber-200/80 bg-white">
                 <div className="flex gap-2">
                   <input type="text" disabled={isSessionLocked} value={unmappedBarcode} onChange={(e) => setUnmappedBarcode(e.target.value)} placeholder="Scan/Ketik Barcode/UPC..." className={`flex-1 h-11 border border-slate-300 px-3 rounded-lg text-sm font-mono font-bold ${isSessionLocked ? 'bg-slate-100 opacity-60' : 'bg-white'}`} />
-                  <button type="button" disabled={isSessionLocked} onClick={triggerNativeBarcodeScan} className={`px-3 min-h-11 rounded-lg flex items-center gap-1 text-xs cursor-pointer transition-all ${isSessionLocked ? 'bg-slate-400 opacity-50 cursor-not-allowed text-white' : 'bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-bold shadow-xs active:scale-95'}`}>
-                    <span className="material-symbols-outlined text-[18px]">photo_camera</span> Scan
+                  <button type="button" disabled={isSessionLocked} onClick={triggerNativeBarcodeScan} className={`px-3 min-h-11 rounded-lg flex items-center gap-1.5 text-xs cursor-pointer transition-all ${isSessionLocked ? 'bg-slate-400 opacity-50 cursor-not-allowed text-white' : 'bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-bold shadow-xs active:scale-95'}`}>
+                    <Scan className="w-4 h-4" />
+                    <span>Scan</span>
                   </button>
                 </div>
 
@@ -1201,7 +1265,8 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                         />
                       </div>
                       <div>
-                        <label className="text-[10px] font-bold text-amber-900 block mb-1">Pilih Kategori Kerusakan (Bisa lebih dari 1):</label>                        <div className="flex flex-wrap gap-1.5">
+                        <label className="text-[10px] font-bold text-amber-900 block mb-1">Pilih Kategori Kerusakan (Bisa lebih dari 1):</label>
+                        <div className="flex flex-wrap gap-1.5">
                           {availableCategories.map((cat, cIdx) => {
                             const isSelected = unmappedSelectedCategories.includes(cat);
                             return (
@@ -1222,8 +1287,8 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                   )}
                 </div>
 
-                <button type="button" disabled={isSessionLocked} onClick={triggerNativeCamera} className={`w-full h-11 border rounded-lg font-bold text-xs flex items-center justify-center gap-1 cursor-pointer ${isSessionLocked ? 'opacity-50 cursor-not-allowed' : ''} ${!isBarcodeInSystem && !unmappedPhotoUrl ? 'bg-rose-50 border-rose-300 text-rose-700 animate-pulse' : 'bg-slate-100 border-slate-300 text-slate-700'}`}>
-                  <span className="material-symbols-outlined text-[18px]">add_a_photo</span>
+                <button type="button" disabled={isSessionLocked} onClick={triggerNativeCamera} className={`w-full h-11 border rounded-lg font-bold text-xs flex items-center justify-center gap-2 cursor-pointer ${isSessionLocked ? 'opacity-50 cursor-not-allowed' : ''} ${!isBarcodeInSystem && !unmappedPhotoUrl ? 'bg-rose-50 border-rose-300 text-rose-700 animate-pulse' : 'bg-slate-100 border-slate-300 text-slate-700'}`}>
+                  <Camera className="w-4 h-4" />
                   <span>{unmappedPhotoUrl ? 'Foto Terlampir ✓' : (!isBarcodeInSystem ? 'Ambil Foto Kamera (Wajib)' : 'Ambil Foto Kamera (Opsional)')}</span>
                 </button>
 
@@ -1246,10 +1311,10 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                     type="button"
                     disabled={isSessionLocked}
                     onClick={() => handleDeleteUnmapped(item.id)}
-                    className={`p-1 text-rose-600 hover:bg-rose-50 rounded cursor-pointer ${isSessionLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    className={`p-1.5 text-rose-600 hover:bg-rose-50 rounded cursor-pointer ${isSessionLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
                     title="Hapus Temuan"
                   >
-                    <span className="material-symbols-outlined text-[18px]">delete</span>
+                    <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
               ))}
@@ -1260,20 +1325,64 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             type="button"
             disabled={isLoadingSave || isSessionLocked}
             onClick={handleSaveAndNext}
-            className={`w-full min-h-14 rounded-xl font-black text-lg shadow-[0_0_15px_rgba(34,211,238,0.35)] cursor-pointer transition-all active:scale-[0.99] ${isSessionLocked || isLoadingSave ? 'bg-slate-400 opacity-50 cursor-not-allowed text-white shadow-none' : 'bg-cyan-400 hover:bg-cyan-300 text-slate-950'}`}
+            className={`w-full min-h-14 rounded-xl font-black text-lg shadow-[0_0_15px_rgba(34,211,238,0.35)] cursor-pointer transition-all active:scale-[0.99] flex items-center justify-center gap-2 ${isSessionLocked || isLoadingSave ? 'bg-slate-400 opacity-50 cursor-not-allowed text-white shadow-none' : 'bg-cyan-400 hover:bg-cyan-300 text-slate-950'}`}
           >
-            {isLoadingSave
-              ? "Menyimpan ke Cloud..."
-              : isSessionLocked
-                ? "🔒 Sesi Terkunci oleh Admin"
-                : "Simpan Semua & Lanjut Rak Berikutnya"}
+            {isLoadingSave ? (
+              <>
+                <Loader2 className="w-5 h-5 animate-spin" />
+                <span>Menyimpan ke Cloud...</span>
+              </>
+            ) : isSessionLocked ? (
+              <>
+                <Lock className="w-5 h-5" />
+                <span>Sesi Terkunci oleh Admin</span>
+              </>
+            ) : (
+              <>
+                <CheckCircle2 className="w-5 h-5" />
+                <span>Simpan Semua &amp; Lanjut Rak Berikutnya</span>
+              </>
+            )}
           </button>
 
         </div>
       </main>
 
-      <footer className="text-center py-4 bg-slate-50 text-slate-400 text-[10px] font-medium border-t border-slate-200">
-        Noctus Count™ • Developed by <span className="font-bold text-indigo-600">Noctus</span>
+      {/* STICKY BOTTOM ACTION BAR (ERGONOMI IBU JARI MOBILE) */}
+      <div className="fixed bottom-0 left-0 right-0 z-30 p-3 bg-white/95 backdrop-blur-md border-t border-slate-200/90 shadow-[0_-8px_20px_rgba(0,0,0,0.06)] pb-safe">
+        <div className="max-w-md mx-auto">
+          <button
+            type="button"
+            disabled={isLoadingSave || isSessionLocked}
+            onClick={handleSaveAndNext}
+            className={`w-full h-12 rounded-xl font-black text-sm shadow-[0_0_15px_rgba(34,211,238,0.35)] cursor-pointer transition-all active:scale-[0.98] flex items-center justify-center gap-2 ${
+              isSessionLocked || isLoadingSave
+                ? 'bg-slate-400 opacity-50 cursor-not-allowed text-white shadow-none'
+                : 'bg-cyan-400 hover:bg-cyan-300 text-slate-950'
+            }`}
+          >
+            {isLoadingSave ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Menyimpan ke Cloud...</span>
+              </>
+            ) : isSessionLocked ? (
+              <>
+                <Lock className="w-4 h-4" />
+                <span>Sesi Terkunci</span>
+              </>
+            ) : (
+              <>
+                <CheckCircle2 className="w-4 h-4 text-slate-950" />
+                <span>Simpan &amp; Lanjut Rak Berikutnya</span>
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+
+      <footer className="text-center py-4 bg-slate-50 text-slate-400 text-[10px] font-medium border-t border-slate-200 pb-16">
+        Noctus Count™ • Developed by <span className="font-bold text-cyan-600">Noctus</span>
       </footer>
     </div>
   );

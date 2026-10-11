@@ -3,6 +3,12 @@ import { db } from '../firebase';
 import { collection, onSnapshot, query, where, doc, setDoc } from 'firebase/firestore';
 import type { SessionData, RackItem, CustomModalState } from '../types';
 import CustomModal from './CustomModal';
+import NetworkStatusBadge from './NetworkStatusBadge';
+import { playScanSuccessBeep, triggerHapticFeedback } from '../utils/soundAndHaptics';
+import { 
+  ChevronLeft, LogOut, Info, Lock, Warehouse, Edit2, Search, Plus, 
+  Layers, Check, CheckCircle2, Loader2 
+} from 'lucide-react';
 
 interface Step3CountsheetListProps {
   sessionData: SessionData;
@@ -193,6 +199,8 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
 
     setTimeout(() => {
       setIsSubmitting(false);
+      playScanSuccessBeep();
+      triggerHapticFeedback('success');
       setModal({
         isOpen: true,
         type: pendingCount + inProgressCount > 0 ? 'warning' : 'success',
@@ -262,7 +270,7 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
               onClick={onLogout}
               className="w-9 h-9 rounded-lg bg-slate-100 flex items-center justify-center text-slate-700 shrink-0 hover:bg-slate-200 transition-colors cursor-pointer"
             >
-              <span className="material-symbols-outlined text-[22px]">arrow_back_ios_new</span>
+              <ChevronLeft className="w-5 h-5" />
             </button>
             <div className="flex flex-col min-w-0">
               <div className="flex items-center gap-space-xs">
@@ -276,14 +284,15 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
               </span>
             </div>
           </div>
-          <div className="flex items-center gap-space-xs shrink-0">
+          <div className="flex items-center gap-1.5 shrink-0">
+            <NetworkStatusBadge />
             <button
               type="button"
               onClick={onLogout}
-              className="px-3 py-1 flex items-center gap-1 rounded-lg text-xs font-bold bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 transition-colors cursor-pointer"
+              className="px-2.5 py-1.5 flex items-center gap-1 rounded-lg text-xs font-bold bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 transition-colors cursor-pointer"
             >
-              <span>Keluar</span>
-              <span className="material-symbols-outlined text-[16px]">logout</span>
+              <LogOut className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Keluar</span>
             </button>
           </div>
         </div>
@@ -295,7 +304,7 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
           {/* PERINGATAN JIKA TIDAK ADA PROJECT AKTIF DI CLOUD */}
           {!activeProject && (
             <div className="bg-amber-50 border border-amber-200 text-amber-900 p-5 rounded-2xl flex flex-col items-center text-center space-y-2 shadow-xs my-4">
-              <span className="material-symbols-outlined text-amber-600 text-3xl">info</span>
+              <Info className="w-8 h-8 text-amber-600" />
               <h3 className="font-bold text-sm">Tidak Ada Sesi Opname Aktif</h3>
               <p className="text-xs text-amber-800/80 leading-relaxed">
                 Project sebelumnya telah dihapus/ditutup oleh Owner. Silakan tunggu Owner meluncurkan project sesi baru.
@@ -305,7 +314,7 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
 
           {isSessionLocked && activeProject && (
             <div className="bg-red-50 border border-red-200 text-red-700 p-3 rounded-xl flex items-center gap-2 text-xs font-bold shadow-xs">
-              <span className="material-symbols-outlined text-red-600 text-[18px]">lock</span>
+              <Lock className="w-4 h-4 text-red-600 shrink-0" />
               <span>Sesi Terkunci oleh Admin Pusat. Input/edit hitungan fisik dinonaktifkan.</span>
             </div>
           )}
@@ -315,7 +324,7 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
               <div className="bg-surface-container-lowest rounded-xl p-space-md shadow-sm border border-outline-variant/30 flex flex-col gap-space-sm">
                 <div className="flex items-center justify-between gap-space-xs">
                   <div className="flex items-center gap-space-xs min-w-0">
-                    <span className="material-symbols-outlined text-secondary text-[20px] shrink-0">warehouse</span>
+                    <Warehouse className="w-5 h-5 text-cyan-600 shrink-0" />
                     <h2 className="font-headline-sm text-headline-sm text-on-surface truncate">
                       {activeProject.sessionCode} — {activeProject.locationName}
                     </h2>
@@ -337,7 +346,7 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
                       onClick={onEditTeam}
                       className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-bold flex items-center gap-1 border border-slate-300 transition-colors cursor-pointer"
                     >
-                      <span className="material-symbols-outlined text-[12px]">edit</span>
+                      <Edit2 className="w-3 h-3" />
                       <span>Edit Tim</span>
                     </button>
                   )}
@@ -363,13 +372,13 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
               <div className="flex flex-col gap-space-sm">
                 <div className="flex gap-2">
                   <div className="relative flex-1">
-                    <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline text-[20px] pointer-events-none">search</span>
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4 pointer-events-none" />
                     <input
                       type="text"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
                       placeholder="Cari nomor rak atau zona..."
-                      className="w-full h-11 pl-10 pr-4 bg-surface-container-lowest rounded-xl font-body-md text-body-md shadow-sm border border-outline-variant/30 outline-none"
+                      className="w-full h-11 pl-9 pr-4 bg-surface-container-lowest rounded-xl font-body-md text-body-md shadow-sm border border-outline-variant/30 outline-none text-xs"
                     />
                   </div>
                   <button
@@ -377,7 +386,8 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
                     onClick={() => setShowAddRackModal(true)}
                     className="px-3 bg-cyan-400 hover:bg-cyan-300 text-slate-950 rounded-xl text-xs font-black flex items-center gap-1 shadow-sm cursor-pointer shrink-0 transition-all active:scale-95"
                   >
-                    <span>+ Rak Baru</span>
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Rak Baru</span>
                   </button>
                 </div>
 
@@ -396,12 +406,12 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
                     <div className={`flex items-start justify-between gap-space-xs ${rack.status === 'in-progress' ? 'pl-1' : ''}`}>
                       <div className="flex flex-col min-w-0">
                         <div className="flex items-center gap-1.5">
-                          <span className="material-symbols-outlined text-[18px] text-cyan-600">shelves</span>
+                          <Layers className="w-4 h-4 text-cyan-600 shrink-0" />
                           <h4 className="font-headline-sm text-headline-sm text-on-surface truncate">Rak {rack.rackNumber}</h4>
                         </div>
                         <p className="font-body-sm text-body-sm text-on-surface-variant mt-0.5">{rack.countedSKU} / {rack.totalSKU} SKU Dihitung • Zone: {rack.zone}</p>
                       </div>
-                      {rack.status === 'completed' && <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-800 font-label-sm text-label-sm px-2.5 py-1 rounded-full shrink-0 border border-emerald-200"><span className="material-symbols-outlined text-[14px] text-emerald-700 font-bold">check</span> Selesai</span>}
+                      {rack.status === 'completed' && <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-800 font-label-sm text-label-sm px-2.5 py-1 rounded-full shrink-0 border border-emerald-200"><Check className="w-3 h-3 text-emerald-700 stroke-3" /> Selesai</span>}
                       {rack.status === 'in-progress' && <span className="inline-flex items-center gap-1.5 bg-amber-50 text-amber-900 font-label-sm text-label-sm px-2.5 py-1 rounded-full shrink-0 border border-amber-200"><span className="w-1.5 h-1.5 rounded-full bg-amber-600 animate-pulse"></span> Sedang Dihitung</span>}
                       {rack.status === 'pending' && <span className="inline-flex items-center gap-1 bg-surface-container-high text-on-surface-variant font-label-sm text-label-sm px-2.5 py-1 rounded-full shrink-0"><span className="w-1.5 h-1.5 rounded-full bg-outline"></span> Belum Mulai</span>}
                     </div>
@@ -421,12 +431,12 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
                 >
                   {isSubmitting ? (
                     <>
-                      <span className="material-symbols-outlined text-[18px] animate-spin">progress_activity</span>
+                      <Loader2 className="w-4 h-4 animate-spin text-cyan-400" />
                       <span>Memverifikasi Rak...</span>
                     </>
                   ) : (
                     <>
-                      <span className="material-symbols-outlined text-[18px] text-emerald-400">check_circle</span>
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400" />
                       <span>Konfirmasi Selesai Perhitungan Rak</span>
                     </>
                   )}
