@@ -25,8 +25,21 @@ export default function BarcodeScannerModal({
   const [manualInputMode, setManualInputMode] = useState<boolean>(false);
   const [manualBarcode, setManualBarcode] = useState<string>('');
 
+  // Reset state when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      setManualInputMode(false);
+      setManualBarcode('');
+    }
+  }, [isOpen]);
+
   useEffect(() => {
     if (!isOpen) return;
+
+    if (manualInputMode) {
+      stopScanner();
+      return;
+    }
 
     let isMounted = true;
     setIsInitializing(true);
@@ -121,7 +134,7 @@ export default function BarcodeScannerModal({
       isMounted = false;
       stopScanner();
     };
-  }, [isOpen]);
+  }, [isOpen, manualInputMode]);
 
   const stopScanner = async () => {
     if (scannerRef.current) {
@@ -165,17 +178,19 @@ export default function BarcodeScannerModal({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-3 backdrop-blur-sm animate-in fade-in duration-150">
-      <div className="w-full max-w-md bg-slate-900 border border-slate-700 rounded-3xl overflow-hidden shadow-2xl flex flex-col max-h-[92vh]">
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/85 p-3 sm:p-4 backdrop-blur-sm flex items-center justify-center animate-in fade-in duration-150">
+      <div className="w-full max-w-md bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl flex flex-col max-h-[90vh] my-auto overflow-hidden">
         {/* Modal Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800 bg-slate-900/90 text-white">
+        <div className="shrink-0 flex items-center justify-between px-5 py-4 border-b border-slate-800 bg-slate-900 text-white z-10">
           <div className="flex items-center gap-2.5">
-            <div className="p-2 bg-cyan-500/20 text-cyan-400 rounded-xl">
+            <div className="p-2 bg-cyan-500/20 text-cyan-400 rounded-xl shrink-0">
               <Camera className="w-5 h-5" />
             </div>
-            <div>
-              <h3 className="font-bold text-sm text-slate-100">{title}</h3>
-              <p className="text-[11px] text-slate-400">Arahkan kamera ke barcode kemasan</p>
+            <div className="min-w-0">
+              <h3 className="font-bold text-sm text-slate-100 truncate">{title}</h3>
+              <p className="text-[11px] text-slate-400 truncate">
+                {manualInputMode ? 'Ketik nomor barcode produk' : 'Arahkan kamera ke barcode kemasan'}
+              </p>
             </div>
           </div>
           <button
@@ -183,17 +198,18 @@ export default function BarcodeScannerModal({
             onClick={() => {
               stopScanner().finally(onClose);
             }}
-            className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition-colors"
+            className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition-colors shrink-0 cursor-pointer"
+            title="Tutup scanner"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Scanner Viewfinder / Camera Container */}
-        <div className="relative flex-1 bg-black flex flex-col items-center justify-center min-h-80 max-h-115 overflow-hidden">
+        {/* Modal Body (Scrollable if content overflows viewport) */}
+        <div className="flex-1 overflow-y-auto overscroll-contain bg-slate-950 flex flex-col">
           {!manualInputMode ? (
-            <>
-              <div id={containerId} className="w-full h-full min-h-80" />
+            <div className="relative w-full flex-1 min-h-70 sm:min-h-85 bg-black flex flex-col items-center justify-center overflow-hidden">
+              <div id={containerId} className="w-full h-full min-h-70" />
 
               {/* Viewfinder Overlay Targeting Guide */}
               {!isInitializing && !errorMessage && (
@@ -210,7 +226,7 @@ export default function BarcodeScannerModal({
 
               {/* Loading State */}
               {isInitializing && (
-                <div className="absolute inset-0 bg-slate-900/90 flex flex-col items-center justify-center gap-3 text-slate-300">
+                <div className="absolute inset-0 bg-slate-900/95 flex flex-col items-center justify-center gap-3 text-slate-300">
                   <div className="w-8 h-8 border-3 border-cyan-400 border-t-transparent rounded-full animate-spin" />
                   <p className="text-xs font-semibold">Menyiapkan kamera HP...</p>
                 </div>
@@ -219,24 +235,24 @@ export default function BarcodeScannerModal({
               {/* Error State */}
               {errorMessage && (
                 <div className="absolute inset-0 bg-slate-900 p-6 flex flex-col items-center justify-center text-center gap-3">
-                  <AlertCircle className="w-10 h-10 text-rose-500" />
+                  <AlertCircle className="w-10 h-10 text-rose-500 shrink-0" />
                   <p className="text-xs text-rose-300 font-medium leading-relaxed max-w-xs">
                     {errorMessage}
                   </p>
                   <button
                     type="button"
                     onClick={() => setManualInputMode(true)}
-                    className="mt-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-cyan-400 rounded-xl text-xs font-bold border border-cyan-500/30 inline-flex items-center gap-2"
+                    className="mt-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-cyan-400 rounded-xl text-xs font-bold border border-cyan-500/30 inline-flex items-center gap-2 cursor-pointer"
                   >
                     <Keyboard className="w-4 h-4" />
                     Ketik Barcode Manual Saja
                   </button>
                 </div>
               )}
-            </>
+            </div>
           ) : (
-            <div className="w-full h-full p-6 flex flex-col justify-center items-center bg-slate-950">
-              <form onSubmit={handleManualSubmit} className="w-full space-y-4">
+            <div className="w-full flex-1 p-5 sm:p-6 flex flex-col justify-center items-center bg-slate-950">
+              <form onSubmit={handleManualSubmit} className="w-full space-y-4 max-w-sm mx-auto">
                 <div className="text-center space-y-1">
                   <h4 className="text-sm font-bold text-slate-100">Ketik Angka Barcode Manual</h4>
                   <p className="text-[11px] text-slate-400">Gunakan bila kemasan rusak atau barcode pudar</p>
@@ -248,20 +264,20 @@ export default function BarcodeScannerModal({
                   value={manualBarcode}
                   onChange={(e) => setManualBarcode(e.target.value)}
                   placeholder="Contoh: 8992775211018"
-                  className="w-full h-12 bg-slate-900 border border-slate-700 rounded-xl px-4 text-center text-base font-mono font-bold text-cyan-400 outline-none focus:ring-2 focus:ring-cyan-400"
+                  className="w-full h-12 bg-slate-900 border border-slate-700 rounded-xl px-4 text-center text-base font-mono font-bold text-cyan-400 outline-none focus:ring-2 focus:ring-cyan-400 shadow-inner"
                 />
-                <div className="flex gap-2">
+                <div className="flex gap-2.5 pt-1">
                   <button
                     type="button"
                     onClick={() => setManualInputMode(false)}
-                    className="flex-1 py-2.5 bg-slate-800 text-slate-300 text-xs font-bold rounded-xl hover:bg-slate-700"
+                    className="flex-1 min-h-11 py-2.5 px-3 bg-slate-800 text-slate-300 text-xs font-bold rounded-xl hover:bg-slate-700 cursor-pointer transition-colors"
                   >
                     Kembali ke Kamera
                   </button>
                   <button
                     type="submit"
                     disabled={!manualBarcode.trim()}
-                    className="flex-1 py-2.5 bg-cyan-500 disabled:opacity-50 text-slate-950 text-xs font-extrabold rounded-xl hover:bg-cyan-400"
+                    className="flex-1 min-h-11 py-2.5 px-3 bg-cyan-400 disabled:opacity-50 text-slate-950 text-xs font-extrabold rounded-xl hover:bg-cyan-300 cursor-pointer transition-colors shadow-md"
                   >
                     Gunakan Barcode
                   </button>
@@ -272,20 +288,20 @@ export default function BarcodeScannerModal({
         </div>
 
         {/* Modal Controls / Footer */}
-        <div className="px-5 py-3.5 bg-slate-900 border-t border-slate-800 flex items-center justify-between text-xs">
+        <div className="shrink-0 px-5 py-3.5 bg-slate-900 border-t border-slate-800 flex items-center justify-between text-xs z-10">
           <div className="flex items-center gap-2">
             {hasTorch && !manualInputMode && (
               <button
                 type="button"
                 onClick={toggleTorch}
-                className={`p-2 rounded-xl flex items-center gap-1.5 font-semibold transition-colors ${
+                className={`p-2 rounded-xl flex items-center gap-1.5 font-semibold transition-colors cursor-pointer ${
                   torchEnabled
                     ? 'bg-amber-400/20 text-amber-300 border border-amber-400/40'
                     : 'bg-slate-800 text-slate-300 hover:text-white'
                 }`}
                 title="Lampu senter kamera"
               >
-                {torchEnabled ? <Zap className="w-4 h-4 text-amber-400" /> : <ZapOff className="w-4 h-4" />}
+                {torchEnabled ? <Zap className="w-4 h-4 text-amber-400 shrink-0" /> : <ZapOff className="w-4 h-4 shrink-0" />}
                 <span className="text-[10px]">Flash</span>
               </button>
             )}
@@ -293,10 +309,10 @@ export default function BarcodeScannerModal({
             <button
               type="button"
               onClick={() => setManualInputMode((prev) => !prev)}
-              className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl flex items-center gap-1.5 font-semibold text-[11px]"
+              className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl flex items-center gap-1.5 font-semibold text-[11px] cursor-pointer transition-colors"
             >
-              <Keyboard className="w-4 h-4 text-cyan-400" />
-              <span>{manualInputMode ? 'Scan Kamera' : 'Ketik Manual'}</span>
+              {manualInputMode ? <Camera className="w-4 h-4 text-cyan-400 shrink-0" /> : <Keyboard className="w-4 h-4 text-cyan-400 shrink-0" />}
+              <span>{manualInputMode ? 'Buka Kamera' : 'Ketik Manual'}</span>
             </button>
           </div>
 

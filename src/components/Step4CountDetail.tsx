@@ -1325,22 +1325,26 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             type="button"
             disabled={isLoadingSave || isSessionLocked}
             onClick={handleSaveAndNext}
-            className={`w-full min-h-14 rounded-xl font-black text-lg shadow-[0_0_15px_rgba(34,211,238,0.35)] cursor-pointer transition-all active:scale-[0.99] flex items-center justify-center gap-2 ${isSessionLocked || isLoadingSave ? 'bg-slate-400 opacity-50 cursor-not-allowed text-white shadow-none' : 'bg-cyan-400 hover:bg-cyan-300 text-slate-950'}`}
+            className={`w-full min-h-12 py-3 px-4 rounded-xl font-black text-sm sm:text-base shadow-[0_0_15px_rgba(34,211,238,0.35)] cursor-pointer transition-all active:scale-[0.99] flex items-center justify-center gap-2.5 text-center ${
+              isSessionLocked || isLoadingSave
+                ? 'bg-slate-400 opacity-50 cursor-not-allowed text-white shadow-none'
+                : 'bg-cyan-400 hover:bg-cyan-300 text-slate-950'
+            }`}
           >
             {isLoadingSave ? (
               <>
-                <Loader2 className="w-5 h-5 animate-spin" />
+                <Loader2 className="w-5 h-5 shrink-0 animate-spin" />
                 <span>Menyimpan ke Cloud...</span>
               </>
             ) : isSessionLocked ? (
               <>
-                <Lock className="w-5 h-5" />
+                <Lock className="w-5 h-5 shrink-0" />
                 <span>Sesi Terkunci oleh Admin</span>
               </>
             ) : (
               <>
-                <CheckCircle2 className="w-5 h-5" />
-                <span>Simpan Semua &amp; Lanjut Rak Berikutnya</span>
+                <CheckCircle2 className="w-5 h-5 shrink-0 text-slate-950" />
+                <span className="leading-snug">Simpan Semua &amp; Lanjut Rak Berikutnya</span>
               </>
             )}
           </button>
@@ -1355,7 +1359,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             type="button"
             disabled={isLoadingSave || isSessionLocked}
             onClick={handleSaveAndNext}
-            className={`w-full h-12 rounded-xl font-black text-sm shadow-[0_0_15px_rgba(34,211,238,0.35)] cursor-pointer transition-all active:scale-[0.98] flex items-center justify-center gap-2 ${
+            className={`w-full h-12 px-4 rounded-xl font-black text-sm shadow-[0_0_15px_rgba(34,211,238,0.35)] cursor-pointer transition-all active:scale-[0.98] flex items-center justify-center gap-2 text-center ${
               isSessionLocked || isLoadingSave
                 ? 'bg-slate-400 opacity-50 cursor-not-allowed text-white shadow-none'
                 : 'bg-cyan-400 hover:bg-cyan-300 text-slate-950'
@@ -1363,17 +1367,17 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
           >
             {isLoadingSave ? (
               <>
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <Loader2 className="w-4 h-4 shrink-0 animate-spin" />
                 <span>Menyimpan ke Cloud...</span>
               </>
             ) : isSessionLocked ? (
               <>
-                <Lock className="w-4 h-4" />
+                <Lock className="w-4 h-4 shrink-0" />
                 <span>Sesi Terkunci</span>
               </>
             ) : (
               <>
-                <CheckCircle2 className="w-4 h-4 text-slate-950" />
+                <CheckCircle2 className="w-4 h-4 shrink-0 text-slate-950" />
                 <span>Simpan &amp; Lanjut Rak Berikutnya</span>
               </>
             )}
