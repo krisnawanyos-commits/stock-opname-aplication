@@ -1,13 +1,13 @@
 import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { db } from './firebase';
 import { doc, onSnapshot, collection, query, where, setDoc } from 'firebase/firestore';
-import Step1Login from './components/Step1Login';
-import Step2TeamSetup from './components/Step2TeamSetup';
-import Step3CountsheetList from './components/Step3CountsheetList';
-import Step4CountDetail from './components/Step4CountDetail';
 import type { SessionData, RackItem, UserRole } from './types';
 import { AlertTriangle, LogOut, Loader2 } from 'lucide-react';
 
+const Step1Login = lazy(() => import('./components/Step1Login'));
+const Step2TeamSetup = lazy(() => import('./components/Step2TeamSetup'));
+const Step3CountsheetList = lazy(() => import('./components/Step3CountsheetList'));
+const Step4CountDetail = lazy(() => import('./components/Step4CountDetail'));
 const AdminDashboard = lazy(() => import('./components/AdminDashboard'));
 
 const STORAGE_KEYS = {
@@ -233,38 +233,39 @@ export default function App() {
         </div>
       )}
 
-      {/* STEP 1: LOGIN */}
-      {currentStep === 1 && (
-        <Step1Login
-          onSuccessLogin={(username: string, role: UserRole, name?: string) => {
-            const userObj = { username, role, name: name || username };
-            setCurrentUser(userObj);
+      {/* SUSPENSE CONTAINER FOR CODE-SPLIT LAZY STEPS */}
+      <Suspense
+        fallback={
+          <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center gap-3 text-slate-300">
+            <Loader2 className="w-8 h-8 text-cyan-400 animate-spin" />
+            <p className="text-xs font-mono tracking-wider font-bold uppercase">Memuat Noctus Count...</p>
+          </div>
+        }
+      >
+        {/* STEP 1: LOGIN */}
+        {currentStep === 1 && (
+          <Step1Login
+            onSuccessLogin={(username: string, role: UserRole, name?: string) => {
+              const userObj = { username, role, name: name || username };
+              setCurrentUser(userObj);
 
-            setSessionData(prev => ({
-              ...prev,
-              primaryCounter: username,
-              role: (role === 'owner' || role === 'spv' || username === 'owner') ? 'admin' : 'counter'
-            }));
+              setSessionData(prev => ({
+                ...prev,
+                primaryCounter: username,
+                role: (role === 'owner' || role === 'spv' || username === 'owner') ? 'admin' : 'counter'
+              }));
 
-            if (role === 'owner' || role === 'spv' || username === 'owner') {
-              setCurrentStep('admin');
-            } else {
-              setCurrentStep(2);
-            }
-          }}
-        />
-      )}
+              if (role === 'owner' || role === 'spv' || username === 'owner') {
+                setCurrentStep('admin');
+              } else {
+                setCurrentStep(2);
+              }
+            }}
+          />
+        )}
 
-      {/* DASHBOARD ADMIN / SUPERVISOR / OWNER */}
-      {currentStep === 'admin' && (
-        <Suspense
-          fallback={
-            <div className="min-h-screen bg-[#0F172A] flex flex-col items-center justify-center gap-3 text-slate-300">
-              <Loader2 className="w-8 h-8 text-cyan-400 animate-spin" />
-              <p className="text-xs font-mono tracking-wider font-bold uppercase">Memuat Enterprise Dashboard...</p>
-            </div>
-          }
-        >
+        {/* DASHBOARD ADMIN / SUPERVISOR / OWNER */}
+        {currentStep === 'admin' && (
           <AdminDashboard
             onBackToApp={handleRequestLogout}
             onSwitchToCounterView={() => {
@@ -277,90 +278,90 @@ export default function App() {
             currentUserRole={currentUser?.role || 'owner'}
             currentUserEmail={currentUser?.username === 'owner' ? 'yos.krisnawan@anymindgroup.com' : ''}
           />
-        </Suspense>
-      )}
+        )}
 
-      {/* STEP 2: SETUP TIM PENDAMPING WAREHOUSE */}
-      {currentStep === 2 && (
-        <Step2TeamSetup
-          sessionData={sessionData}
-          onLogout={handleRequestLogout}
-          onSaveTeam={async (updatedData) => {
-            setSessionData(updatedData);
-            try {
-              if (updatedData.primaryCounter) {
-                const cleanUser = updatedData.primaryCounter.toLowerCase().trim();
-                const partnerVal = updatedData.partners?.[0] || '';
-                await setDoc(doc(db, "counter_partners", cleanUser), {
-                  counter: cleanUser,
-                  partner: partnerVal,
-                  updatedAt: new Date().toISOString()
-                }, { merge: true });
+        {/* STEP 2: SETUP TIM PENDAMPING WAREHOUSE */}
+        {currentStep === 2 && (
+          <Step2TeamSetup
+            sessionData={sessionData}
+            onLogout={handleRequestLogout}
+            onSaveTeam={async (updatedData) => {
+              setSessionData(updatedData);
+              try {
+                if (updatedData.primaryCounter) {
+                  const cleanUser = updatedData.primaryCounter.toLowerCase().trim();
+                  const partnerVal = updatedData.partners?.[0] || '';
+                  await setDoc(doc(db, "counter_partners", cleanUser), {
+                    counter: cleanUser,
+                    partner: partnerVal,
+                    updatedAt: new Date().toISOString()
+                  }, { merge: true });
+                }
+              } catch (err) {
+                console.error("Error saving counter partner to db:", err);
               }
-            } catch (err) {
-              console.error("Error saving counter partner to db:", err);
-            }
-            setCurrentStep(3);
-          }}
-        />
-      )}
+              setCurrentStep(3);
+            }}
+          />
+        )}
 
-      {/* STEP 3: LIST COUNTSHEET RAK/BIN */}
-      {(currentStep === 3 || currentStep === 'admin_demo') && (
-        <div className="relative">
-          {isDemoMode && (
-            <div className="fixed top-0 left-0 right-0 z-50 bg-amber-500 text-slate-950 px-4 py-1.5 text-xs font-black flex justify-between items-center shadow-md">
-              <span>📱 DEMO MODE: Tampilan HP Counter ({sessionData.primaryCounter})</span>
-              <button
-                onClick={() => setCurrentStep('admin')}
-                className="bg-slate-900 text-white px-3 py-1 rounded-lg text-[10px] font-bold hover:bg-slate-800 transition-colors cursor-pointer"
-              >
-                🛡️ Kembali ke Admin
-              </button>
+        {/* STEP 3: LIST COUNTSHEET RAK/BIN */}
+        {(currentStep === 3 || currentStep === 'admin_demo') && (
+          <div className="relative">
+            {isDemoMode && (
+              <div className="fixed top-0 left-0 right-0 z-50 bg-amber-500 text-slate-950 px-4 py-1.5 text-xs font-black flex justify-between items-center shadow-md">
+                <span>📱 DEMO MODE: Tampilan HP Counter ({sessionData.primaryCounter})</span>
+                <button
+                  onClick={() => setCurrentStep('admin')}
+                  className="bg-slate-900 text-white px-3 py-1 rounded-lg text-[10px] font-bold hover:bg-slate-800 transition-colors cursor-pointer"
+                >
+                  🛡️ Kembali ke Admin
+                </button>
+              </div>
+            )}
+            <div className={isDemoMode ? "pt-8" : ""}>
+              <Step3CountsheetList
+                sessionData={sessionData}
+                onLogout={handleRequestLogout}
+                onEditTeam={() => setCurrentStep(2)}
+                onSelectRack={(rack) => {
+                  setSelectedRack(rack);
+                  setCurrentStep(4);
+                }}
+              />
             </div>
-          )}
-          <div className={isDemoMode ? "pt-8" : ""}>
-            <Step3CountsheetList
-              sessionData={sessionData}
-              onLogout={handleRequestLogout}
-              onEditTeam={() => setCurrentStep(2)}
-              onSelectRack={(rack) => {
-                setSelectedRack(rack);
-                setCurrentStep(4);
-              }}
-            />
           </div>
-        </div>
-      )}
+        )}
 
-      {/* STEP 4: DETAIL PENGHITUNGAN RAK & BARANG */}
-      {currentStep === 4 && selectedRack && (
-        <div className="relative">
-          {isDemoMode && (
-            <div className="fixed top-0 left-0 right-0 z-50 bg-amber-500 text-slate-950 px-4 py-1.5 text-xs font-black flex justify-between items-center shadow-md">
-              <span>📱 DEMO MODE: Tampilan HP Counter ({sessionData.primaryCounter})</span>
-              <button
-                onClick={() => setCurrentStep('admin')}
-                className="bg-slate-900 text-white px-3 py-1 rounded-lg text-[10px] font-bold hover:bg-slate-800 transition-colors cursor-pointer"
-              >
-                🛡️ Kembali ke Admin
-              </button>
+        {/* STEP 4: DETAIL PENGHITUNGAN RAK & BARANG */}
+        {currentStep === 4 && selectedRack && (
+          <div className="relative">
+            {isDemoMode && (
+              <div className="fixed top-0 left-0 right-0 z-50 bg-amber-500 text-slate-950 px-4 py-1.5 text-xs font-black flex justify-between items-center shadow-md">
+                <span>📱 DEMO MODE: Tampilan HP Counter ({sessionData.primaryCounter})</span>
+                <button
+                  onClick={() => setCurrentStep('admin')}
+                  className="bg-slate-900 text-white px-3 py-1 rounded-lg text-[10px] font-bold hover:bg-slate-800 transition-colors cursor-pointer"
+                >
+                  🛡️ Kembali ke Admin
+                </button>
+              </div>
+            )}
+            <div className={isDemoMode ? "pt-8" : ""}>
+              <Step4CountDetail
+                sessionData={sessionData}
+                rack={selectedRack}
+                onLogout={handleRequestLogout}
+                onBackToList={() => setCurrentStep(isDemoMode ? 'admin_demo' : 3)}
+                onSelectNextRack={(nextRack) => {
+                  setSelectedRack(nextRack);
+                  setCurrentStep(4);
+                }}
+              />
             </div>
-          )}
-          <div className={isDemoMode ? "pt-8" : ""}>
-            <Step4CountDetail
-              sessionData={sessionData}
-              rack={selectedRack}
-              onLogout={handleRequestLogout}
-              onBackToList={() => setCurrentStep(isDemoMode ? 'admin_demo' : 3)}
-              onSelectNextRack={(nextRack) => {
-                setSelectedRack(nextRack);
-                setCurrentStep(4);
-              }}
-            />
           </div>
-        </div>
-      )}
+        )}
+      </Suspense>
     </div>
   );
 }

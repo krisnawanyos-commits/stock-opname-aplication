@@ -24,6 +24,11 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [isSessionLocked, setIsSessionLocked] = useState<boolean>(false);
+  const [visibleCount, setVisibleCount] = useState<number>(30);
+
+  useEffect(() => {
+    setVisibleCount(30);
+  }, [searchQuery, activeFilter]);
 
   // STATE TAMBAH RAK/BIN BARU
   const [showAddRackModal, setShowAddRackModal] = useState<boolean>(false);
@@ -400,7 +405,7 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
               </div>
 
               <div className="flex flex-col gap-space-sm">
-                {filteredRacks.map((rack) => (
+                {filteredRacks.slice(0, visibleCount).map((rack) => (
                   <div key={rack.id} onClick={() => onSelectRack(rack)} className="bg-surface-container-lowest rounded-xl p-space-md shadow-sm border border-outline-variant/30 flex flex-col gap-3 cursor-pointer hover:border-cyan-400/60 transition-all relative overflow-hidden">
                     {rack.status === 'in-progress' && <div className="absolute left-0 top-0 bottom-0 w-1 bg-amber-500"></div>}
                     <div className={`flex items-start justify-between gap-space-xs ${rack.status === 'in-progress' ? 'pl-1' : ''}`}>
@@ -417,6 +422,15 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
                     </div>
                   </div>
                 ))}
+                {filteredRacks.length > visibleCount && (
+                  <button
+                    type="button"
+                    onClick={() => setVisibleCount((prev) => prev + 30)}
+                    className="w-full py-3 bg-surface-container-lowest hover:bg-slate-100 text-cyan-700 border border-cyan-300/60 rounded-xl font-bold text-xs transition-colors cursor-pointer shadow-xs active:scale-[0.99]"
+                  >
+                    Tampilkan 30 Rak Berikutnya ({filteredRacks.length - visibleCount} Rak Tersisa)
+                  </button>
+                )}
                 {filteredRacks.length === 0 && (
                   <div className="p-8 text-center text-slate-400 font-medium">Belum ada tugas rak untuk akun kamu ({sessionData.primaryCounter}).</div>
                 )}

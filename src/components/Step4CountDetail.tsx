@@ -75,6 +75,9 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
   });
   const [isDirty, setIsDirty] = useState<boolean>(false);
 
+  const draftKey = `so_draft_${sessionData.sessionId || 'default'}_${rack.rackNumber || rack.id}`;
+  const [hasDraftRestored, setHasDraftRestored] = useState<boolean>(false);
+
   const isDirtyRef = useRef<boolean>(isDirty);
   const modalOpenRef = useRef<boolean>(modal.isOpen);
   const isHandledBackRef = useRef<boolean>(false);
@@ -143,6 +146,12 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
           onConfirm: () => {
             setIsDirty(false);
             isDirtyRef.current = false;
+            try {
+              localStorage.removeItem(draftKey);
+            } catch (e) {
+              console.debug('Failed to clear draft', e);
+            }
+            setHasDraftRestored(false);
             triggerSafeBack();
           },
           onCancel: () => {
@@ -172,6 +181,39 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [isDirty]);
+
+  // AUTO-SAVE DRAFT KE LOCALSTORAGE HP SAAT COUNTER MENGETIK HITUNGAN
+  useEffect(() => {
+    if (!isDirty || skuList.length === 0) return;
+
+    const draftData: Record<string, { qtyGood: string; qtyBad: string; expDateActual: string; isBadStock: boolean; badRemarks: string; selectedCategories: string[] }> = {};
+    let hasCount = false;
+
+    skuList.forEach((item) => {
+      if (item.qtyGood !== '' || item.qtyBad !== '' || item.expDateActual !== '' || item.badRemarks !== '') {
+        hasCount = true;
+        draftData[item.sku] = {
+          qtyGood: item.qtyGood,
+          qtyBad: item.qtyBad,
+          expDateActual: item.expDateActual,
+          isBadStock: item.isBadStock,
+          badRemarks: item.badRemarks,
+          selectedCategories: item.selectedCategories || []
+        };
+      }
+    });
+
+    if (hasCount) {
+      try {
+        localStorage.setItem(draftKey, JSON.stringify({
+          timestamp: Date.now(),
+          items: draftData
+        }));
+      } catch (err) {
+        console.warn('Gagal menyimpan draft lokal ke localStorage:', err);
+      }
+    }
+  }, [skuList, isDirty, draftKey]);
 
   // 1. LISTEN GEMBOK LOCK SESI GLOBAL & COUNTER
   useEffect(() => {
@@ -216,6 +258,24 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
 
     const unsubscribe = onSnapshot(qTasks, (snapshot) => {
       setSkuList((prevSkuList) => {
+        // Cek apakah ada draft lokal yang tersimpan saat pertama kali halaman dimuat / ter-refresh
+        let draftMap: Record<string, any> = {};
+        if (prevSkuList.length === 0) {
+          try {
+            const rawDraft = localStorage.getItem(draftKey);
+            if (rawDraft) {
+              const parsed = JSON.parse(rawDraft);
+              if (parsed?.items && Object.keys(parsed.items).length > 0) {
+                draftMap = parsed.items;
+                setHasDraftRestored(true);
+                setIsDirty(true);
+              }
+            }
+          } catch (err) {
+            console.warn('Gagal membaca draft lokal:', err);
+          }
+        }
+
         const localStateMap: Record<string, { qtyGood: string; qtyBad: string; expDateActual: string; isBadStock: boolean; badRemarks: string; selectedCategories: string[] }> = {};
         prevSkuList.forEach(item => {
           localStateMap[item.sku] = {
@@ -256,7 +316,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
           const initialCats = existingRemarks.replace(/^\[BAD STOCK\]\s*/, '').split(', ').filter(Boolean);
 
           if (!groupedMap[skuKey]) {
-            const existingLocal = localStateMap[skuKey];
+            const existingLocal = localStateMap[skuKey] || draftMap[skuKey];
 
             groupedMap[skuKey] = {
               sku: skuKey,
@@ -543,6 +603,12 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
         onConfirm: () => {
           setIsDirty(false);
           isDirtyRef.current = false;
+          try {
+            localStorage.removeItem(draftKey);
+          } catch (e) {
+            console.debug('Failed to clear draft', e);
+          }
+          setHasDraftRestored(false);
           triggerSafeBack();
         }
       });
@@ -563,6 +629,12 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
         confirmText: 'Keluar Akun',
         onConfirm: () => {
           setIsDirty(false);
+          try {
+            localStorage.removeItem(draftKey);
+          } catch (e) {
+            console.debug('Failed to clear draft', e);
+          }
+          setHasDraftRestored(false);
           onLogout();
         }
       });
@@ -795,6 +867,12 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
 
       await batch.commit();
       setIsDirty(false);
+      try {
+        localStorage.removeItem(draftKey);
+      } catch (err) {
+        console.debug('Failed to clear draft key', err);
+      }
+      setHasDraftRestored(false);
 
       const remainingTasksQuery = query(
         collection(db, "master_tasks"),
@@ -913,6 +991,23 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
               <span className="text-xs font-bold text-slate-500 bg-slate-200 px-2.5 py-1 rounded-full">{skuList.length} SKU</span>
             </div>
           </div>
+
+          {/* BANNER NOTIFIKASI DRAFT RESTORED */}
+          {hasDraftRestored && (
+            <div className="bg-amber-50 border border-amber-300 rounded-xl p-3 flex items-center justify-between text-xs text-amber-900 shadow-xs animate-in fade-in">
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse shrink-0" />
+                <span className="font-bold">Draft hitungan dipulihkan dari memori lokal HP.</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setHasDraftRestored(false)}
+                className="text-amber-700 font-extrabold hover:text-amber-900 ml-2 text-[11px] underline cursor-pointer shrink-0"
+              >
+                Tutup
+              </button>
+            </div>
+          )}
 
           {/* TOMBOL SCAN BARCODE KAMERA HP (VIEWFINDER LIVE) */}
           <button
