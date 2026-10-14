@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import type { SessionData } from '../types';
 import { Users, LogOut, Info, ArrowRight, ShieldCheck, UserCheck } from 'lucide-react';
 import NetworkStatusBadge from './NetworkStatusBadge';
+import { useLanguage, LanguageToggle } from '../utils/i18n';
 
 interface Step2TeamSetupProps {
   sessionData: SessionData;
@@ -10,6 +11,7 @@ interface Step2TeamSetupProps {
 }
 
 export default function Step2TeamSetup({ sessionData, onSaveTeam, onLogout }: Step2TeamSetupProps) {
+  const { t } = useLanguage();
   const [partnerName, setPartnerName] = useState<string>(sessionData.partners?.[0] || 'Budi Prasetyo');
 
   // GUARD: REDIRECT SPV OTOMATIS KE DASHBOARD ADMIN
@@ -46,17 +48,18 @@ export default function Step2TeamSetup({ sessionData, onSaveTeam, onLogout }: St
               <Users className="w-5 h-5 text-cyan-600" />
             </div>
             <div>
-              <h2 className="text-base font-black text-slate-900">Setup Tim Opname</h2>
+              <h2 className="text-base font-black text-slate-900">{t('teamSetupTitle')}</h2>
               <p className="text-xs text-slate-500 font-medium truncate max-w-44">{sessionData.sessionName}</p>
             </div>
           </div>
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 shrink-0">
+            <LanguageToggle />
             <NetworkStatusBadge />
             <button
               type="button"
               onClick={onLogout}
-              className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors"
-              title="Keluar"
+              className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer"
+              title={t('logout')}
             >
               <LogOut className="w-4 h-4" />
             </button>
@@ -66,10 +69,10 @@ export default function Step2TeamSetup({ sessionData, onSaveTeam, onLogout }: St
         <div className="p-4 bg-amber-50/80 border border-amber-200/90 rounded-2xl space-y-1.5">
           <div className="flex items-center space-x-1.5 text-amber-900 font-bold text-xs">
             <Info className="w-4 h-4 text-amber-700 shrink-0" />
-            <span>Keterangan Tim Pendamping</span>
+            <span>{t('teamSetupSubtitle')}</span>
           </div>
           <p className="text-[11px] text-amber-800 font-medium leading-relaxed">
-            Sebelum memulai perhitungan rak, mohon lengkapi nama petugas pendamping dari tim warehouse (WH).
+            {t('teamSetupDesc')}
           </p>
         </div>
 
@@ -77,7 +80,7 @@ export default function Step2TeamSetup({ sessionData, onSaveTeam, onLogout }: St
           <div className="space-y-1.5">
             <label className="text-[11px] font-extrabold text-slate-600 uppercase tracking-wider flex items-center gap-1.5">
               <ShieldCheck className="w-3.5 h-3.5 text-cyan-600" />
-              Counter Utama (SO)
+              {t('primaryCounterLabel')}
             </label>
             <input
               type="text"
@@ -90,13 +93,13 @@ export default function Step2TeamSetup({ sessionData, onSaveTeam, onLogout }: St
           <div className="space-y-1.5">
             <label className="text-[11px] font-extrabold text-slate-600 uppercase tracking-wider flex items-center gap-1.5">
               <UserCheck className="w-3.5 h-3.5 text-cyan-600" />
-              Tim Pendamping (Warehouse / WH)
+              {t('partnerLabel')}
             </label>
             <input
               type="text"
               value={partnerName}
               onChange={(e) => setPartnerName(e.target.value)}
-              placeholder="Masukkan nama petugas WH..."
+              placeholder={t('partnerPlaceholder')}
               className="w-full h-12 px-4 bg-white border border-slate-300 rounded-xl text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-cyan-400 transition-all"
               required
             />
@@ -106,7 +109,7 @@ export default function Step2TeamSetup({ sessionData, onSaveTeam, onLogout }: St
             type="submit"
             className="w-full h-12 bg-cyan-400 hover:bg-cyan-300 active:scale-[0.98] text-slate-950 rounded-xl text-sm font-extrabold shadow-lg shadow-cyan-400/25 transition-all cursor-pointer flex items-center justify-center space-x-2 mt-2"
           >
-            <span>Lanjut ke Countsheet (Step 3)</span>
+            <span>{t('startOpnameBtn')}</span>
             <ArrowRight className="w-4 h-4" />
           </button>
         </form>

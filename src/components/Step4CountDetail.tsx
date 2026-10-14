@@ -5,6 +5,7 @@ import type { SessionData, RackItem, CustomModalState, UnmappedItem } from '../t
 import CustomModal from './CustomModal';
 import BarcodeScannerModal from './BarcodeScannerModal';
 import NetworkStatusBadge from './NetworkStatusBadge';
+import { useLanguage, LanguageToggle } from '../utils/i18n';
 import { compressImage } from '../utils/imageCompressor';
 import { playScanSuccessBeep, playErrorBuzzer, triggerHapticFeedback } from '../utils/soundAndHaptics';
 import { 
@@ -56,6 +57,7 @@ const formatDateDisplay = (dateStr: string) => {
 };
 
 export default function Step4CountDetail({ sessionData, rack, onBackToList, onLogout, onSelectNextRack }: Step4CountDetailProps) {
+  const { t, lang, translateDamageCat } = useLanguage();
   const cameraInputRef = useRef<HTMLInputElement>(null);
 
   const [skuList, setSkuList] = useState<GroupedSKUItem[]>([]);
@@ -320,8 +322,8 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
 
             groupedMap[skuKey] = {
               sku: skuKey,
-              upc: data.UPC1 || data.upc || 'N/A',
-              upc2: data.UPC2 || '',
+              upc: (data.UPC1 || data.upc || '').toString().trim(),
+              upc2: (data.UPC2 || data.upc2 || '').toString().trim(),
               name: data.Description || data.name || skuKey,
               category: `${data.Zone || 'RACKING'} • ${data.SKUBrand || 'General'}`,
               uom: (data.satuanHitung as 'PCS' | 'CARTON') || 'PCS',
@@ -344,6 +346,13 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             groupedMap[skuKey].totalSystemQty += sysQty;
             groupedMap[skuKey].docIds.push(docSnap.id);
             groupedMap[skuKey].batchCount += 1;
+
+            if (!groupedMap[skuKey].upc2 && (data.UPC2 || data.upc2)) {
+              groupedMap[skuKey].upc2 = (data.UPC2 || data.upc2).toString().trim();
+            }
+            if ((!groupedMap[skuKey].upc || groupedMap[skuKey].upc === 'N/A') && (data.UPC1 || data.upc)) {
+              groupedMap[skuKey].upc = (data.UPC1 || data.upc).toString().trim();
+            }
 
             if (edSys && !groupedMap[skuKey].allSystemEds.includes(edSys)) {
               groupedMap[skuKey].allSystemEds.push(edSys);
@@ -941,23 +950,25 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       {/* HEADER HP COUNTER (RELATIVE - TIDAK IKUT TURUN SAAT SCROLLING) */}
       <header className="relative w-full z-10 bg-white border-b border-slate-200/90 pt-safe shadow-xs shrink-0">
         <div className="py-3 px-margin flex flex-col justify-center gap-space-xs max-w-md mx-auto">
-          <div className="flex items-center justify-between">
-            <button type="button" onClick={handleSafeBackToList} className="min-h-11 min-w-11 -ml-2 px-2 flex items-center gap-1 text-slate-800 hover:text-cyan-600 transition-colors cursor-pointer font-bold">
-              <ChevronLeft className="w-5 h-5" />
-              <span className="font-label-md uppercase tracking-wider font-bold text-xs">Countsheet List</span>
+          <div className="flex items-center justify-between gap-1.5">
+            <button type="button" onClick={handleSafeBackToList} className="min-h-10 -ml-1 px-1.5 flex items-center gap-0.5 text-slate-800 hover:text-cyan-600 transition-colors cursor-pointer font-bold shrink-0">
+              <ChevronLeft className="w-5 h-5 text-slate-700" />
+              <span className="font-label-md uppercase tracking-wider font-bold text-xs">{t('backToCountsheet')}</span>
             </button>
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 shrink-0">
+              <LanguageToggle />
               <NetworkStatusBadge />
-              <span className="px-2.5 py-1 rounded-full bg-cyan-50 text-cyan-900 font-mono text-[11px] uppercase font-bold border border-cyan-300">
-                Round {currentDisplayRound}
+              <span className="whitespace-nowrap shrink-0 px-2.5 py-1 rounded-lg bg-cyan-50 text-cyan-950 font-sans text-xs font-bold border border-cyan-300 shadow-2xs flex items-center gap-1">
+                <span className="text-[10px] text-cyan-700 font-semibold uppercase">{t('round')}</span>
+                <span className="font-mono font-black text-xs text-cyan-900">{currentDisplayRound}</span>
               </span>
               <button
                 type="button"
                 onClick={handleSafeLogout}
-                className="px-2.5 py-1 bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                className="px-2.5 py-1 bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer shrink-0"
               >
                 <LogOut className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Keluar</span>
+                <span className="hidden sm:inline">{t('logout')}</span>
               </button>
             </div>
           </div>
@@ -969,7 +980,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
           <div className="flex items-center justify-between gap-space-sm pt-0.5">
             <div className="flex items-center gap-1.5 text-slate-600 font-label-sm text-xs truncate">
               <Users className="w-3.5 h-3.5 text-cyan-600 shrink-0" />
-              <span className="truncate">Counter Active: <b className="text-slate-900 font-mono">{sessionData.primaryCounter}</b></span>
+              <span className="truncate">{t('activeCounterText')}: <b className="text-slate-900 font-mono">{sessionData.primaryCounter}</b></span>
             </div>
           </div>
         </div>
@@ -986,7 +997,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             </h2>
             <div className="flex items-center gap-2">
               <span className={`text-[10px] font-bold px-2.5 py-1 rounded-md border ${isSessionLocked ? 'bg-red-50 text-red-700 border-red-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>
-                {isSessionLocked ? '🔒 Sesi Terkunci' : '🟢 Sesi Terbuka'}
+                {isSessionLocked ? `🔒 ${t('sessionLockedBadge')}` : `🟢 ${t('sessionOpenBadge')}`}
               </span>
               <span className="text-xs font-bold text-slate-500 bg-slate-200 px-2.5 py-1 rounded-full">{skuList.length} SKU</span>
             </div>
@@ -997,14 +1008,14 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             <div className="bg-amber-50 border border-amber-300 rounded-xl p-3 flex items-center justify-between text-xs text-amber-900 shadow-xs animate-in fade-in">
               <div className="flex items-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse shrink-0" />
-                <span className="font-bold">Draft hitungan dipulihkan dari memori lokal HP.</span>
+                <span className="font-bold">{t('draftRestoredMsg')}</span>
               </div>
               <button
                 type="button"
                 onClick={() => setHasDraftRestored(false)}
                 className="text-amber-700 font-extrabold hover:text-amber-900 ml-2 text-[11px] underline cursor-pointer shrink-0"
               >
-                Tutup
+                {t('dismiss')}
               </button>
             </div>
           )}
@@ -1021,7 +1032,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             }`}
           >
             <Scan className="w-4 h-4" />
-            <span>Scan Barcode Kamera (Cari / Tambah SKU)</span>
+            <span>{t('scanBarcodeBtnTop')}</span>
           </button>
 
           {/* RENDER KARTU SKU MASTER WMS & TEMUAN (ACCORDION COMPACT MODE) */}
@@ -1078,7 +1089,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                       )}
                     </div>
 
-                    <div className="min-w-0 flex-1 space-y-0.5">
+                    <div className="min-w-0 flex-1 space-y-1">
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <span className={`text-xs font-mono font-bold uppercase px-2 py-0.5 rounded-md tracking-wide ${
                           currentSku.isUnmappedFound
@@ -1094,9 +1105,25 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                       <h3 className="font-headline-sm text-slate-900 font-bold text-xs sm:text-sm leading-snug line-clamp-2">
                         {currentSku.name}
                       </h3>
-                      <p className="text-[11px] text-slate-500 truncate">
-                        {currentSku.category} {currentSku.upc ? `• UPC: ${currentSku.upc}` : ''}
+                      <p className="text-[11px] text-slate-500 font-medium truncate">
+                        {currentSku.category}
                       </p>
+
+                      {/* BADGE UPC 1 & UPC 2 JELAS (TIDAK TERPOTONG) */}
+                      <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                        {currentSku.upc && currentSku.upc !== 'N/A' && currentSku.upc !== '-' && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-100 text-slate-800 font-mono text-[10px] sm:text-[11px] font-bold border border-slate-200 shadow-2xs">
+                            <span className="text-[9px] text-slate-500 font-semibold uppercase">UPC:</span>
+                            <span className="select-all tracking-wide">{currentSku.upc}</span>
+                          </span>
+                        )}
+                        {currentSku.upc2 && currentSku.upc2 !== '-' && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-purple-50 text-purple-900 font-mono text-[10px] sm:text-[11px] font-bold border border-purple-200 shadow-2xs">
+                            <span className="text-[9px] text-purple-600 font-semibold uppercase">UPC 2 (Kardus):</span>
+                            <span className="select-all tracking-wide">{currentSku.upc2}</span>
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
 
@@ -1109,13 +1136,13 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                         </span>
                         {numBad > 0 && (
                           <span className="block text-[9px] font-bold text-amber-700 mt-0.5">
-                            ⚠️ {numBad} Rusak
+                            ⚠️ {numBad} {t('damagedSummary')}
                           </span>
                         )}
                       </div>
                     ) : (
                       <span className="px-2 py-1 bg-slate-100 text-slate-500 text-[10px] font-bold rounded-lg border border-slate-200">
-                        Belum Dihitung
+                        {t('notCountedYet')}
                       </span>
                     )}
 
@@ -1126,12 +1153,37 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                 {/* EXPANDED CONTENT: FORM HITUNG HANYA MUNCUL SAAT DI-KLIK */}
                 {isExpanded && (
                   <div className="px-3.5 pb-3.5 pt-1 space-y-3.5 border-t border-slate-100 animate-in fade-in duration-150">
+                    {/* DETAIL KODE BARCODE & UPC */}
+                    <div className="bg-slate-50/90 border border-slate-200 p-2.5 rounded-xl flex flex-wrap items-center gap-2 text-xs">
+                      <div className="flex-1 min-w-36 bg-white p-2 rounded-lg border border-slate-200 shadow-2xs">
+                        <div className="text-[9px] text-slate-500 font-extrabold uppercase tracking-wider mb-0.5 flex items-center justify-between">
+                          <span>{t('upc1Label')}</span>
+                          <span className="text-[8px] bg-slate-100 px-1 py-0.2 rounded text-slate-500 font-medium">{t('barcodeScanHelper')}</span>
+                        </div>
+                        <div className="font-mono text-xs font-black text-slate-900 select-all break-all">
+                          {currentSku.upc && currentSku.upc !== 'N/A' && currentSku.upc !== '-' ? currentSku.upc : '-'}
+                        </div>
+                      </div>
+
+                      {currentSku.upc2 && currentSku.upc2 !== '-' && (
+                        <div className="flex-1 min-w-36 bg-purple-50/50 p-2 rounded-lg border border-purple-200 shadow-2xs">
+                          <div className="text-[9px] text-purple-700 font-extrabold uppercase tracking-wider mb-0.5 flex items-center justify-between">
+                            <span>{t('upc2Label')}</span>
+                            <span className="text-[8px] bg-purple-100 px-1 py-0.2 rounded text-purple-700 font-medium">{t('barcodeScanHelper')}</span>
+                          </div>
+                          <div className="font-mono text-xs font-black text-purple-950 select-all break-all">
+                            {currentSku.upc2}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
                     {/* EXPIRED DATE FEFO DENGAN FORMAT DD/MM/YYYY */}
                     <div className="bg-cyan-50/60 border border-cyan-200 p-space-sm rounded-xl space-y-2">
                       <div className="flex justify-between items-center">
                         <span className="font-label-sm text-cyan-950 font-bold flex items-center gap-1.5">
                           <Calendar className="w-3.5 h-3.5 text-cyan-700" />
-                          <span>Expired Date System (FEFO)</span>
+                          <span>{t('expDateSystemLabel')}</span>
                         </span>
                         <button
                           type="button"
@@ -1139,16 +1191,16 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                           onClick={() => handleSetSameExpAsSystem(idx)}
                           className={`px-2.5 py-1 text-white rounded-lg text-[10px] font-bold cursor-pointer ${isSessionLocked ? 'bg-slate-400 opacity-50 cursor-not-allowed' : 'bg-emerald-600 active:scale-95'}`}
                         >
-                          Sama dgn System
+                          {t('sameAsSystemBtn')}
                         </button>
                       </div>
                       <div className="grid grid-cols-2 gap-2 text-xs">
                         <div>
-                          <label className="text-[10px] text-slate-500 font-bold block uppercase mb-0.5">ED System Terdekat</label>
+                          <label className="text-[10px] text-slate-500 font-bold block uppercase mb-0.5">{t('nearestSystemEd')}</label>
                           <input type="text" readOnly value={formatDateDisplay(currentSku.expDateSystem)} className="w-full p-2 bg-white/80 border border-slate-200 rounded-lg text-slate-600 font-mono text-xs font-bold outline-none" />
                         </div>
                         <div>
-                          <label className="text-[10px] text-cyan-800 font-bold block uppercase mb-0.5">ED Actual (Fisik)</label>
+                          <label className="text-[10px] text-cyan-800 font-bold block uppercase mb-0.5">{t('actualEdLabel')}</label>
                           <input
                             type="date"
                             disabled={isSessionLocked}
@@ -1179,7 +1231,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                     {/* INPUT KONDISI BAIK (QTY GOOD) */}
                     <div className="bg-slate-50 border border-slate-200 p-space-md rounded-xl space-y-space-sm">
                       <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-cyan-400"></span><span className="font-headline-sm text-slate-900 font-bold text-xs sm:text-sm">Kondisi Baik (Qty Good)</span></div>
+                        <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-cyan-400"></span><span className="font-headline-sm text-slate-900 font-bold text-xs sm:text-sm">{t('goodConditionLabel')}</span></div>
                         <span className="px-2 py-0.5 rounded-md bg-cyan-100 text-cyan-950 border border-cyan-300 font-black text-xs uppercase">{currentSku.uom}</span>
                       </div>
                       <div className="flex items-center gap-space-sm">
@@ -1202,14 +1254,14 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                     {/* BAD STOCK DETECTED DENGAN TOMBOL CHIP KATEGORI */}
                     <div className="bg-amber-50/70 border border-amber-200 p-space-md rounded-xl space-y-space-sm">
                       <div className="flex items-center justify-between">
-                        <span className="font-body-lg text-amber-900 font-bold">Bad Stock Detected?</span>
+                        <span className="font-body-lg text-amber-900 font-bold">{t('badStockQuestion')}</span>
                         <button type="button" disabled={isSessionLocked} onClick={() => toggleBadStock(idx)} className={`min-h-11 min-w-11 px-3 py-1 rounded-full text-xs font-bold cursor-pointer ${isSessionLocked ? 'opacity-50 cursor-not-allowed' : ''} ${currentSku.isBadStock ? 'bg-amber-500 text-slate-950' : 'bg-slate-200 text-slate-600'}`}>{currentSku.isBadStock ? 'ON' : 'OFF'}</button>
                       </div>
                       {currentSku.isBadStock && (
                         <div className="pt-2 space-y-3 border-t border-amber-200">
                           <div>
                             <label className="text-xs font-bold text-amber-900 flex items-center justify-between mb-1">
-                              <span>Jumlah Rusak (Qty Bad):</span>
+                              <span>{t('damagedQtyLabel')}</span>
                               <span className="px-2 py-0.5 rounded-md bg-amber-200/80 text-amber-950 font-black text-[11px] uppercase">{currentSku.uom}</span>
                             </label>
                             <input
@@ -1224,7 +1276,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                           </div>
 
                           <div>
-                            <label className="text-xs font-bold text-amber-900 block mb-1.5">Pilih Kategori Kerusakan (Bisa lebih dari 1):</label>
+                            <label className="text-xs font-bold text-amber-900 block mb-1.5">{t('selectDamageCatLabel')}</label>
                             <div className="flex flex-wrap gap-1.5">
                               {availableCategories.map((cat, cIdx) => {
                                 const isSelected = (currentSku.selectedCategories || []).includes(cat);
@@ -1236,7 +1288,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                                     onClick={() => toggleCategoryChip(idx, cat)}
                                     className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${isSelected ? 'bg-amber-500 text-slate-950 border-amber-600 shadow-xs' : 'bg-white text-slate-700 border-amber-200 hover:bg-amber-100/50'}`}
                                   >
-                                    {isSelected ? '✓ ' : ''}{cat}
+                                    {isSelected ? '✓ ' : ''}{translateDamageCat(cat)}
                                   </button>
                                 );
                               })}
@@ -1253,7 +1305,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                         onClick={() => setExpandedSku(null)}
                         className="text-xs font-bold text-cyan-700 hover:text-cyan-800 flex items-center gap-1 cursor-pointer py-1.5 px-3 rounded-xl bg-cyan-50 hover:bg-cyan-100 transition-colors"
                       >
-                        <span>Selesai Edit Item Ini</span>
+                        <span>{t('doneEditingThisItem')}</span>
                         <ChevronUp className="w-4 h-4" />
                       </button>
                     </div>
@@ -1275,10 +1327,10 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                 </div>
                 <div>
                   <h3 className="font-headline-sm text-slate-900 font-bold text-xs sm:text-sm">
-                    {unmappedDrawerOpen ? 'Form Input Item Temuan Fisik' : 'Temukan Barang Tak Terdaftar? Klik di Sini'}
+                    {unmappedDrawerOpen ? t('unmappedHeaderOpen') : t('unmappedHeaderClosed')}
                   </h3>
                   <p className="text-[11px] text-slate-500">
-                    {unmappedDrawerOpen ? 'Isi barcode, foto fisik, dan jumlah temuan' : '+ Tambah item baru yang tidak ada dalam daftar sistem'}
+                    {unmappedDrawerOpen ? (lang === 'en' ? 'Scan barcode, upload physical photo, and enter counts' : 'Isi barcode, foto fisik, dan jumlah temuan') : t('unmappedSubtitleClosed')}
                   </p>
                 </div>
               </div>
@@ -1416,34 +1468,6 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             </div>
           )}
 
-          <button
-            type="button"
-            disabled={isLoadingSave || isSessionLocked}
-            onClick={handleSaveAndNext}
-            className={`w-full min-h-12 py-3 px-4 rounded-xl font-black text-sm sm:text-base shadow-[0_0_15px_rgba(34,211,238,0.35)] cursor-pointer transition-all active:scale-[0.99] flex items-center justify-center gap-2.5 text-center ${
-              isSessionLocked || isLoadingSave
-                ? 'bg-slate-400 opacity-50 cursor-not-allowed text-white shadow-none'
-                : 'bg-cyan-400 hover:bg-cyan-300 text-slate-950'
-            }`}
-          >
-            {isLoadingSave ? (
-              <>
-                <Loader2 className="w-5 h-5 shrink-0 animate-spin" />
-                <span>Menyimpan ke Cloud...</span>
-              </>
-            ) : isSessionLocked ? (
-              <>
-                <Lock className="w-5 h-5 shrink-0" />
-                <span>Sesi Terkunci oleh Admin</span>
-              </>
-            ) : (
-              <>
-                <CheckCircle2 className="w-5 h-5 shrink-0 text-slate-950" />
-                <span className="leading-snug">Simpan Semua &amp; Lanjut Rak Berikutnya</span>
-              </>
-            )}
-          </button>
-
         </div>
       </main>
 
@@ -1463,17 +1487,17 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             {isLoadingSave ? (
               <>
                 <Loader2 className="w-4 h-4 shrink-0 animate-spin" />
-                <span>Menyimpan ke Cloud...</span>
+                <span>{t('savingToCloud')}</span>
               </>
             ) : isSessionLocked ? (
               <>
                 <Lock className="w-4 h-4 shrink-0" />
-                <span>Sesi Terkunci</span>
+                <span>{t('sessionLockedByAdmin')}</span>
               </>
             ) : (
               <>
                 <CheckCircle2 className="w-4 h-4 shrink-0 text-slate-950" />
-                <span>Simpan &amp; Lanjut Rak Berikutnya</span>
+                <span>{t('saveAndNextBtn')}</span>
               </>
             )}
           </button>

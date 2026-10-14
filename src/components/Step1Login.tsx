@@ -2,12 +2,14 @@ import React, { useState } from 'react';
 import { db } from '../firebase';
 import { doc, getDoc, collection, getDocs, query, where } from 'firebase/firestore';
 import type { UserRole } from '../types';
+import { useLanguage, LanguageToggle } from '../utils/i18n';
 
 interface Step1LoginProps {
   onSuccessLogin: (username: string, role: UserRole, name?: string) => void;
 }
 
 export default function Step1Login({ onSuccessLogin }: Step1LoginProps) {
+  const { t, lang } = useLanguage();
   const [usernameInput, setUsernameInput] = useState('');
   const [pinInput, setPinInput] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -22,7 +24,7 @@ export default function Step1Login({ onSuccessLogin }: Step1LoginProps) {
     const cleanPin = pinInput.trim();
 
     if (!cleanUsername || !cleanPin) {
-      setErrorMsg('Username dan PIN wajib diisi.');
+      setErrorMsg(lang === 'en' ? 'Username and PIN are required.' : 'Username dan PIN wajib diisi.');
       setIsLoading(false);
       return;
     }
@@ -46,7 +48,7 @@ export default function Step1Login({ onSuccessLogin }: Step1LoginProps) {
           setIsLoading(false);
           return;
         } else {
-          setErrorMsg('PIN Owner tidak sesuai. Periksa PIN terbaru kamu.');
+          setErrorMsg(lang === 'en' ? 'Owner PIN invalid.' : 'PIN Owner tidak sesuai. Periksa PIN terbaru kamu.');
           setIsLoading(false);
           return;
         }
@@ -81,16 +83,16 @@ export default function Step1Login({ onSuccessLogin }: Step1LoginProps) {
           setIsLoading(false);
           return;
         } else {
-          setErrorMsg('PIN salah. Silakan coba lagi.');
+          setErrorMsg(lang === 'en' ? 'Incorrect PIN. Please try again.' : 'PIN salah. Silakan coba lagi.');
           setIsLoading(false);
           return;
         }
       }
 
-      setErrorMsg('Username tidak terdaftar di KTP Cloud.');
+      setErrorMsg(lang === 'en' ? 'Username not found in system.' : 'Username tidak terdaftar di KTP Cloud.');
     } catch (err) {
       console.error("Login Error:", err);
-      setErrorMsg('Terjadi kesalahan koneksi. Periksa internet kamu.');
+      setErrorMsg(lang === 'en' ? 'Network error. Please check your connection.' : 'Terjadi kesalahan koneksi. Periksa internet kamu.');
     } finally {
       setIsLoading(false);
     }
@@ -98,6 +100,11 @@ export default function Step1Login({ onSuccessLogin }: Step1LoginProps) {
 
   return (
     <div className="relative min-h-screen bg-[#F4F6F9] font-sans flex flex-col justify-center items-center p-4 overflow-hidden select-none">
+      {/* LANGUAGE SWITCHER TOP RIGHT */}
+      <div className="absolute top-4 right-4 z-20">
+        <LanguageToggle />
+      </div>
+
       {/* 1. ATMOSPHERIC TECH GRID (LIGHT MODE) */}
       <div 
         className="absolute inset-0 pointer-events-none opacity-40"
@@ -134,7 +141,7 @@ export default function Step1Login({ onSuccessLogin }: Step1LoginProps) {
               NOCTUS COUNT
             </h1>
             <p className="font-mono text-[10px] text-slate-500 tracking-[0.2em] uppercase font-bold">
-              ENTER AUTHORIZED CREDENTIALS
+              {lang === 'en' ? 'ENTER AUTHORIZED CREDENTIALS' : 'MASUKKAN KREDENSIAL AKUN'}
             </p>
           </div>
         </div>
@@ -151,13 +158,13 @@ export default function Step1Login({ onSuccessLogin }: Step1LoginProps) {
           {/* USERNAME FIELD */}
           <div className="space-y-1.5">
             <label className="font-mono text-[10px] tracking-[0.18em] text-slate-500 block uppercase font-bold">
-              IDENTIFIER / USERNAME
+              {t('usernameLabel')}
             </label>
             <input
               type="text"
               value={usernameInput}
               onChange={(e) => setUsernameInput(e.target.value)}
-              placeholder="e.g. pamungkas / spv / owner"
+              placeholder="e.g. bambang / counter1"
               className="cipher-input w-full h-12 px-4 rounded-xl text-sm font-mono font-bold outline-none transition-all duration-300 focus:ring-2 focus:ring-cyan-400/20"
               required
             />
@@ -166,7 +173,7 @@ export default function Step1Login({ onSuccessLogin }: Step1LoginProps) {
           {/* PIN FIELD */}
           <div className="space-y-1.5">
             <label className="font-mono text-[10px] tracking-[0.18em] text-slate-500 block uppercase font-bold">
-              SECURITY PIN (4-DIGIT)
+              {t('pinLabel')}
             </label>
             <input
               type="password"
@@ -185,7 +192,7 @@ export default function Step1Login({ onSuccessLogin }: Step1LoginProps) {
             disabled={isLoading}
             className="w-full h-12 mt-2 rounded-xl text-xs font-mono font-black tracking-[0.2em] uppercase transition-all duration-300 cursor-pointer disabled:opacity-50 text-slate-950 bg-cyan-400 hover:bg-cyan-300 shadow-[0_0_20px_rgba(0,242,254,0.35)] hover:shadow-[0_0_25px_rgba(0,242,254,0.55)] active:scale-[0.98] flex items-center justify-center space-x-2"
           >
-            <span>{isLoading ? 'AUTHENTICATING...' : 'MASUK APLIKASI'}</span>
+            <span>{isLoading ? (lang === 'en' ? 'AUTHENTICATING...' : 'MEMERIKSA AKUN...') : t('loginBtn').toUpperCase()}</span>
           </button>
         </form>
 

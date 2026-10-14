@@ -4,6 +4,7 @@ import { collection, onSnapshot, query, where, doc, setDoc } from 'firebase/fire
 import type { SessionData, RackItem, CustomModalState } from '../types';
 import CustomModal from './CustomModal';
 import NetworkStatusBadge from './NetworkStatusBadge';
+import { useLanguage, LanguageToggle } from '../utils/i18n';
 import { playScanSuccessBeep, triggerHapticFeedback } from '../utils/soundAndHaptics';
 import { 
   ChevronLeft, LogOut, Info, Lock, Warehouse, Edit2, Search, Plus, 
@@ -18,6 +19,7 @@ interface Step3CountsheetListProps {
 }
 
 export default function Step3CountsheetList({ sessionData, onSelectRack, onLogout, onEditTeam }: Step3CountsheetListProps) {
+  const { t, lang } = useLanguage();
   const [racks, setRacks] = useState<RackItem[]>([]);
   const [activeProject, setActiveProject] = useState<any>(null);
   const [activeFilter, setActiveFilter] = useState<string>('all');
@@ -290,6 +292,7 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
             </div>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
+            <LanguageToggle />
             <NetworkStatusBadge />
             <button
               type="button"
@@ -297,7 +300,7 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
               className="px-2.5 py-1.5 flex items-center gap-1 rounded-lg text-xs font-bold bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 transition-colors cursor-pointer"
             >
               <LogOut className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Keluar</span>
+              <span className="hidden sm:inline">{t('logout')}</span>
             </button>
           </div>
         </div>
@@ -320,7 +323,7 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
           {isSessionLocked && activeProject && (
             <div className="bg-red-50 border border-red-200 text-red-700 p-3 rounded-xl flex items-center gap-2 text-xs font-bold shadow-xs">
               <Lock className="w-4 h-4 text-red-600 shrink-0" />
-              <span>Sesi Terkunci oleh Admin Pusat. Input/edit hitungan fisik dinonaktifkan.</span>
+              <span>{lang === 'en' ? 'Session Locked by Admin. Editing counts is disabled.' : 'Sesi Terkunci oleh Admin Pusat. Input/edit hitungan fisik dinonaktifkan.'}</span>
             </div>
           )}
 
@@ -340,7 +343,7 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
                     <span className="text-xs">👥</span>
                     <span className="font-label-sm text-label-sm text-on-surface-variant font-medium truncate">
                       Counter: <b className="text-slate-900">{sessionData.primaryCounter}</b>
-                      {partnerName ? <span className="text-slate-500"> • Pendamping: <b className="text-slate-800">{partnerName}</b></span> : null}
+                      {partnerName ? <span className="text-slate-500"> • {lang === 'en' ? 'Assistant' : 'Pendamping'}: <b className="text-slate-800">{partnerName}</b></span> : null}
                     </span>
                     <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>
                   </div>
@@ -352,7 +355,7 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
                       className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-bold flex items-center gap-1 border border-slate-300 transition-colors cursor-pointer"
                     >
                       <Edit2 className="w-3 h-3" />
-                      <span>Edit Tim</span>
+                      <span>{lang === 'en' ? 'Edit Team' : 'Edit Tim'}</span>
                     </button>
                   )}
                 </div>
@@ -361,12 +364,12 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
               <div className="bg-surface-container-lowest rounded-xl p-space-md shadow-sm border border-outline-variant/30 flex flex-col gap-space-sm">
                 <div className="flex items-start justify-between">
                   <div>
-                    <span className="font-label-md text-label-md text-on-surface-variant block uppercase tracking-wide">Ringkasan Tugas Kamu</span>
-                    <h3 className="font-headline-sm text-headline-sm text-on-surface font-bold">Progress Perhitungan</h3>
+                    <span className="font-label-md text-label-md text-on-surface-variant block uppercase tracking-wide">{lang === 'en' ? 'Task Summary' : 'Ringkasan Tugas Kamu'}</span>
+                    <h3 className="font-headline-sm text-headline-sm text-on-surface font-bold">{lang === 'en' ? 'Counting Progress' : 'Progress Perhitungan'}</h3>
                   </div>
                   <div className="flex flex-col items-end">
                     <span className="font-headline-lg-mobile text-headline-lg-mobile text-cyan-600 font-black leading-none">{progressPercent}%</span>
-                    <span className="font-label-sm text-label-sm text-on-surface-variant font-bold">{completedCount} / {racks.length} Rak</span>
+                    <span className="font-label-sm text-label-sm text-on-surface-variant font-bold">{completedCount} / {racks.length} {lang === 'en' ? 'Racks' : 'Rak'}</span>
                   </div>
                 </div>
                 <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden flex">
@@ -382,7 +385,7 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
                       type="text"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="Cari nomor rak atau zona..."
+                      placeholder={t('searchRackPlaceholder')}
                       className="w-full h-11 pl-9 pr-4 bg-surface-container-lowest rounded-xl font-body-md text-body-md shadow-sm border border-outline-variant/30 outline-none text-xs"
                     />
                   </div>
@@ -392,15 +395,15 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
                     className="px-3 bg-cyan-400 hover:bg-cyan-300 text-slate-950 rounded-xl text-xs font-black flex items-center gap-1 shadow-sm cursor-pointer shrink-0 transition-all active:scale-95"
                   >
                     <Plus className="w-3.5 h-3.5" />
-                    <span>Rak Baru</span>
+                    <span>{t('addRackBtn')}</span>
                   </button>
                 </div>
 
                 <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none">
-                  <button type="button" onClick={() => setActiveFilter('all')} className={`flex items-center gap-1 px-3.5 py-1.5 rounded-full font-label-md text-label-md shadow-xs shrink-0 transition-all cursor-pointer ${activeFilter === 'all' ? 'bg-cyan-400 text-slate-950 font-black shadow-[0_0_8px_rgba(34,211,238,0.3)]' : 'bg-surface-container-lowest text-on-surface-variant border border-outline-variant/30 font-medium'}`}>Semua ({racks.length})</button>
-                  <button type="button" onClick={() => setActiveFilter('completed')} className={`flex items-center gap-1 px-3.5 py-1.5 rounded-full font-label-md text-label-md shadow-xs shrink-0 transition-all cursor-pointer ${activeFilter === 'completed' ? 'bg-cyan-400 text-slate-950 font-black shadow-[0_0_8px_rgba(34,211,238,0.3)]' : 'bg-surface-container-lowest text-on-surface-variant border border-outline-variant/30 font-medium'}`}>Selesai ({completedCount})</button>
-                  <button type="button" onClick={() => setActiveFilter('in_progress')} className={`flex items-center gap-1 px-3.5 py-1.5 rounded-full font-label-md text-label-md shadow-xs shrink-0 transition-all cursor-pointer ${activeFilter === 'in_progress' ? 'bg-cyan-400 text-slate-950 font-black shadow-[0_0_8px_rgba(34,211,238,0.3)]' : 'bg-surface-container-lowest text-on-surface-variant border border-outline-variant/30 font-medium'}`}>Berjalan ({inProgressCount})</button>
-                  <button type="button" onClick={() => setActiveFilter('pending')} className={`flex items-center gap-1 px-3.5 py-1.5 rounded-full font-label-md text-label-md shadow-xs shrink-0 transition-all cursor-pointer ${activeFilter === 'pending' ? 'bg-cyan-400 text-slate-950 font-black shadow-[0_0_8px_rgba(34,211,238,0.3)]' : 'bg-surface-container-lowest text-on-surface-variant border border-outline-variant/30 font-medium'}`}>Pending ({pendingCount})</button>
+                  <button type="button" onClick={() => setActiveFilter('all')} className={`flex items-center gap-1 px-3.5 py-1.5 rounded-full font-label-md text-label-md shadow-xs shrink-0 transition-all cursor-pointer ${activeFilter === 'all' ? 'bg-cyan-400 text-slate-950 font-black shadow-[0_0_8px_rgba(34,211,238,0.3)]' : 'bg-surface-container-lowest text-on-surface-variant border border-outline-variant/30 font-medium'}`}>{t('tabAll')} ({racks.length})</button>
+                  <button type="button" onClick={() => setActiveFilter('completed')} className={`flex items-center gap-1 px-3.5 py-1.5 rounded-full font-label-md text-label-md shadow-xs shrink-0 transition-all cursor-pointer ${activeFilter === 'completed' ? 'bg-cyan-400 text-slate-950 font-black shadow-[0_0_8px_rgba(34,211,238,0.3)]' : 'bg-surface-container-lowest text-on-surface-variant border border-outline-variant/30 font-medium'}`}>{t('tabCompleted')} ({completedCount})</button>
+                  <button type="button" onClick={() => setActiveFilter('in_progress')} className={`flex items-center gap-1 px-3.5 py-1.5 rounded-full font-label-md text-label-md shadow-xs shrink-0 transition-all cursor-pointer ${activeFilter === 'in_progress' ? 'bg-cyan-400 text-slate-950 font-black shadow-[0_0_8px_rgba(34,211,238,0.3)]' : 'bg-surface-container-lowest text-on-surface-variant border border-outline-variant/30 font-medium'}`}>{t('rackStatusInProgress')} ({inProgressCount})</button>
+                  <button type="button" onClick={() => setActiveFilter('pending')} className={`flex items-center gap-1 px-3.5 py-1.5 rounded-full font-label-md text-label-md shadow-xs shrink-0 transition-all cursor-pointer ${activeFilter === 'pending' ? 'bg-cyan-400 text-slate-950 font-black shadow-[0_0_8px_rgba(34,211,238,0.3)]' : 'bg-surface-container-lowest text-on-surface-variant border border-outline-variant/30 font-medium'}`}>{t('tabPending')} ({pendingCount})</button>
                 </div>
               </div>
 
@@ -414,11 +417,11 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
                           <Layers className="w-4 h-4 text-cyan-600 shrink-0" />
                           <h4 className="font-headline-sm text-headline-sm text-on-surface truncate">Rak {rack.rackNumber}</h4>
                         </div>
-                        <p className="font-body-sm text-body-sm text-on-surface-variant mt-0.5">{rack.countedSKU} / {rack.totalSKU} SKU Dihitung • Zone: {rack.zone}</p>
+                        <p className="font-body-sm text-body-sm text-on-surface-variant mt-0.5">{rack.countedSKU} / {rack.totalSKU} SKU {lang === 'en' ? 'Counted' : 'Dihitung'} • Zone: {rack.zone}</p>
                       </div>
-                      {rack.status === 'completed' && <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-800 font-label-sm text-label-sm px-2.5 py-1 rounded-full shrink-0 border border-emerald-200"><Check className="w-3 h-3 text-emerald-700 stroke-3" /> Selesai</span>}
-                      {rack.status === 'in-progress' && <span className="inline-flex items-center gap-1.5 bg-amber-50 text-amber-900 font-label-sm text-label-sm px-2.5 py-1 rounded-full shrink-0 border border-amber-200"><span className="w-1.5 h-1.5 rounded-full bg-amber-600 animate-pulse"></span> Sedang Dihitung</span>}
-                      {rack.status === 'pending' && <span className="inline-flex items-center gap-1 bg-surface-container-high text-on-surface-variant font-label-sm text-label-sm px-2.5 py-1 rounded-full shrink-0"><span className="w-1.5 h-1.5 rounded-full bg-outline"></span> Belum Mulai</span>}
+                      {rack.status === 'completed' && <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-800 font-label-sm text-label-sm px-2.5 py-1 rounded-full shrink-0 border border-emerald-200"><Check className="w-3 h-3 text-emerald-700 stroke-3" /> {t('rackStatusCompleted')}</span>}
+                      {rack.status === 'in-progress' && <span className="inline-flex items-center gap-1.5 bg-amber-50 text-amber-900 font-label-sm text-label-sm px-2.5 py-1 rounded-full shrink-0 border border-amber-200"><span className="w-1.5 h-1.5 rounded-full bg-amber-600 animate-pulse"></span> {t('rackStatusInProgress')}</span>}
+                      {rack.status === 'pending' && <span className="inline-flex items-center gap-1 bg-surface-container-high text-on-surface-variant font-label-sm text-label-sm px-2.5 py-1 rounded-full shrink-0"><span className="w-1.5 h-1.5 rounded-full bg-outline"></span> {t('rackStatusPending')}</span>}
                     </div>
                   </div>
                 ))}
