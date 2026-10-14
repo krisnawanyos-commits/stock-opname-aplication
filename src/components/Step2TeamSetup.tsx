@@ -41,28 +41,31 @@ export default function Step2TeamSetup({ sessionData, onSaveTeam, onLogout }: St
       />
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-140 h-140 bg-cyan-400/10 rounded-full blur-[140px] pointer-events-none" />
 
-      <div className="relative z-10 w-full max-w-sm bg-white rounded-3xl p-6 sm:p-7 shadow-[0_20px_60px_rgba(15,23,42,0.08)] border border-slate-200/90 space-y-6">
-        <div className="flex justify-between items-center border-b border-slate-100 pb-3">
-          <div className="flex items-center space-x-3">
-            <div className="p-2.5 bg-cyan-50 text-cyan-600 rounded-2xl border border-cyan-200">
-              <Users className="w-5 h-5 text-cyan-600" />
-            </div>
-            <div>
-              <h2 className="text-base font-black text-slate-900">{t('teamSetupTitle')}</h2>
-              <p className="text-xs text-slate-500 font-medium truncate max-w-44">{sessionData.sessionName}</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-1.5 shrink-0">
+      <div className="relative z-10 w-full max-w-sm bg-white rounded-3xl p-6 sm:p-7 shadow-[0_20px_60px_rgba(15,23,42,0.08)] border border-slate-200/90 space-y-5">
+        {/* TOP UTILITY BAR (NETWORK STATUS, LANGUAGE TOGGLE, LOGOUT) */}
+        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+          <NetworkStatusBadge />
+          <div className="flex items-center gap-2 shrink-0">
             <LanguageToggle />
-            <NetworkStatusBadge />
             <button
               type="button"
               onClick={onLogout}
-              className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer"
+              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer"
               title={t('logout')}
             >
               <LogOut className="w-4 h-4" />
             </button>
+          </div>
+        </div>
+
+        {/* HEADER TITLE & ICON */}
+        <div className="flex items-center space-x-3 pt-0.5">
+          <div className="p-2.5 bg-cyan-50 text-cyan-600 rounded-2xl border border-cyan-200 shrink-0">
+            <Users className="w-5 h-5 text-cyan-600" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h2 className="text-base font-black text-slate-900 leading-snug">{t('teamSetupTitle')}</h2>
+            <p className="text-xs text-slate-500 font-medium truncate">{sessionData.sessionName}</p>
           </div>
         </div>
 

@@ -270,37 +270,38 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
       )}
 
       <header className="relative w-full z-10 pt-safe bg-white border-b border-slate-200 shadow-xs shrink-0">
-        <div className="h-16 px-gutter-sm flex items-center justify-between gap-space-sm max-w-md mx-auto">
-          <div className="flex items-center gap-space-sm min-w-0">
+        <div className="h-16 px-3 sm:px-4 flex items-center justify-between gap-2 max-w-md mx-auto">
+          <div className="flex items-center gap-2 min-w-0">
             <button
               type="button"
               onClick={onLogout}
-              className="w-9 h-9 rounded-lg bg-slate-100 flex items-center justify-center text-slate-700 shrink-0 hover:bg-slate-200 transition-colors cursor-pointer"
+              className="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center text-slate-700 shrink-0 hover:bg-slate-200 transition-colors cursor-pointer"
             >
               <ChevronLeft className="w-5 h-5" />
             </button>
             <div className="flex flex-col min-w-0">
-              <div className="flex items-center gap-space-xs">
-                <h1 className="font-headline-sm text-headline-sm text-slate-900 font-extrabold truncate leading-tight">Countsheet List</h1>
-              </div>
-              <span className="font-label-md text-label-md text-slate-500 truncate flex items-center gap-1.5 text-xs">
-                <span className="w-4 h-4 rounded-full bg-slate-950 p-0.5 inline-flex items-center justify-center shrink-0 border border-slate-800">
+              <h1 className="text-sm sm:text-base text-slate-900 font-extrabold leading-tight whitespace-nowrap">
+                Countsheet List
+              </h1>
+              <span className="text-[10px] text-slate-500 flex items-center gap-1">
+                <span className="w-3.5 h-3.5 rounded-full bg-slate-950 p-0.5 inline-flex items-center justify-center shrink-0 border border-slate-800">
                   <img src="/logo.png" alt="Noctus Logo" className="w-full h-full object-contain" />
                 </span>
-                <span>Noctus Count™</span>
+                <span className="whitespace-nowrap">Noctus Count™</span>
               </span>
             </div>
           </div>
+
           <div className="flex items-center gap-1.5 shrink-0">
             <LanguageToggle />
             <NetworkStatusBadge />
             <button
               type="button"
               onClick={onLogout}
-              className="px-2.5 py-1.5 flex items-center gap-1 rounded-lg text-xs font-bold bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 transition-colors cursor-pointer"
+              className="w-9 h-9 flex items-center justify-center rounded-xl text-xs font-bold bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 transition-colors cursor-pointer shrink-0"
+              title={t('logout')}
             >
-              <LogOut className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">{t('logout')}</span>
+              <LogOut className="w-4 h-4" />
             </button>
           </div>
         </div>
@@ -399,11 +400,58 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
                   </button>
                 </div>
 
-                <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none">
-                  <button type="button" onClick={() => setActiveFilter('all')} className={`flex items-center gap-1 px-3.5 py-1.5 rounded-full font-label-md text-label-md shadow-xs shrink-0 transition-all cursor-pointer ${activeFilter === 'all' ? 'bg-cyan-400 text-slate-950 font-black shadow-[0_0_8px_rgba(34,211,238,0.3)]' : 'bg-surface-container-lowest text-on-surface-variant border border-outline-variant/30 font-medium'}`}>{t('tabAll')} ({racks.length})</button>
-                  <button type="button" onClick={() => setActiveFilter('completed')} className={`flex items-center gap-1 px-3.5 py-1.5 rounded-full font-label-md text-label-md shadow-xs shrink-0 transition-all cursor-pointer ${activeFilter === 'completed' ? 'bg-cyan-400 text-slate-950 font-black shadow-[0_0_8px_rgba(34,211,238,0.3)]' : 'bg-surface-container-lowest text-on-surface-variant border border-outline-variant/30 font-medium'}`}>{t('tabCompleted')} ({completedCount})</button>
-                  <button type="button" onClick={() => setActiveFilter('in_progress')} className={`flex items-center gap-1 px-3.5 py-1.5 rounded-full font-label-md text-label-md shadow-xs shrink-0 transition-all cursor-pointer ${activeFilter === 'in_progress' ? 'bg-cyan-400 text-slate-950 font-black shadow-[0_0_8px_rgba(34,211,238,0.3)]' : 'bg-surface-container-lowest text-on-surface-variant border border-outline-variant/30 font-medium'}`}>{t('rackStatusInProgress')} ({inProgressCount})</button>
-                  <button type="button" onClick={() => setActiveFilter('pending')} className={`flex items-center gap-1 px-3.5 py-1.5 rounded-full font-label-md text-label-md shadow-xs shrink-0 transition-all cursor-pointer ${activeFilter === 'pending' ? 'bg-cyan-400 text-slate-950 font-black shadow-[0_0_8px_rgba(34,211,238,0.3)]' : 'bg-surface-container-lowest text-on-surface-variant border border-outline-variant/30 font-medium'}`}>{t('tabPending')} ({pendingCount})</button>
+                <div className="grid grid-cols-4 gap-1.5 w-full">
+                  <button
+                    type="button"
+                    onClick={() => setActiveFilter('all')}
+                    className={`py-2 px-1 rounded-xl text-center font-bold text-xs transition-all cursor-pointer flex flex-col items-center justify-center gap-0.5 ${
+                      activeFilter === 'all'
+                        ? 'bg-cyan-400 text-slate-950 font-black shadow-sm ring-1 ring-cyan-500/20'
+                        : 'bg-white text-slate-600 border border-slate-200/90 hover:bg-slate-50'
+                    }`}
+                  >
+                    <span className="truncate leading-none">{t('tabAll')}</span>
+                    <span className="text-[10px] font-mono opacity-80 leading-none">({racks.length})</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setActiveFilter('completed')}
+                    className={`py-2 px-1 rounded-xl text-center font-bold text-xs transition-all cursor-pointer flex flex-col items-center justify-center gap-0.5 ${
+                      activeFilter === 'completed'
+                        ? 'bg-cyan-400 text-slate-950 font-black shadow-sm ring-1 ring-cyan-500/20'
+                        : 'bg-white text-slate-600 border border-slate-200/90 hover:bg-slate-50'
+                    }`}
+                  >
+                    <span className="truncate leading-none">{t('tabCompleted')}</span>
+                    <span className="text-[10px] font-mono opacity-80 leading-none">({completedCount})</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setActiveFilter('in_progress')}
+                    className={`py-2 px-1 rounded-xl text-center font-bold text-xs transition-all cursor-pointer flex flex-col items-center justify-center gap-0.5 ${
+                      activeFilter === 'in_progress'
+                        ? 'bg-cyan-400 text-slate-950 font-black shadow-sm ring-1 ring-cyan-500/20'
+                        : 'bg-white text-slate-600 border border-slate-200/90 hover:bg-slate-50'
+                    }`}
+                  >
+                    <span className="truncate leading-none">{t('tabInProgress')}</span>
+                    <span className="text-[10px] font-mono opacity-80 leading-none">({inProgressCount})</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setActiveFilter('pending')}
+                    className={`py-2 px-1 rounded-xl text-center font-bold text-xs transition-all cursor-pointer flex flex-col items-center justify-center gap-0.5 ${
+                      activeFilter === 'pending'
+                        ? 'bg-cyan-400 text-slate-950 font-black shadow-sm ring-1 ring-cyan-500/20'
+                        : 'bg-white text-slate-600 border border-slate-200/90 hover:bg-slate-50'
+                    }`}
+                  >
+                    <span className="truncate leading-none">{t('tabPending')}</span>
+                    <span className="text-[10px] font-mono opacity-80 leading-none">({pendingCount})</span>
+                  </button>
                 </div>
               </div>
 
