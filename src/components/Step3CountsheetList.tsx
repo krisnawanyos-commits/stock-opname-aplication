@@ -352,7 +352,7 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
 
           {activeProject && (
             <>
-              <div className="bg-surface-container-lowest rounded-xl p-space-md shadow-sm border border-outline-variant/30 flex flex-col gap-space-sm">
+              <div className="bg-surface-container-lowest rounded-xl p-space-md shadow-sm border border-outline-variant/30 flex flex-col gap-space-sm w-full max-w-full min-w-0 overflow-hidden">
                 <div className="flex items-center justify-between gap-space-xs">
                   <div className="flex items-center gap-space-xs min-w-0">
                     <Warehouse className="w-5 h-5 text-cyan-600 shrink-0" />
@@ -364,18 +364,26 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
 
                 {/* SELECTOR PILIH SESI JIKA ADA LEBIH DARI 1 PROJECT LIVE_ACTIVE */}
                 {allActiveProjects.length > 1 && (
-                  <div className="flex items-center gap-2 p-2 bg-indigo-50 border border-indigo-200 rounded-xl">
-                    <span className="text-[10px] font-black uppercase text-indigo-900 shrink-0">Sesi Aktif:</span>
+                  <div className="w-full max-w-full min-w-0 p-2 sm:p-2.5 bg-indigo-50/80 border border-indigo-200 rounded-xl flex flex-col gap-1.5 overflow-hidden">
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-indigo-900 flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse"></span>
+                        <span>Sesi Aktif:</span>
+                      </span>
+                      <span className="text-[10px] font-mono font-bold text-indigo-600 bg-white px-2 py-0.5 rounded-md border border-indigo-200">
+                        {allActiveProjects.length} Sesi Terbuka
+                      </span>
+                    </div>
                     <select
                       value={activeProject.id}
                       onChange={(e) => {
                         const sel = allActiveProjects.find(p => p.id === e.target.value);
                         if (sel) setActiveProject(sel);
                       }}
-                      className="flex-1 bg-white border border-indigo-300 rounded-lg text-xs font-bold text-indigo-950 p-1.5 outline-none"
+                      className="w-full min-w-0 max-w-full truncate bg-white border border-indigo-300 rounded-lg text-xs font-bold text-indigo-950 p-2 outline-none shadow-2xs cursor-pointer"
                     >
                       {allActiveProjects.map(proj => (
-                        <option key={proj.id} value={proj.id}>
+                        <option key={proj.id} value={proj.id} className="text-slate-900">
                           {proj.sessionCode} ({proj.locationName || proj.method})
                         </option>
                       ))}

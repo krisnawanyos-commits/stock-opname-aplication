@@ -1523,29 +1523,6 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
         </div>
       </main>
 
-      {/* FLOATING QUICK ACCESS UNTUK "+ TEMUAN BARU" */}
-      <div className="fixed bottom-20 right-4 z-20">
-        <button
-          type="button"
-          disabled={isSessionLocked}
-          onClick={() => {
-            setUnmappedDrawerOpen(true);
-            setTimeout(() => {
-              const el = document.getElementById('unmapped-card');
-              if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }, 100);
-          }}
-          className={`px-3.5 py-2.5 rounded-full shadow-lg border border-amber-300 text-xs font-black flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer ${
-            isSessionLocked
-              ? 'bg-slate-300 text-slate-500 opacity-50 cursor-not-allowed'
-              : 'bg-amber-400 hover:bg-amber-300 text-slate-950 shadow-amber-500/20'
-          }`}
-          title="Buka form input barang temuan"
-        >
-          <PlusCircle className="w-4 h-4 text-slate-950" />
-          <span>+ Temuan</span>
-        </button>
-      </div>
 
       {/* STICKY BOTTOM ACTION BAR (DUAL ACTION: LANJUT RAK VS BALIK LIST) */}
       <div className="fixed bottom-0 left-0 right-0 z-30 p-2.5 sm:p-3 bg-white/95 backdrop-blur-md border-t border-slate-200/90 shadow-[0_-8px_20px_rgba(0,0,0,0.06)] pb-safe">
