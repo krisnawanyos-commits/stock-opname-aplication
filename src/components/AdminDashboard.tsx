@@ -640,7 +640,19 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             if (updateTimer) clearTimeout(updateTimer);
 
             updateTimer = setTimeout(() => {
-                const taskList: MasterSKUItem[] = snapshot.docs.map(docSnap => {
+                const activeProjId = activeProject?.id;
+                const filteredDocs = snapshot.docs.filter(docSnap => {
+                    const data = docSnap.data();
+                    if (data.projectId && activeProjId) {
+                        return data.projectId === activeProjId;
+                    }
+                    if (!data.projectId && activeProject?.method === 'FLOOR_TO_LIST') {
+                        return false; // Jangan tampilkan task warisan tanpa projectId pada sesi Floor to List baru
+                    }
+                    return true;
+                });
+
+                const taskList: MasterSKUItem[] = filteredDocs.map(docSnap => {
                     const data = docSnap.data();
 
                     const gQty = data.QTY_GOOD ?? data.qtyGood;
@@ -687,9 +699,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     };
                 });
 
-                if (taskList.length > 0) {
-                    setMasterDataList(taskList);
-                }
+                setMasterDataList(taskList);
             }, 250);
         });
 
@@ -2843,6 +2853,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                     const isCounted = rawActQty !== undefined && rawActQty !== null && rawActQty !== '' && !isNaN(numActQty);
 
                                     const taskDoc = {
+                                        projectId: pId,
                                         Owner: row['Owner'] || 'DDI',
                                         SKU: skuStr,
                                         Description: row['Description'] || '',
@@ -3595,6 +3606,8 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
             if (initialFileToUpload) {
                 await parseXLSXFile(initialFileToUpload, projId);
+            } else {
+                setMasterDataList([]);
             }
             setRecoveryAdjustments({});
             setViewState('DASHBOARD');

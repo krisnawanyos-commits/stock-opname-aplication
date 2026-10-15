@@ -344,7 +344,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
               qtyGood: existingLocal ? existingLocal.qtyGood : (!isNaN(numGoodQty) ? numGoodQty.toString() : (hasActQty ? numActQty.toString() : "")),
               qtyBad: existingLocal ? existingLocal.qtyBad : (!isNaN(numBadQty) && numBadQty > 0 ? numBadQty.toString() : ""),
               expDateSystem: edSys,
-              expDateActual: existingLocal ? existingLocal.expDateActual : (data.expDateActual || data.expiredDateActual || ''),
+              expDateActual: existingLocal ? existingLocal.expDateActual : (data.expDateActual || data.expiredDateActual || edSys || ''),
               isBadStock: existingLocal ? existingLocal.isBadStock : ((!isNaN(numBadQty) && numBadQty > 0) || !!data.badRemarks),
               badRemarks: existingLocal ? existingLocal.badRemarks : existingRemarks,
               selectedCategories: existingLocal ? existingLocal.selectedCategories : initialCats,
@@ -831,7 +831,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     setUnmappedList((prev) => prev.filter((item) => item.id !== id));
   };
 
-  const handleSaveAndNext = async () => {
+  const handleSaveAndNext = async (goToNextRack: boolean = true) => {
     if (isSessionLocked) return;
     setIsLoadingSave(true);
 
@@ -906,9 +906,14 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       let nextRackItem: RackItem | null = null;
 
       if (!snap.empty) {
-        const nextTask = snap.docs[0].data();
-        const nextRackNumber = nextTask.Location;
-        if (nextRackNumber && nextRackNumber !== rack.rackNumber) {
+        const nextDoc = snap.docs.find(d => {
+          const data = d.data();
+          return data.Location && data.Location !== rack.rackNumber;
+        });
+
+        if (nextDoc) {
+          const nextTask = nextDoc.data();
+          const nextRackNumber = nextTask.Location;
           nextRackItem = {
             id: nextRackNumber,
             rackNumber: nextRackNumber,
@@ -921,20 +926,31 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
         }
       }
 
-      setModal({
-        isOpen: true,
-        type: 'success',
-        title: 'Hitungan Rak Berhasil Tersimpan!',
-        message: `Semua SKU pada Rak ${rack.rackNumber} telah di-sync ke Cloud Firestore dan dicatat ke Audit Trail.`,
-        confirmText: nextRackItem ? `Lanjut Otomatis ke Rak ${nextRackItem.rackNumber}` : 'Kembali ke Countsheet List',
-        onConfirm: () => {
-          if (nextRackItem && onSelectNextRack) {
-            onSelectNextRack(nextRackItem);
-          } else {
-            triggerSafeBack();
-          }
-        },
-      });
+      if (goToNextRack && nextRackItem && onSelectNextRack) {
+        playScanSuccessBeep();
+        triggerHapticFeedback('success');
+        onSelectNextRack(nextRackItem);
+        return;
+      }
+
+      if (goToNextRack && !nextRackItem) {
+        playScanSuccessBeep();
+        triggerHapticFeedback('success');
+        setModal({
+          isOpen: true,
+          type: 'success',
+          title: 'Semua Rak Selesai!',
+          message: `Luar biasa! Seluruh rak tugas untuk counter ${cleanCounter} telah selesai dihitung.`,
+          confirmText: 'Kembali ke Countsheet List',
+          onConfirm: () => triggerSafeBack()
+        });
+        return;
+      }
+
+      // Jika user memilih Simpan & Balik ke List
+      playScanSuccessBeep();
+      triggerHapticFeedback('success');
+      triggerSafeBack();
     } catch (err) {
       console.error("Firestore Save Error:", err);
       playErrorBuzzer();
@@ -1193,19 +1209,35 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
 
                     {/* EXPIRED DATE FEFO DENGAN FORMAT DD/MM/YYYY */}
                     <div className="bg-cyan-50/60 border border-cyan-200 p-space-sm rounded-xl space-y-2">
-                      <div className="flex justify-between items-center">
+                      <div className="flex justify-between items-center gap-2 flex-wrap">
                         <span className="font-label-sm text-cyan-950 font-bold flex items-center gap-1.5">
                           <Calendar className="w-3.5 h-3.5 text-cyan-700" />
                           <span>{t('expDateSystemLabel')}</span>
                         </span>
-                        <button
-                          type="button"
-                          disabled={isSessionLocked}
-                          onClick={() => handleSetSameExpAsSystem(idx)}
-                          className={`px-2.5 py-1 text-white rounded-lg text-[10px] font-bold cursor-pointer ${isSessionLocked ? 'bg-slate-400 opacity-50 cursor-not-allowed' : 'bg-emerald-600 active:scale-95'}`}
-                        >
-                          {t('sameAsSystemBtn')}
-                        </button>
+
+                        <div className="flex items-center gap-1.5">
+                          {currentSku.expDateActual && currentSku.expDateSystem && currentSku.expDateActual === currentSku.expDateSystem ? (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                              ✓ Sesuai Sistem
+                            </span>
+                          ) : currentSku.expDateActual && currentSku.expDateSystem && currentSku.expDateActual !== currentSku.expDateSystem ? (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                              ⚠️ Beda Batch
+                            </span>
+                          ) : null}
+
+                          {currentSku.expDateSystem && currentSku.expDateActual !== currentSku.expDateSystem && (
+                            <button
+                              type="button"
+                              disabled={isSessionLocked}
+                              onClick={() => handleSetSameExpAsSystem(idx)}
+                              className={`px-2 py-0.5 text-white rounded-lg text-[10px] font-bold cursor-pointer ${isSessionLocked ? 'bg-slate-400 opacity-50 cursor-not-allowed' : 'bg-cyan-600 hover:bg-cyan-500 active:scale-95'}`}
+                              title="Reset sama dengan sistem"
+                            >
+                              Reset
+                            </button>
+                          )}
+                        </div>
                       </div>
                       <div className="grid grid-cols-2 gap-2 text-xs">
                         <div>
@@ -1329,7 +1361,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
           })}
 
           {/* FORM ITEM TAK TERDAFTAR / TEMUAN LAIN (ACCORDION COLLAPSIBLE) */}
-          <div className={`bg-white rounded-2xl shadow-xs border transition-all overflow-hidden ${unmappedDrawerOpen ? 'border-amber-400 ring-2 ring-amber-400/20' : 'border-dashed border-2 border-amber-300/80 bg-amber-50/30 hover:bg-amber-50/60'}`}>
+          <div id="unmapped-card" className={`bg-white rounded-2xl shadow-xs border transition-all overflow-hidden ${unmappedDrawerOpen ? 'border-amber-400 ring-2 ring-amber-400/20' : 'border-dashed border-2 border-amber-300/80 bg-amber-50/30 hover:bg-amber-50/60'}`}>
             <div
               className="p-3.5 flex items-center justify-between cursor-pointer select-none"
               onClick={() => setUnmappedDrawerOpen(!unmappedDrawerOpen)}
@@ -1484,14 +1516,50 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
         </div>
       </main>
 
-      {/* STICKY BOTTOM ACTION BAR (ERGONOMI IBU JARI MOBILE) */}
-      <div className="fixed bottom-0 left-0 right-0 z-30 p-3 bg-white/95 backdrop-blur-md border-t border-slate-200/90 shadow-[0_-8px_20px_rgba(0,0,0,0.06)] pb-safe">
-        <div className="max-w-md mx-auto">
+      {/* FLOATING QUICK ACCESS UNTUK "+ TEMUAN BARU" */}
+      <div className="fixed bottom-20 right-4 z-20">
+        <button
+          type="button"
+          disabled={isSessionLocked}
+          onClick={() => {
+            setUnmappedDrawerOpen(true);
+            setTimeout(() => {
+              const el = document.getElementById('unmapped-card');
+              if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }, 100);
+          }}
+          className={`px-3.5 py-2.5 rounded-full shadow-lg border border-amber-300 text-xs font-black flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer ${
+            isSessionLocked
+              ? 'bg-slate-300 text-slate-500 opacity-50 cursor-not-allowed'
+              : 'bg-amber-400 hover:bg-amber-300 text-slate-950 shadow-amber-500/20'
+          }`}
+          title="Buka form input barang temuan"
+        >
+          <PlusCircle className="w-4 h-4 text-slate-950" />
+          <span>+ Temuan</span>
+        </button>
+      </div>
+
+      {/* STICKY BOTTOM ACTION BAR (DUAL ACTION: LANJUT RAK VS BALIK LIST) */}
+      <div className="fixed bottom-0 left-0 right-0 z-30 p-2.5 sm:p-3 bg-white/95 backdrop-blur-md border-t border-slate-200/90 shadow-[0_-8px_20px_rgba(0,0,0,0.06)] pb-safe">
+        <div className="max-w-md mx-auto flex items-center gap-2">
+          {/* Tombol Sekunder: Simpan & Balik ke List */}
           <button
             type="button"
             disabled={isLoadingSave || isSessionLocked}
-            onClick={handleSaveAndNext}
-            className={`w-full h-12 px-4 rounded-xl font-black text-sm shadow-[0_0_15px_rgba(34,211,238,0.35)] cursor-pointer transition-all active:scale-[0.98] flex items-center justify-center gap-2 text-center ${
+            onClick={() => handleSaveAndNext(false)}
+            className="h-12 px-3 sm:px-4 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-bold border border-slate-300 transition-colors cursor-pointer shrink-0 disabled:opacity-50"
+            title="Simpan dan kembali ke menu list rak"
+          >
+            {t('saveAndBackToList') || 'Simpan & List'}
+          </button>
+
+          {/* Tombol Utama: Simpan & Lanjut ke Rak Berikutnya */}
+          <button
+            type="button"
+            disabled={isLoadingSave || isSessionLocked}
+            onClick={() => handleSaveAndNext(true)}
+            className={`flex-1 h-12 px-3 sm:px-4 rounded-xl font-black text-xs sm:text-sm shadow-[0_0_15px_rgba(34,211,238,0.35)] cursor-pointer transition-all active:scale-[0.98] flex items-center justify-center gap-1.5 text-center ${
               isSessionLocked || isLoadingSave
                 ? 'bg-slate-400 opacity-50 cursor-not-allowed text-white shadow-none'
                 : 'bg-cyan-400 hover:bg-cyan-300 text-slate-950'
@@ -1510,7 +1578,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             ) : (
               <>
                 <CheckCircle2 className="w-4 h-4 shrink-0 text-slate-950" />
-                <span>{t('saveAndNextBtn')}</span>
+                <span>Simpan & Lanjut Rak ➔</span>
               </>
             )}
           </button>

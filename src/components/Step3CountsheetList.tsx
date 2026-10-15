@@ -41,16 +41,23 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
     isOpen: false, title: '', message: '',
   });
 
+  const [allActiveProjects, setAllActiveProjects] = useState<any[]>([]);
+
   // 1. LISTEN PROJECT AKTIF BERSTATU "LIVE_ACTIVE" DARI FIRESTORE
   useEffect(() => {
     const qProjects = query(collection(db, "projects"), where("status", "==", "LIVE_ACTIVE"));
     const unsubProjects = onSnapshot(qProjects, (snap) => {
       if (!snap.empty) {
-        // Ambil project aktif terbaru
-        const projData = snap.docs[0].data();
-        setActiveProject({ id: snap.docs[0].id, ...projData });
+        const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        setAllActiveProjects(list);
+        setActiveProject((prev: any) => {
+          if (prev && list.some((p: any) => p.id === prev.id)) {
+            return list.find((p: any) => p.id === prev.id) || list[0];
+          }
+          return list[0];
+        });
       } else {
-        // JIKA ADMIN MENGHAPUS PROJECT, DETEKSI OTOMATIS & BERSIHKAN DATA
+        setAllActiveProjects([]);
         setActiveProject(null);
         setRacks([]);
       }
@@ -99,6 +106,12 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
 
       taskList.forEach((task: any) => {
         if (task.isLocked) return;
+
+        // ISOLASI PROJECT:
+        // Jika task punya projectId dan beda dengan activeProject, lewati
+        if (task.projectId && activeProject && task.projectId !== activeProject.id) return;
+        // Jika project adalah FLOOR_TO_LIST dan task tidak punya projectId (task warisan lama), lewati agar mulai bersih
+        if (!task.projectId && activeProject && activeProject.method === 'FLOOR_TO_LIST') return;
 
         const rackLoc = task.Location || 'Z02-10-A';
         const isCounted = !!task.isCounted || (task.QTY_ACTUAL !== null && task.QTY_ACTUAL !== undefined);
@@ -158,6 +171,7 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
     const taskRef = doc(db, "master_tasks", taskId);
 
     await setDoc(taskRef, {
+      projectId: activeProject?.id || '',
       Location: cleanRack,
       Zone: newRackZone,
       counter: cleanCounter,
@@ -334,15 +348,37 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
                 <div className="flex items-center justify-between gap-space-xs">
                   <div className="flex items-center gap-space-xs min-w-0">
                     <Warehouse className="w-5 h-5 text-cyan-600 shrink-0" />
-                    <h2 className="font-headline-sm text-headline-sm text-on-surface truncate">
+                    <h2 className="font-headline-sm text-headline-sm text-on-surface line-clamp-2 wrap-break-word leading-snug">
                       {activeProject.sessionCode} — {activeProject.locationName}
                     </h2>
                   </div>
                 </div>
+
+                {/* SELECTOR PILIH SESI JIKA ADA LEBIH DARI 1 PROJECT LIVE_ACTIVE */}
+                {allActiveProjects.length > 1 && (
+                  <div className="flex items-center gap-2 p-2 bg-indigo-50 border border-indigo-200 rounded-xl">
+                    <span className="text-[10px] font-black uppercase text-indigo-900 shrink-0">Sesi Aktif:</span>
+                    <select
+                      value={activeProject.id}
+                      onChange={(e) => {
+                        const sel = allActiveProjects.find(p => p.id === e.target.value);
+                        if (sel) setActiveProject(sel);
+                      }}
+                      className="flex-1 bg-white border border-indigo-300 rounded-lg text-xs font-bold text-indigo-950 p-1.5 outline-none"
+                    >
+                      {allActiveProjects.map(proj => (
+                        <option key={proj.id} value={proj.id}>
+                          {proj.sessionCode} ({proj.locationName || proj.method})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
                 <div className="flex items-center justify-between flex-wrap gap-2 pt-space-xs border-t border-surface-container-low">
-                  <div className="inline-flex items-center gap-1.5 bg-surface-container-low px-2.5 py-1 rounded-full">
-                    <span className="text-xs">👥</span>
-                    <span className="font-label-sm text-label-sm text-on-surface-variant font-medium truncate">
+                  <div className="inline-flex items-center gap-1.5 bg-surface-container-low px-2.5 py-1.5 rounded-xl max-w-full flex-wrap">
+                    <span className="text-xs shrink-0">👥</span>
+                    <span className="font-label-sm text-label-sm text-on-surface-variant font-medium wrap-break-word leading-tight">
                       Counter: <b className="text-slate-900">{sessionData.primaryCounter}</b>
                       {partnerName ? <span className="text-slate-500"> • {lang === 'en' ? 'Assistant' : 'Pendamping'}: <b className="text-slate-800">{partnerName}</b></span> : null}
                     </span>
@@ -353,7 +389,7 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
                     <button
                       type="button"
                       onClick={onEditTeam}
-                      className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-bold flex items-center gap-1 border border-slate-300 transition-colors cursor-pointer"
+                      className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-bold flex items-center gap-1 border border-slate-300 transition-colors cursor-pointer shrink-0"
                     >
                       <Edit2 className="w-3 h-3" />
                       <span>{lang === 'en' ? 'Edit Team' : 'Edit Tim'}</span>
