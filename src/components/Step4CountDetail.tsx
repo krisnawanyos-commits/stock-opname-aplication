@@ -68,6 +68,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
   const [expandedSku, setExpandedSku] = useState<string | null>(null);
   const [isScannerOpen, setIsScannerOpen] = useState<boolean>(false);
   const [isLoadingSave, setIsLoadingSave] = useState<boolean>(false);
+  const [showCompletedSection, setShowCompletedSection] = useState<boolean>(false);
 
   // MASTER KATEGORI BAD STOCK DARI OWNER
   const [availableCategories, setAvailableCategories] = useState<string[]>([]);
@@ -969,6 +970,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
   };
 
   const currentDisplayRound = skuList[0]?.currentRound || 1;
+  const completedCount = skuList.filter(s => s.isCounted || ((s.qtyGood !== "" || s.qtyBad !== "") && (parseInt(s.qtyGood || "0", 10) + parseInt(s.qtyBad || "0", 10) > 0))).length;
 
   return (
     <div className="bg-slate-50 text-slate-900 font-body-md text-body-md flex flex-col min-h-screen">
@@ -985,13 +987,13 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
 
       {/* HEADER HP COUNTER (RELATIVE - TIDAK IKUT TURUN SAAT SCROLLING) */}
       <header className="relative w-full z-10 bg-white border-b border-slate-200/90 pt-safe shadow-xs shrink-0">
-        <div className="py-3 px-margin flex flex-col justify-center gap-space-xs max-w-md mx-auto">
+        <div className="py-3 px-4 sm:px-5 flex flex-col justify-center gap-space-xs max-w-md mx-auto">
           <div className="flex items-center justify-between gap-1.5">
             <button type="button" onClick={handleSafeBackToList} className="min-h-10 -ml-1 px-1.5 flex items-center gap-0.5 text-slate-800 hover:text-cyan-600 transition-colors cursor-pointer font-bold shrink-0">
               <ChevronLeft className="w-5 h-5 text-slate-700" />
               <span className="font-label-md uppercase tracking-wider font-bold text-xs">{t('backToCountsheet')}</span>
             </button>
-            <div className="flex items-center gap-1.5 shrink-0">
+            <div className="flex items-center gap-1.5 shrink-0 pr-1">
               <LanguageToggle />
               <NetworkStatusBadge />
               <span className="whitespace-nowrap shrink-0 px-2.5 py-1 rounded-lg bg-cyan-50 text-cyan-950 font-sans text-xs font-bold border border-cyan-300 shadow-2xs flex items-center gap-1">
@@ -1001,7 +1003,8 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
               <button
                 type="button"
                 onClick={handleSafeLogout}
-                className="px-2.5 py-1 bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer shrink-0"
+                className="px-2.5 py-1.5 bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer shrink-0 ml-1.5 shadow-2xs"
+                title={t('logout')}
               >
                 <LogOut className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">{t('logout')}</span>
@@ -1035,7 +1038,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
               <span className={`text-[10px] font-bold px-2.5 py-1 rounded-md border ${isSessionLocked ? 'bg-red-50 text-red-700 border-red-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>
                 {isSessionLocked ? `🔒 ${t('sessionLockedBadge')}` : `🟢 ${t('sessionOpenBadge')}`}
               </span>
-              <span className="text-xs font-bold text-slate-500 bg-slate-200 px-2.5 py-1 rounded-full">{skuList.length} SKU</span>
+              <span className="text-xs font-bold text-slate-700 bg-slate-200 px-2.5 py-1 rounded-full">{completedCount} / {skuList.length} SKU</span>
             </div>
           </div>
 
@@ -1071,16 +1074,41 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             <span>{t('scanBarcodeBtnTop')}</span>
           </button>
 
-          {/* RENDER KARTU SKU MASTER WMS & TEMUAN (ACCORDION COMPACT MODE) */}
-          {skuList.map((currentSku, idx) => {
-            const isExpanded = expandedSku === currentSku.sku;
-            const numGood = parseInt(currentSku.qtyGood || "0", 10);
-            const numBad = parseInt(currentSku.qtyBad || "0", 10);
-            const totalCounted = numGood + numBad;
-            const hasInputValue = currentSku.qtyGood !== "" || currentSku.qtyBad !== "";
-            const isCounted = currentSku.isCounted || (hasInputValue && totalCounted > 0);
+          {/* PISAHKAN SKU BELUM DIHITUNG (UTAMA) VS SELESAI DIHITUNG (TERLIPAT) */}
+          {(() => {
+            const pendingItems = skuList
+              .map((sku, originalIndex) => ({ sku, originalIndex }))
+              .filter(({ sku }) => {
+                if (expandedSku === sku.sku) return true;
+                const numGood = parseInt(sku.qtyGood || "0", 10);
+                const numBad = parseInt(sku.qtyBad || "0", 10);
+                const totalCounted = numGood + numBad;
+                const hasInputValue = sku.qtyGood !== "" || sku.qtyBad !== "";
+                const isCounted = sku.isCounted || (hasInputValue && totalCounted > 0);
+                return !isCounted;
+              });
 
-            return (
+            const completedItems = skuList
+              .map((sku, originalIndex) => ({ sku, originalIndex }))
+              .filter(({ sku }) => {
+                if (expandedSku === sku.sku) return false;
+                const numGood = parseInt(sku.qtyGood || "0", 10);
+                const numBad = parseInt(sku.qtyBad || "0", 10);
+                const totalCounted = numGood + numBad;
+                const hasInputValue = sku.qtyGood !== "" || sku.qtyBad !== "";
+                const isCounted = sku.isCounted || (hasInputValue && totalCounted > 0);
+                return isCounted;
+              });
+
+            const renderCard = (currentSku: GroupedSKUItem, idx: number) => {
+              const isExpanded = expandedSku === currentSku.sku;
+              const numGood = parseInt(currentSku.qtyGood || "0", 10);
+              const numBad = parseInt(currentSku.qtyBad || "0", 10);
+              const totalCounted = numGood + numBad;
+              const hasInputValue = currentSku.qtyGood !== "" || currentSku.qtyBad !== "";
+              const isCounted = currentSku.isCounted || (hasInputValue && totalCounted > 0);
+
+              return (
               <div
                 key={currentSku.sku}
                 id={`sku-card-${currentSku.sku}`}
@@ -1365,7 +1393,66 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                 )}
               </div>
             );
-          })}
+          };
+
+          return (
+            <>
+              {/* 1. KELOMPOK UTAMA: SKU BELUM DIHITUNG */}
+              {pendingItems.map(({ sku, originalIndex }) => renderCard(sku, originalIndex))}
+
+              {/* NOTIFIKASI JIKA SEMUA SKU DI RAK SUDAH SELESAI */}
+              {pendingItems.length === 0 && completedItems.length > 0 && (
+                <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 text-center space-y-1.5 my-1 animate-in fade-in">
+                  <div className="w-9 h-9 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center mx-auto text-base font-black">
+                    ✓
+                  </div>
+                  <h4 className="font-bold text-sm text-emerald-950">Semua SKU di Rak Ini Selesai Dihitung!</h4>
+                  <p className="text-[11px] text-emerald-700 max-w-xs mx-auto">
+                    Total {completedItems.length} SKU sudah memiliki hitungan. Buka section riwayat di bawah jika perlu koreksi, atau klik tombol simpan di bawah.
+                  </p>
+                </div>
+              )}
+
+              {/* 2. SECTION TERLIPAT: SKU YANG SUDAH DIHITUNG (DENGAN TOMBOL RIWAYAT) */}
+              {completedItems.length > 0 && (
+                <div className="rounded-2xl border border-emerald-200 bg-white shadow-xs overflow-hidden transition-all my-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowCompletedSection(prev => !prev)}
+                    className="w-full p-3.5 flex items-center justify-between bg-emerald-50/80 hover:bg-emerald-100/70 transition-colors cursor-pointer select-none text-left"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="w-7 h-7 rounded-xl bg-emerald-500 text-white flex items-center justify-center font-black text-xs shrink-0 shadow-xs">
+                        ✓
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-xs font-bold text-emerald-950 flex items-center gap-1.5 flex-wrap">
+                          <span>SKU Selesai Dihitung</span>
+                          <span className="px-2 py-0.5 rounded-full bg-emerald-200 text-emerald-900 font-mono text-[10px] font-bold">
+                            {completedItems.length} SKU
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-emerald-700 font-medium truncate">
+                          {showCompletedSection ? 'Klik untuk melipat kembali' : 'Klik untuk melihat riwayat atau koreksi hitungan'}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1 text-emerald-800 text-xs font-bold shrink-0 pl-2">
+                      <span>{showCompletedSection ? 'Tutup' : 'Buka'}</span>
+                      <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${showCompletedSection ? 'rotate-180' : ''}`} />
+                    </div>
+                  </button>
+
+                  {showCompletedSection && (
+                    <div className="p-3 bg-slate-50/60 space-y-3 border-t border-emerald-100 animate-in fade-in duration-200">
+                      {completedItems.map(({ sku, originalIndex }) => renderCard(sku, originalIndex))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          );
+        })()}
 
           {/* FORM ITEM TAK TERDAFTAR / TEMUAN LAIN (ACCORDION COLLAPSIBLE) */}
           <div id="unmapped-card" className={`bg-white rounded-2xl shadow-xs border transition-all overflow-hidden ${unmappedDrawerOpen ? 'border-amber-400 ring-2 ring-amber-400/20' : 'border-dashed border-2 border-amber-300/80 bg-amber-50/30 hover:bg-amber-50/60'}`}>
