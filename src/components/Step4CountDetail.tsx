@@ -217,6 +217,19 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     }
   }, [skuList, isDirty, draftKey]);
 
+  // PROTEKSI ANTI DATA LOSS: Peringatan jika counter mencoba menutup tab / reload saat data belum disubmit
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (isDirty) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [isDirty]);
+
   // 1. LISTEN GEMBOK LOCK SESI GLOBAL & COUNTER
   useEffect(() => {
     const lockDocId = sessionData.sessionCode || sessionData.sessionId || "SO-WRG-2026-09";
