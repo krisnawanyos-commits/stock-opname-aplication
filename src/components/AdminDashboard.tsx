@@ -643,13 +643,8 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 const activeProjId = activeProject?.id;
                 const filteredDocs = snapshot.docs.filter(docSnap => {
                     const data = docSnap.data();
-                    if (data.projectId && activeProjId) {
-                        return data.projectId === activeProjId;
-                    }
-                    if (!data.projectId && activeProject?.method === 'FLOOR_TO_LIST') {
-                        return false; // Jangan tampilkan task warisan tanpa projectId pada sesi Floor to List baru
-                    }
-                    return true;
+                    if (!activeProjId) return false;
+                    return data.projectId === activeProjId;
                 });
 
                 const taskList: MasterSKUItem[] = filteredDocs.map(docSnap => {
@@ -2846,7 +2841,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                     const locStr = (row['Location'] || row['LOCATION'] || `LOC-${globalIdx + 1}`).toString().trim();
                                     const skuStr = (row['SKU'] || `SKU-${globalIdx + 1}`).toString().trim();
 
-                                    const taskId = sanitizeDocId(`${locStr}_${skuStr}_${globalIdx + 1}`);
+                                    const taskId = sanitizeDocId(`${pId}_${locStr}_${skuStr}_${globalIdx + 1}`);
 
                                     const rawActQty = row['QTY ACTUAL'] ?? row['Qty Actual'] ?? row['ACTUAL QTY'];
                                     const numActQty = parseInt(rawActQty, 10);
@@ -3563,7 +3558,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
             const tasksSnap = await getDocs(collection(db, "master_tasks"));
             const CHUNK = 400;
-            const taskDocs = tasksSnap.docs;
+            const taskDocs = tasksSnap.docs.filter(docSnap => docSnap.data().projectId === projectToDelete.id);
 
             for (let i = 0; i < taskDocs.length; i += CHUNK) {
                 const chunk = taskDocs.slice(i, i + CHUNK);
@@ -3573,8 +3568,12 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             }
 
             const auditSnap = await getDocs(collection(db, "audit_logs"));
-            for (let i = 0; i < auditSnap.docs.length; i += CHUNK) {
-                const chunk = auditSnap.docs.slice(i, i + CHUNK);
+            const auditDocs = auditSnap.docs.filter(docSnap => {
+                const data = docSnap.data();
+                return data.projectId === projectToDelete.id || data.sessionCode === projectToDelete.sessionCode;
+            });
+            for (let i = 0; i < auditDocs.length; i += CHUNK) {
+                const chunk = auditDocs.slice(i, i + CHUNK);
                 const batch = writeBatch(db);
                 chunk.forEach(docSnap => batch.delete(docSnap.ref));
                 await batch.commit();
@@ -3604,11 +3603,12 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             await setDoc(doc(db, "projects", projId), newSession);
             setActiveProject(newSession);
 
-            if (initialFileToUpload) {
+            if (wizMethod === 'LIST_TO_FLOOR' && initialFileToUpload) {
                 await parseXLSXFile(initialFileToUpload, projId);
             } else {
                 setMasterDataList([]);
             }
+            setInitialFileToUpload(null);
             setRecoveryAdjustments({});
             setViewState('DASHBOARD');
             setActiveTab('progress');
@@ -5493,7 +5493,13 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                             )}
                             {effectiveRole === 'owner' && (
                                 <button 
-                                    onClick={() => setViewState('WIZARD_SETUP')} 
+                                    onClick={() => {
+                                        setInitialFileToUpload(null);
+                                        setWizMethod('LIST_TO_FLOOR');
+                                        const autoCode = `SO-${warehouseList[0]?.id || 'WRG'}-${new Date().toISOString().slice(0, 10)}`;
+                                        setWizSessionCode(autoCode);
+                                        setViewState('WIZARD_SETUP');
+                                    }} 
                                     className="flex-1 md:flex-none px-5 py-2.5 bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-mono text-xs font-bold uppercase tracking-wider rounded-xl flex items-center justify-center space-x-2 shadow-[0_0_15px_rgba(0,242,254,0.3)] transition-all cursor-pointer active:scale-95"
                                 >
                                     <Plus className="w-4 h-4" /><span>New Project</span>
@@ -6020,30 +6026,52 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                             </div>
                         </div>
 
-                        <div className="p-5 bg-slate-50 border border-dashed border-cyan-400/50 rounded-2xl text-center space-y-3">
-                            <div className="flex justify-center"><FileSpreadsheet className="w-8 h-8 text-cyan-600" /></div>
-                            <div>
-                                <div className="text-xs font-mono font-bold text-slate-900 uppercase tracking-wider">Pre-load Master Task Excel (.xlsx)</div>
-                                <p className="text-[11px] font-mono text-slate-500 mt-1">Upload sekarang untuk mempercepat sesi opname.</p>
+                        {wizMethod === 'FLOOR_TO_LIST' ? (
+                            <div className="p-5 bg-cyan-50/70 border border-cyan-200 rounded-2xl text-center space-y-2">
+                                <div className="flex justify-center"><CheckCircle2 className="w-8 h-8 text-cyan-600" /></div>
+                                <div className="text-xs font-mono font-bold text-slate-900 uppercase tracking-wider">Metode Floor to List Aktif</div>
+                                <p className="text-[11px] font-mono text-slate-600 max-w-md mx-auto">
+                                    Sesi dimulai bersih dengan 0 tugas (kosong). Counter di lapangan akan mendaftarkan rak fisik secara mandiri melalui tombol "+ Tambah Rak".
+                                </p>
                             </div>
+                        ) : (
+                            <div className="p-5 bg-slate-50 border border-dashed border-cyan-400/50 rounded-2xl text-center space-y-3">
+                                <div className="flex justify-center"><FileSpreadsheet className="w-8 h-8 text-cyan-600" /></div>
+                                <div>
+                                    <div className="text-xs font-mono font-bold text-slate-900 uppercase tracking-wider">Pre-load Master Task Excel (.xlsx)</div>
+                                    <p className="text-[11px] font-mono text-slate-500 mt-1">Upload sekarang untuk membagi penugasan rak ke counter.</p>
+                                </div>
 
-                            <div className="flex flex-col sm:flex-row justify-center items-center gap-3 pt-2 text-slate-600">
-                                <button
-                                    type="button"
-                                    onClick={handleDownloadTemplateXLSX}
-                                    className="px-4 py-2 bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 rounded-xl text-xs font-mono font-bold flex items-center space-x-1.5 shadow-xs transition-colors cursor-pointer"
-                                >
-                                    <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
-                                    <span>Download Template (.xlsx)</span>
-                                </button>
-                                <input
-                                    type="file"
-                                    accept=".xlsx, .xls"
-                                    onChange={(e) => setInitialFileToUpload(e.target.files?.[0] || null)}
-                                    className="text-xs font-mono file:mr-2 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:font-bold file:bg-cyan-400 file:text-slate-950 hover:file:bg-cyan-300 cursor-pointer"
-                                />
+                                <div className="flex flex-col sm:flex-row justify-center items-center gap-3 pt-2 text-slate-600">
+                                    <button
+                                        type="button"
+                                        onClick={handleDownloadTemplateXLSX}
+                                        className="px-4 py-2 bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 rounded-xl text-xs font-mono font-bold flex items-center space-x-1.5 shadow-xs transition-colors cursor-pointer"
+                                    >
+                                        <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                                        <span>Download Template (.xlsx)</span>
+                                    </button>
+                                    <input
+                                        type="file"
+                                        accept=".xlsx, .xls"
+                                        onChange={(e) => setInitialFileToUpload(e.target.files?.[0] || null)}
+                                        className="text-xs font-mono file:mr-2 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:font-bold file:bg-cyan-400 file:text-slate-950 hover:file:bg-cyan-300 cursor-pointer"
+                                    />
+                                </div>
+
+                                {initialFileToUpload && (
+                                    <div className="inline-flex items-center justify-center gap-2 text-xs font-mono font-bold text-emerald-700 bg-emerald-50 py-1.5 px-3 rounded-xl border border-emerald-200 mx-auto">
+                                        <span>📄 {initialFileToUpload.name}</span>
+                                        <button
+                                            type="button"
+                                            onClick={() => setInitialFileToUpload(null)}
+                                            className="text-red-500 hover:text-red-700 ml-1.5 font-black cursor-pointer text-sm"
+                                            title="Hapus file terpilih"
+                                        >✕</button>
+                                    </div>
+                                )}
                             </div>
-                        </div>
+                        )}
 
                         <div className="flex justify-end pt-4">
                             <button 

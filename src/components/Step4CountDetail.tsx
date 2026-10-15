@@ -308,6 +308,8 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
         snapshot.docs.forEach(docSnap => {
           const data = docSnap.data();
           if (data.isLocked) return;
+          if (sessionData.projectId && data.projectId && data.projectId !== sessionData.projectId) return;
+          if (sessionData.projectId && !data.projectId) return;
           if (!data.SKU || data.SKU === 'SKU_UNKNOWN') return;
 
           const skuKey = data.SKU.toUpperCase().trim();
@@ -772,6 +774,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     const taskRef = doc(db, "master_tasks", taskId);
 
     batch.set(taskRef, {
+      projectId: sessionData.projectId || '',
       Owner: unmOwner,
       SKU: unmSku,
       Description: unmDesc,
@@ -796,6 +799,8 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     // 3. Log Audit Trail (Auto-ID)
     const auditRef = doc(collection(db, "audit_logs"));
     batch.set(auditRef, {
+      projectId: sessionData.projectId || '',
+      sessionCode: sessionData.sessionCode || '',
       timestamp: new Date().toISOString(),
       rackLocation: rack.rackNumber,
       ownerSku: unmOwner,
@@ -868,6 +873,8 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
         const auditRef = doc(collection(db, "audit_logs"));
 
         batch.set(auditRef, {
+          projectId: sessionData.projectId || '',
+          sessionCode: sessionData.sessionCode || '',
           timestamp: new Date().toISOString(),
           rackLocation: rack.rackNumber,
           ownerSku: 'DDI',

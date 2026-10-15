@@ -66,6 +66,16 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
     return () => unsubProjects();
   }, []);
 
+  // SINKRONISASI ACTIVE PROJECT KE SESSION DATA
+  useEffect(() => {
+    if (activeProject) {
+      sessionData.projectId = activeProject.id;
+      sessionData.sessionCode = activeProject.sessionCode;
+      sessionData.sessionName = activeProject.sessionCode;
+      sessionData.mode = activeProject.method === 'FLOOR_TO_LIST' ? 'floor-to-list' : 'list-to-floor';
+    }
+  }, [activeProject, sessionData]);
+
   // 2. LISTEN GEMBOK LOCK SESI
   useEffect(() => {
     const lockDocId = activeProject?.sessionCode || sessionData.sessionCode || sessionData.sessionId || "SO-WRG-2026-09";
@@ -107,11 +117,9 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
       taskList.forEach((task: any) => {
         if (task.isLocked) return;
 
-        // ISOLASI PROJECT:
-        // Jika task punya projectId dan beda dengan activeProject, lewati
-        if (task.projectId && activeProject && task.projectId !== activeProject.id) return;
-        // Jika project adalah FLOOR_TO_LIST dan task tidak punya projectId (task warisan lama), lewati agar mulai bersih
-        if (!task.projectId && activeProject && activeProject.method === 'FLOOR_TO_LIST') return;
+        // ISOLASI PROJECT KETAT:
+        // Task HANYA boleh diproses jika projectId sama persis dengan activeProject.id
+        if (!activeProject || task.projectId !== activeProject.id) return;
 
         const rackLoc = task.Location || 'Z02-10-A';
         const isCounted = !!task.isCounted || (task.QTY_ACTUAL !== null && task.QTY_ACTUAL !== undefined);
@@ -375,12 +383,12 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
                   </div>
                 )}
 
-                <div className="flex items-center justify-between flex-wrap gap-2 pt-space-xs border-t border-surface-container-low">
-                  <div className="inline-flex items-center gap-1.5 bg-surface-container-low px-2.5 py-1.5 rounded-xl max-w-full flex-wrap">
+                <div className="flex items-center justify-between gap-2 pt-space-xs border-t border-surface-container-low">
+                  <div className="flex-1 min-w-0 inline-flex items-center gap-1.5 bg-surface-container-low px-2.5 py-1.5 rounded-xl">
                     <span className="text-xs shrink-0">👥</span>
-                    <span className="font-label-sm text-label-sm text-on-surface-variant font-medium wrap-break-word leading-tight">
+                    <span className="font-label-sm text-label-sm text-on-surface-variant font-medium truncate leading-tight">
                       Counter: <b className="text-slate-900">{sessionData.primaryCounter}</b>
-                      {partnerName ? <span className="text-slate-500"> • {lang === 'en' ? 'Assistant' : 'Pendamping'}: <b className="text-slate-800">{partnerName}</b></span> : null}
+                      {partnerName ? <span className="text-slate-500"> • {partnerName}</span> : null}
                     </span>
                     <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>
                   </div>
@@ -389,7 +397,7 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
                     <button
                       type="button"
                       onClick={onEditTeam}
-                      className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-bold flex items-center gap-1 border border-slate-300 transition-colors cursor-pointer shrink-0"
+                      className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-[11px] font-bold flex items-center gap-1 border border-slate-300 transition-colors cursor-pointer shrink-0"
                     >
                       <Edit2 className="w-3 h-3" />
                       <span>{lang === 'en' ? 'Edit Team' : 'Edit Tim'}</span>
@@ -519,7 +527,29 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
                   </button>
                 )}
                 {filteredRacks.length === 0 && (
-                  <div className="p-8 text-center text-slate-400 font-medium">Belum ada tugas rak untuk akun kamu ({sessionData.primaryCounter}).</div>
+                  <div className="p-8 text-center bg-white rounded-2xl border border-dashed border-cyan-300 space-y-3 my-2">
+                    <div className="text-3xl">📦</div>
+                    <div className="text-xs font-bold text-slate-700">
+                      {activeProject?.method === 'FLOOR_TO_LIST'
+                        ? 'Mode Floor to List: Belum Ada Rak'
+                        : `Belum ada tugas rak untuk akun kamu (${sessionData.primaryCounter})`}
+                    </div>
+                    <p className="text-[11px] text-slate-500 max-w-xs mx-auto leading-relaxed">
+                      {activeProject?.method === 'FLOOR_TO_LIST'
+                        ? 'Mulai hitung dengan menekan tombol "+ Tambah Rak" di atas untuk mendaftarkan rak fisik yang kamu temukan di lapangan.'
+                        : 'Tunggu Admin/Supervisor mengunggah dan membagi tugas rak di Admin Dashboard.'}
+                    </p>
+                    {activeProject?.method === 'FLOOR_TO_LIST' && (
+                      <button
+                        type="button"
+                        onClick={() => setShowAddRackModal(true)}
+                        className="px-4 py-2.5 bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-bold text-xs rounded-xl shadow-xs inline-flex items-center gap-1.5 cursor-pointer active:scale-95 transition-all"
+                      >
+                        <Plus className="w-4 h-4" />
+                        <span>Tambah Rak Pertama</span>
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
 
