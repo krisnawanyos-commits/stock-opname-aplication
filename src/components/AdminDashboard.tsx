@@ -1063,7 +1063,17 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         // Hitung total baris yang akan dicetak
         let totalTasksCount = 0;
         countersToPrint.forEach(cName => {
-            const count = masterDataList.filter(m => m.counter === cName && (roundNumber === 1 || m.currentRound === roundNumber || (m.currentRound >= roundNumber && !m.isLocked))).length;
+            const cleanC = cName.toLowerCase().trim();
+            const count = masterDataList.filter(m => {
+                const c = (m.counter || '').toLowerCase().trim();
+                const r1C = (m.round1Counter || '').toLowerCase().trim();
+                const r2C = (m.round2Counter || '').toLowerCase().trim();
+                const r3C = (m.round3Counter || '').toLowerCase().trim();
+                if (roundNumber === 1) return (r1C === cleanC) || (!r1C && c === cleanC);
+                if (roundNumber === 2) return (r2C === cleanC) || (m.currentRound === 2 && c === cleanC);
+                if (roundNumber === 3) return (r3C === cleanC) || (m.currentRound >= 3 && c === cleanC);
+                return c === cleanC;
+            }).length;
             totalTasksCount += count;
         });
 
@@ -1093,10 +1103,17 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         const ROWS_PER_PAGE = 26;
 
         countersToPrint.forEach(cName => {
-            let tasks = masterDataList.filter(m => m.counter === cName);
-            if (roundNumber > 1) {
-                tasks = tasks.filter(m => m.currentRound === roundNumber || (m.currentRound >= roundNumber && !m.isLocked));
-            }
+            const cleanC = cName.toLowerCase().trim();
+            const tasks = masterDataList.filter(m => {
+                const c = (m.counter || '').toLowerCase().trim();
+                const r1C = (m.round1Counter || '').toLowerCase().trim();
+                const r2C = (m.round2Counter || '').toLowerCase().trim();
+                const r3C = (m.round3Counter || '').toLowerCase().trim();
+                if (roundNumber === 1) return (r1C === cleanC) || (!r1C && c === cleanC);
+                if (roundNumber === 2) return (r2C === cleanC) || (m.currentRound === 2 && c === cleanC);
+                if (roundNumber === 3) return (r3C === cleanC) || (m.currentRound >= 3 && c === cleanC);
+                return c === cleanC;
+            });
 
             if (tasks.length === 0 && selectedCounter) return;
             tasks.sort((a, b) => (a.Location || '').localeCompare(b.Location || '') || (a.SKU || '').localeCompare(b.SKU || ''));
@@ -1812,12 +1829,27 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             return;
         }
 
-        let tasks = selectedCounter
-            ? masterDataList.filter(m => m.counter === selectedCounter)
-            : [...masterDataList];
-
-        if (roundNumber > 1) {
-            tasks = tasks.filter(m => m.currentRound === roundNumber || (m.currentRound >= roundNumber && !m.isLocked));
+        let tasks: MasterSKUItem[] = [];
+        if (selectedCounter) {
+            const cleanC = selectedCounter.toLowerCase().trim();
+            tasks = masterDataList.filter(m => {
+                const c = (m.counter || '').toLowerCase().trim();
+                const r1C = (m.round1Counter || '').toLowerCase().trim();
+                const r2C = (m.round2Counter || '').toLowerCase().trim();
+                const r3C = (m.round3Counter || '').toLowerCase().trim();
+                if (roundNumber === 1) return (r1C === cleanC) || (!r1C && c === cleanC);
+                if (roundNumber === 2) return (r2C === cleanC) || (m.currentRound === 2 && c === cleanC);
+                if (roundNumber === 3) return (r3C === cleanC) || (m.currentRound >= 3 && c === cleanC);
+                return c === cleanC;
+            });
+        } else {
+            if (roundNumber === 1) {
+                tasks = [...masterDataList];
+            } else if (roundNumber === 2) {
+                tasks = masterDataList.filter(m => m.currentRound >= 2 || !!m.round2Counter || m.round2Actual !== undefined);
+            } else if (roundNumber === 3) {
+                tasks = masterDataList.filter(m => m.currentRound >= 3 || !!m.round3Counter || m.round3Actual !== undefined);
+            }
         }
 
         tasks.sort((a, b) => (a.counter || '').localeCompare(b.counter || '') || (a.Location || '').localeCompare(b.Location || ''));
@@ -2151,6 +2183,72 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
         const wsDetail = XLSX.utils.json_to_sheet(rows);
         XLSX.utils.book_append_sheet(wb, wsDetail, "Komparasi_R1_R2_R3");
+
+        // SHEET HASIL RONDE 1
+        const r1Rows = sortedList.map((item, idx) => {
+            const sysQty = item.Qty || 0;
+            const r1Actual = item.round1Actual !== undefined ? item.round1Actual : (item.currentRound === 1 && item.isCounted ? (item.countedQty ?? item.QTY_ACTUAL) : '-');
+            const diffR1 = typeof r1Actual === 'number' ? r1Actual - sysQty : '-';
+            return {
+                'NO': idx + 1,
+                'LOKASI / RAK': item.Location || '-',
+                'LEVEL': item.level || '-',
+                'ZONE': item.Zone || '-',
+                'BARCODE / SKU': item.SKU,
+                'DESKRIPSI': item.Description || '-',
+                'SATUAN': item.satuanHitung || 'PCS',
+                'QTY SISTEM': sysQty,
+                'PIC RONDE 1': item.round1Counter || (item.currentRound === 1 ? item.counter : '-'),
+                'HASIL FISIK R1': r1Actual,
+                'SELISIH R1': diffR1,
+                'STATUS': typeof diffR1 === 'number' ? (diffR1 === 0 ? 'MATCH' : (diffR1 > 0 ? 'SURPLUS' : 'SHORTAGE')) : 'BELUM HITUNG'
+            };
+        });
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(r1Rows), "Hasil_Ronde_1");
+
+        // SHEET HASIL RONDE 2
+        const r2Rows = sortedList.map((item, idx) => {
+            const sysQty = item.Qty || 0;
+            const r2Actual = item.round2Actual !== undefined ? item.round2Actual : (item.currentRound === 2 && item.isCounted ? (item.countedQty ?? item.QTY_ACTUAL) : '-');
+            const diffR2 = typeof r2Actual === 'number' ? r2Actual - sysQty : '-';
+            return {
+                'NO': idx + 1,
+                'LOKASI / RAK': item.Location || '-',
+                'LEVEL': item.level || '-',
+                'ZONE': item.Zone || '-',
+                'BARCODE / SKU': item.SKU,
+                'DESKRIPSI': item.Description || '-',
+                'SATUAN': item.satuanHitung || 'PCS',
+                'QTY SISTEM': sysQty,
+                'PIC RONDE 2': item.round2Counter || (item.currentRound === 2 ? item.counter : '-'),
+                'HASIL FISIK R2': r2Actual,
+                'SELISIH R2': diffR2,
+                'STATUS': typeof diffR2 === 'number' ? (diffR2 === 0 ? 'MATCH' : (diffR2 > 0 ? 'SURPLUS' : 'SHORTAGE')) : (item.currentRound >= 2 ? 'PENDING' : 'TIDAK MASUK R2 (SUDAH MATCH R1)')
+            };
+        });
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(r2Rows), "Hasil_Ronde_2");
+
+        // SHEET HASIL RONDE 3
+        const r3Rows = sortedList.map((item, idx) => {
+            const sysQty = item.Qty || 0;
+            const r3Actual = item.round3Actual !== undefined ? item.round3Actual : (item.currentRound >= 3 && item.isCounted ? (item.countedQty ?? item.QTY_ACTUAL) : '-');
+            const diffR3 = typeof r3Actual === 'number' ? r3Actual - sysQty : '-';
+            return {
+                'NO': idx + 1,
+                'LOKASI / RAK': item.Location || '-',
+                'LEVEL': item.level || '-',
+                'ZONE': item.Zone || '-',
+                'BARCODE / SKU': item.SKU,
+                'DESKRIPSI': item.Description || '-',
+                'SATUAN': item.satuanHitung || 'PCS',
+                'QTY SISTEM': sysQty,
+                'PIC RONDE 3': item.round3Counter || (item.currentRound >= 3 ? item.counter : '-'),
+                'HASIL FISIK R3': r3Actual,
+                'SELISIH R3': diffR3,
+                'STATUS': typeof diffR3 === 'number' ? (diffR3 === 0 ? 'MATCH' : (diffR3 > 0 ? 'SURPLUS' : 'SHORTAGE')) : (item.currentRound >= 3 ? 'PENDING' : 'TIDAK MASUK R3')
+            };
+        });
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(r3Rows), "Hasil_Ronde_3");
 
         const cleanDateStr = new Date().toISOString().slice(0, 10);
         const cleanProjCode = (project?.sessionCode || 'SO').replace(/[^a-zA-Z0-9-]/g, '_');
@@ -3908,7 +4006,17 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             const slice = activeCountersForPrint.slice(i, i + bSize);
             let skuCount = 0;
             slice.forEach(c => {
-                const count = masterDataList.filter(m => m.counter === c && (printGuardModal.roundNumber === 1 || m.currentRound === printGuardModal.roundNumber || (m.currentRound >= printGuardModal.roundNumber && !m.isLocked))).length;
+                const cleanC = c.toLowerCase().trim();
+                const count = masterDataList.filter(m => {
+                    const cOwner = (m.counter || '').toLowerCase().trim();
+                    const r1C = (m.round1Counter || '').toLowerCase().trim();
+                    const r2C = (m.round2Counter || '').toLowerCase().trim();
+                    const r3C = (m.round3Counter || '').toLowerCase().trim();
+                    if (printGuardModal.roundNumber === 1) return (r1C === cleanC) || (!r1C && cOwner === cleanC);
+                    if (printGuardModal.roundNumber === 2) return (r2C === cleanC) || (m.currentRound === 2 && cOwner === cleanC);
+                    if (printGuardModal.roundNumber === 3) return (r3C === cleanC) || (m.currentRound >= 3 && cOwner === cleanC);
+                    return cOwner === cleanC;
+                }).length;
                 skuCount += count;
             });
 
@@ -3926,7 +4034,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
     }, [activeCountersForPrint, masterDataList, printGuardModal.batchSize, printGuardModal.roundNumber]);
 
     return (
-        <div className={`min-h-screen font-sans relative ${viewState === 'DASHBOARD' ? 'w-full p-0 max-w-none bg-slate-50 text-slate-800' : 'bg-[#F4F6F9] text-slate-900 p-4 lg:p-8 min-h-screen'}`}>
+        <div className={`min-h-screen font-sans relative w-full max-w-full overflow-x-hidden ${viewState === 'DASHBOARD' ? 'p-0 max-w-none bg-slate-50 text-slate-800' : 'bg-[#F4F6F9] text-slate-900 p-4 lg:p-8 min-h-screen'}`}>
             {/* ATMOSPHERIC TECH GRID (LIGHT MODE) */}
             {viewState !== 'DASHBOARD' && (
                 <>
@@ -5093,6 +5201,51 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                             </button>
                         </div>
 
+                        {/* Selector Target Ronde (R1, R2, R3) */}
+                        <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 bg-slate-50 border border-slate-200 rounded-2xl">
+                            <span className="text-[11px] font-bold text-slate-700 font-mono flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-cyan-500 animate-pulse"></span>
+                                <span>TARGET RONDE:</span>
+                            </span>
+                            <div className="flex items-center gap-1.5 bg-white p-1 rounded-xl border border-slate-200">
+                                {[1, 2, 3].map(rnd => {
+                                    let countForRound = 0;
+                                    activeCountersForPrint.forEach(cName => {
+                                        const cleanC = cName.toLowerCase().trim();
+                                        countForRound += masterDataList.filter(m => {
+                                            const c = (m.counter || '').toLowerCase().trim();
+                                            const r1C = (m.round1Counter || '').toLowerCase().trim();
+                                            const r2C = (m.round2Counter || '').toLowerCase().trim();
+                                            const r3C = (m.round3Counter || '').toLowerCase().trim();
+                                            if (rnd === 1) return (r1C === cleanC) || (!r1C && c === cleanC);
+                                            if (rnd === 2) return (r2C === cleanC) || (m.currentRound === 2 && c === cleanC);
+                                            if (rnd === 3) return (r3C === cleanC) || (m.currentRound >= 3 && c === cleanC);
+                                            return c === cleanC;
+                                        }).length;
+                                    });
+                                    const isSelected = printGuardModal.roundNumber === rnd;
+                                    return (
+                                        <button
+                                            key={rnd}
+                                            type="button"
+                                            onClick={() => setPrintGuardModal(prev => ({
+                                                ...prev,
+                                                roundNumber: rnd,
+                                                totalRows: countForRound
+                                            }))}
+                                            className={`px-3 py-1 rounded-lg text-xs font-black cursor-pointer transition-all ${
+                                                isSelected 
+                                                    ? 'bg-cyan-500 text-slate-950 shadow-2xs font-black' 
+                                                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                                            }`}
+                                        >
+                                            Ronde {rnd} ({countForRound.toLocaleString()} SKU)
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
+
                         {/* Navigation Tabs */}
                         <div className="flex border-b border-slate-200 font-mono text-xs">
                             <button
@@ -5192,7 +5345,17 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                         className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 outline-none cursor-pointer"
                                     >
                                         {activeCountersForPrint.map(cName => {
-                                            const count = masterDataList.filter(m => m.counter === cName && (printGuardModal.roundNumber === 1 || m.currentRound === printGuardModal.roundNumber || (m.currentRound >= printGuardModal.roundNumber && !m.isLocked))).length;
+                                            const cleanC = cName.toLowerCase().trim();
+                                            const count = masterDataList.filter(m => {
+                                                const cOwner = (m.counter || '').toLowerCase().trim();
+                                                const r1C = (m.round1Counter || '').toLowerCase().trim();
+                                                const r2C = (m.round2Counter || '').toLowerCase().trim();
+                                                const r3C = (m.round3Counter || '').toLowerCase().trim();
+                                                if (printGuardModal.roundNumber === 1) return (r1C === cleanC) || (!r1C && cOwner === cleanC);
+                                                if (printGuardModal.roundNumber === 2) return (r2C === cleanC) || (m.currentRound === 2 && cOwner === cleanC);
+                                                if (printGuardModal.roundNumber === 3) return (r3C === cleanC) || (m.currentRound >= 3 && cOwner === cleanC);
+                                                return cOwner === cleanC;
+                                            }).length;
                                             return (
                                                 <option key={cName} value={cName}>
                                                     {cName.toUpperCase()} ({count} SKU • ~{Math.ceil(count / 26)} Lembar A4)
@@ -5884,11 +6047,11 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
             {/* SCREEN 3: DASHBOARD MAIN - FULL SCREEN EDGE-TO-EDGE */}
             {viewState === 'DASHBOARD' && activeProject && (
-                <div className="w-full min-h-screen bg-slate-100 flex flex-col animate-in fade-in duration-300">
+                <div className="w-full max-w-full min-h-screen bg-slate-100 flex flex-col overflow-x-hidden animate-in fade-in duration-300">
                     {/* EXECUTIVE TOP BAR (FULL WIDTH) */}
-                    <div className="bg-white px-4 py-3 sm:px-6 sm:py-3.5 border-b border-slate-200/90 flex flex-col xl:flex-row justify-between xl:items-center gap-4 shrink-0 shadow-xs sticky top-0 z-30">
+                    <div className="bg-white px-4 py-2.5 sm:px-6 border-b border-slate-200/90 flex flex-wrap justify-between items-center gap-3 w-full max-w-full shadow-2xs sticky top-0 z-30">
                         {/* LEFT: Back, Logo, Project Code & Warehouse */}
-                        <div className="flex items-center space-x-3.5 shrink-0">
+                        <div className="flex items-center space-x-3 min-w-0">
                             <button
                                 onClick={() => setViewState('LANDING')}
                                 title="Kembali ke Daftar Project"
@@ -5896,43 +6059,43 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                             >
                                 <ArrowLeft className="w-4 h-4" />
                             </button>
-                            <div className="w-10 h-10 flex items-center justify-center shrink-0">
+                            <div className="w-9 h-9 flex items-center justify-center shrink-0">
                                 <img src="/logo.png" alt="Noctus Count Logo" className="w-full h-full object-contain filter drop-shadow-sm" />
                             </div>
-                                <div>
-                                    <div className="flex items-center space-x-2">
-                                        <span className="text-sm font-black tracking-tight text-slate-900 font-mono">
-                                            {activeProject.sessionCode}
+                            <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <span className="text-sm font-black tracking-tight text-slate-900 font-mono">
+                                        {activeProject.sessionCode}
+                                    </span>
+                                    {activeProject.status === 'ARCHIVED' ? (
+                                        <span className="px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 border border-amber-300 text-[10px] font-black uppercase tracking-wider inline-flex items-center gap-1 font-mono">
+                                            <Archive className="w-3 h-3" />
+                                            <span>ARCHIVED</span>
                                         </span>
-                                        {activeProject.status === 'ARCHIVED' ? (
-                                            <span className="px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 border border-amber-300 text-[10px] font-black uppercase tracking-wider inline-flex items-center gap-1 font-mono">
-                                                <Archive className="w-3 h-3" />
-                                                <span>ARCHIVED</span>
-                                            </span>
-                                        ) : (
-                                            <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-300 text-[10px] font-black uppercase tracking-wider inline-flex items-center gap-1 font-mono">
-                                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                                                <span>LIVE_ACTIVE</span>
-                                            </span>
-                                        )}
-                                        <span className="text-[10px] text-slate-400 font-medium">•</span>
-                                        <span className="text-xs font-bold text-slate-600 flex items-center gap-1">
-                                            <MapPin className="w-3 h-3 text-slate-400" />
-                                            <span>{activeProject.locationName}</span>
+                                    ) : (
+                                        <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-300 text-[10px] font-black uppercase tracking-wider inline-flex items-center gap-1 font-mono">
+                                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                                            <span>LIVE_ACTIVE</span>
                                         </span>
-                                    </div>
-                                    <p className="text-[10px] text-slate-400 font-semibold tracking-wider">
-                                        NOCTUS COUNT™ <span className="text-slate-300">|</span> Stock Opname Systems
-                                    </p>
+                                    )}
+                                    <span className="text-[10px] text-slate-400 font-medium">•</span>
+                                    <span className="text-xs font-bold text-slate-600 flex items-center gap-1 truncate max-w-44 sm:max-w-xs">
+                                        <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
+                                        <span className="truncate">{activeProject.locationName}</span>
+                                    </span>
                                 </div>
+                                <p className="text-[10px] text-slate-400 font-semibold tracking-wider">
+                                    NOCTUS COUNT™ <span className="text-slate-300">|</span> Stock Opname Systems
+                                </p>
                             </div>
+                        </div>
 
                         {/* RIGHT: Round Filter, Role Badge, Session Lock, Mode Counter & Logout Button */}
-                        <div className="flex items-center space-x-2.5 justify-end shrink-0">
+                        <div className="flex flex-wrap items-center gap-2 justify-end">
                             <select
                                 value={viewRoundFilter}
                                 onChange={(e) => setViewRoundFilter(e.target.value === 'overall' ? 'overall' : parseInt(e.target.value, 10) as 1 | 2 | 3 | 4)}
-                                className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 outline-none cursor-pointer"
+                                className="px-2.5 py-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 outline-none cursor-pointer transition-colors"
                             >
                                 <option value="overall">All Rounds</option>
                                 <option value={1}>Round 1</option>
@@ -5941,25 +6104,26 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                             </select>
 
                             {effectiveRole === 'owner' ? (
-                                <div className="flex items-center space-x-2">
-                                    <span className="bg-slate-900 text-white text-[10px] font-black px-2.5 py-1.5 rounded-xl flex items-center space-x-1 border border-slate-800 shadow-xs">
+                                <div className="flex items-center gap-1.5">
+                                    <span className="bg-slate-900 text-white text-[10px] font-black px-2.5 py-1.5 rounded-xl flex items-center space-x-1 border border-slate-800 shadow-2xs">
                                         <ShieldCheck className="w-3.5 h-3.5 text-cyan-400" />
-                                        <span>SUPER ADMIN</span>
+                                        <span className="hidden sm:inline">SUPER ADMIN</span>
                                     </span>
                                     <button
                                         onClick={handleToggleGlobalLock}
-                                        className={`px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 shadow-xs border transition-colors cursor-pointer ${isProjectLocked ? 'bg-red-50 text-red-700 border-red-200 hover:bg-red-100' : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'}`}
+                                        className={`px-2.5 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1 shadow-2xs border transition-colors cursor-pointer ${isProjectLocked ? 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100' : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'}`}
+                                        title={isProjectLocked ? "Buka Sesi Global" : "Kunci Sesi Global"}
                                     >
-                                        {isProjectLocked ? <><Unlock className="w-3.5 h-3.5" />Buka Sesi</> : <><Lock className="w-3.5 h-3.5" />Kunci Sesi</>}
+                                        {isProjectLocked ? <><Unlock className="w-3 h-3" /><span>Buka Sesi</span></> : <><Lock className="w-3 h-3" /><span>Kunci Sesi</span></>}
                                     </button>
                                 </div>
                             ) : (
-                                <div className="flex items-center space-x-2">
-                                    <span className="bg-emerald-50 text-emerald-700 text-[10px] font-black px-3 py-1.5 rounded-xl flex items-center space-x-1.5 border border-emerald-300 shadow-xs">
+                                <div className="flex items-center gap-1.5">
+                                    <span className="bg-emerald-50 text-emerald-700 text-[10px] font-black px-2.5 py-1.5 rounded-xl flex items-center space-x-1 border border-emerald-300 shadow-2xs">
                                         <UserCheck className="w-3.5 h-3.5 text-emerald-600" />
-                                        <span>SUPERVISOR (MONITORING)</span>
+                                        <span>SUPERVISOR</span>
                                     </span>
-                                    <span className={`px-2.5 py-1 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1 border ${isProjectLocked ? 'bg-red-50 text-red-600 border-red-200' : 'bg-emerald-50 text-emerald-600 border-emerald-200'}`}>
+                                    <span className={`px-2 py-1 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1 border ${isProjectLocked ? 'bg-rose-50 text-rose-600 border-rose-200' : 'bg-emerald-50 text-emerald-600 border-emerald-200'}`}>
                                         {isProjectLocked ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
                                         <span>{isProjectLocked ? 'Terkunci' : 'Aktif'}</span>
                                     </span>
@@ -5967,47 +6131,48 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                             )}
 
                             <NetworkStatusBadge />
+
                             {onSwitchToCounterView && (
                                 <button
                                     onClick={onSwitchToCounterView}
                                     title="Beralih ke Layar HP Counter"
-                                    className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl cursor-pointer transition-colors flex items-center space-x-1.5 text-xs font-bold"
+                                    className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl cursor-pointer transition-colors flex items-center space-x-1.5 text-xs font-bold shadow-2xs"
                                 >
-                                    <Smartphone className="w-4 h-4 text-emerald-600" />
+                                    <Smartphone className="w-3.5 h-3.5 text-emerald-600" />
                                     <span className="hidden sm:inline">Mode Counter</span>
                                 </button>
                             )}
 
-                            <div className="hidden lg:flex items-center space-x-1.5 border-l border-slate-200 pl-2.5">
+                            <div className="flex items-center gap-1.5 border-l border-slate-200 pl-2">
                                 <button
                                     onClick={() => handleExportComprehensiveRekapXLSX(activeProject)}
                                     disabled={isExportingData}
-                                    className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-bold flex items-center space-x-1 cursor-pointer transition-colors"
+                                    className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-bold flex items-center space-x-1 cursor-pointer transition-colors shadow-2xs"
                                     title="Download Rekap Laporan Excel Lengkap (.xlsx)"
                                 >
                                     <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
-                                    <span>Rekap Excel</span>
+                                    <span className="hidden lg:inline">Rekap Excel</span>
                                 </button>
                                 <button
                                     onClick={() => handleDownloadHardBackupJSON(activeProject)}
                                     disabled={isExportingData}
-                                    className="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 rounded-xl text-xs font-bold flex items-center space-x-1 cursor-pointer transition-colors"
+                                    className="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 rounded-xl text-xs font-bold flex items-center space-x-1 cursor-pointer transition-colors shadow-2xs"
                                     title="Download Hard Backup JSON untuk Google Drive"
                                 >
                                     <HardDrive className="w-3.5 h-3.5 text-indigo-600" />
-                                    <span>Hard Backup JSON</span>
+                                    <span className="hidden lg:inline">Backup JSON</span>
                                 </button>
                                 {effectiveRole === 'owner' && (
                                     <button
                                         onClick={() => setProjectToArchive({ project: activeProject, targetStatus: activeProject.status === 'ARCHIVED' ? 'LIVE_ACTIVE' : 'ARCHIVED' })}
-                                        className={`p-1.5 rounded-xl border cursor-pointer transition-colors ${
+                                        className={`p-2 rounded-xl border cursor-pointer transition-colors shadow-2xs ${
                                             activeProject.status === 'ARCHIVED'
                                                 ? 'bg-amber-50 text-amber-700 border-amber-300 hover:bg-amber-100'
                                                 : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
                                         }`}
                                         title={activeProject.status === 'ARCHIVED' ? "Pulihkan Project ke LIVE_ACTIVE" : "Arsipkan Project"}
                                     >
-                                        {activeProject.status === 'ARCHIVED' ? <ArchiveRestore className="w-4 h-4 text-amber-600" /> : <Archive className="w-4 h-4 text-slate-600" />}
+                                        {activeProject.status === 'ARCHIVED' ? <ArchiveRestore className="w-3.5 h-3.5 text-amber-600" /> : <Archive className="w-3.5 h-3.5 text-slate-600" />}
                                     </button>
                                 )}
                             </div>
@@ -6015,10 +6180,10 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                             <button
                                 onClick={() => setViewState('LANDING')}
                                 title="Keluar ke Daftar Project"
-                                className="px-2.5 py-1.5 bg-slate-100 hover:bg-red-50 text-slate-700 hover:text-red-600 rounded-xl cursor-pointer transition-colors flex items-center space-x-1.5 text-xs font-bold"
+                                className="px-2.5 py-1.5 bg-slate-100 hover:bg-rose-50 text-slate-700 hover:text-rose-600 border border-slate-200 rounded-xl cursor-pointer transition-colors flex items-center space-x-1.5 text-xs font-bold shadow-2xs"
                             >
-                                <LogOut className="w-4 h-4" />
-                                <span className="hidden sm:inline">Keluar</span>
+                                <LogOut className="w-3.5 h-3.5" />
+                                <span>Keluar</span>
                             </button>
                         </div>
                     </div>
@@ -6068,7 +6233,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     )}
 
                     {/* MAIN BODY: LABELED SIDEBAR + FULL WIDTH EXPANSIVE CONTENT */}
-                    <div className="flex flex-1 flex-col md:flex-row min-h-[calc(100vh-65px)]">
+                    <div className="flex flex-1 flex-col md:flex-row min-h-[calc(100vh-65px)] w-full max-w-full overflow-x-hidden">
                         {/* LABELED SIDEBAR (EXECUTIVE DARK) */}
                         <div className="w-full md:w-56 bg-[#0F172A] flex md:flex-col justify-between p-2 md:p-3.5 border-r border-slate-800 shrink-0">
                             {/* NAV ICONS & LABELS */}
@@ -6136,44 +6301,97 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                             <div className="xl:col-span-7 space-y-6">
                                                 {/* PENDING STOCK COUNTS TABLE */}
                                                 <div className="bg-white p-5 sm:p-6 rounded-3xl border border-slate-200/80 shadow-md space-y-4">
-                                                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-100 pb-3 gap-3">
-                                                        <div className="flex items-center space-x-2">
-                                                            <div className="p-2 bg-cyan-50 text-cyan-700 rounded-xl">
-                                                                <Users className="w-4 h-4" />
+                                                    {/* CARD HEADER: Title & Search Bar */}
+                                                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-100 pb-3">
+                                                        <div className="flex items-center space-x-3">
+                                                            <div className="p-2.5 bg-cyan-50 text-cyan-700 rounded-2xl shadow-2xs border border-cyan-100/60 shrink-0">
+                                                                <Users className="w-5 h-5" />
                                                             </div>
                                                             <div>
-                                                                <h3 className="text-sm font-black text-slate-900 tracking-tight">PENDING STOCK COUNTS</h3>
+                                                                <div className="flex items-center gap-2">
+                                                                    <h3 className="text-sm font-black text-slate-900 tracking-tight">PENDING STOCK COUNTS</h3>
+                                                                    <span className="text-[10px] font-black bg-cyan-100/80 text-cyan-800 px-2 py-0.5 rounded-full border border-cyan-200/50">
+                                                                        {filteredCounterNames.length} Counter
+                                                                    </span>
+                                                                </div>
                                                                 <p className="text-[11px] text-slate-400 font-medium">Monitoring Real-Time PIC Counter Lapangan</p>
                                                             </div>
                                                         </div>
-                                                        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => handlePrintCountsheet(undefined, 1)}
-                                                                className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-[11px] font-bold flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer shrink-0"
-                                                                title="Cetak Countsheet Fisik Ronde 1 untuk semua counter (Page-break otomatis per counter)"
-                                                            >
-                                                                <Printer className="w-3.5 h-3.5 text-slate-600" />
-                                                                <span>Cetak R1 (Semua)</span>
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => handleExportCountsheetXLSX(undefined, 1)}
-                                                                className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-[11px] font-bold flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer shrink-0"
-                                                                title="Download file Excel Countsheet Blind Ronde 1"
-                                                            >
-                                                                <FileDown className="w-3.5 h-3.5 text-slate-600" />
-                                                                <span>Excel R1</span>
-                                                            </button>
+
+                                                        {/* SEARCH INPUT */}
+                                                        <div className="relative w-full sm:w-60">
+                                                            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+                                                            <input
+                                                                type="text"
+                                                                placeholder="Cari PIC Counter..."
+                                                                value={counterSearch}
+                                                                onChange={(e) => setCounterSearch(e.target.value)}
+                                                                className="w-full pl-9 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none transition-all"
+                                                            />
+                                                        </div>
+                                                    </div>
+
+                                                    {/* TOOLBAR: SEGMENTED PRINTS, EXPORTS & OPERATIONAL ACTIONS */}
+                                                    <div className="flex flex-wrap items-center justify-between gap-2 p-2 bg-slate-50/80 rounded-2xl border border-slate-200/70">
+                                                        {/* Left Group: Print & Excel Segmented Buttons */}
+                                                        <div className="flex flex-wrap items-center gap-2">
+                                                            {/* Segmented Cetak R1, R2, R3 */}
+                                                            <div className="flex items-center bg-white rounded-xl p-0.5 border border-slate-200/90 shadow-2xs">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => handlePrintCountsheet(undefined, 1)}
+                                                                    className="px-2.5 py-1 text-[11px] font-black text-slate-700 hover:text-cyan-800 hover:bg-cyan-50/50 rounded-lg flex items-center gap-1 cursor-pointer transition-all"
+                                                                    title="Buka Hub Cetak Countsheet Lapangan (Anti-Crash)"
+                                                                >
+                                                                    <Printer className="w-3.5 h-3.5 text-cyan-600" />
+                                                                    <span>Cetak:</span>
+                                                                </button>
+                                                                {[1, 2, 3].map(rnd => (
+                                                                    <button
+                                                                        key={rnd}
+                                                                        type="button"
+                                                                        onClick={() => handlePrintCountsheet(undefined, rnd)}
+                                                                        className="px-2 py-1 text-[11px] font-black text-slate-700 hover:text-cyan-800 hover:bg-cyan-50/60 rounded-lg cursor-pointer transition-all active:scale-95"
+                                                                        title={`Cetak Countsheet Fisik Ronde ${rnd} Semua Counter`}
+                                                                    >
+                                                                        R{rnd}
+                                                                    </button>
+                                                                ))}
+                                                            </div>
+
+                                                            {/* Segmented Excel R1, R2, R3 */}
+                                                            <div className="flex items-center bg-white rounded-xl p-0.5 border border-slate-200/90 shadow-2xs">
+                                                                <span className="px-2.5 py-1 text-[11px] font-black text-slate-700 flex items-center gap-1">
+                                                                    <FileDown className="w-3.5 h-3.5 text-slate-600" />
+                                                                    <span>Excel:</span>
+                                                                </span>
+                                                                {[1, 2, 3].map(rnd => (
+                                                                    <button
+                                                                        key={rnd}
+                                                                        type="button"
+                                                                        onClick={() => handleExportCountsheetXLSX(undefined, rnd)}
+                                                                        className="px-2 py-1 text-[11px] font-black text-slate-700 hover:text-emerald-800 hover:bg-emerald-50/60 rounded-lg cursor-pointer transition-all active:scale-95"
+                                                                        title={`Download File Excel Countsheet Blind Ronde ${rnd} Semua Counter`}
+                                                                    >
+                                                                        R{rnd}
+                                                                    </button>
+                                                                ))}
+                                                            </div>
+
+                                                            {/* Rekap Komparasi R1-R2-R3 */}
                                                             <button
                                                                 type="button"
                                                                 onClick={() => handleExportRoundsComparisonXLSX()}
-                                                                className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-xl text-[11px] font-bold flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer shrink-0"
+                                                                className="px-2.5 py-1.5 bg-white hover:bg-emerald-50 text-emerald-800 border border-emerald-300/80 rounded-xl text-[11px] font-bold flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer shrink-0"
                                                                 title="Download Rekap Komparasi Ronde 1, 2, 3 Seluruh Counter untuk Vendor & Manajemen"
                                                             >
                                                                 <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
-                                                                <span>Excel R1-R2-R3 (Semua)</span>
+                                                                <span>Rekap R1-R2-R3 (Semua)</span>
                                                             </button>
+                                                        </div>
+
+                                                        {/* Right Group: Operational Actions */}
+                                                        <div className="flex flex-wrap items-center gap-2">
                                                             <button
                                                                 type="button"
                                                                 onClick={handleOpenAutoPairModal}
@@ -6201,16 +6419,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                                 <ArrowRightLeft className="w-3.5 h-3.5" />
                                                                 <span>Oper Sisa Rak</span>
                                                             </button>
-                                                            <div className="relative w-full sm:w-48">
-                                                                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
-                                                                <input
-                                                                    type="text"
-                                                                    placeholder="Cari PIC Counter..."
-                                                                    value={counterSearch}
-                                                                    onChange={(e) => setCounterSearch(e.target.value)}
-                                                                    className="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none"
-                                                                />
-                                                            </div>
                                                         </div>
                                                     </div>
 
@@ -6370,39 +6578,71 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                                                                 </div>
                                                                                             </button>
 
-                                                                                            <button
-                                                                                                onClick={(e) => {
-                                                                                                    e.stopPropagation();
-                                                                                                    setMenuAnchor(null);
-                                                                                                    handlePrintCountsheet(cName, cMaxRound);
-                                                                                                }}
-                                                                                                className="w-full text-left px-3 py-2 rounded-xl text-xs font-bold flex items-center space-x-2.5 hover:bg-slate-100 text-slate-700 transition-all cursor-pointer"
-                                                                                            >
-                                                                                                <div className="w-7 h-7 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center shrink-0">
-                                                                                                    <Printer className="w-3.5 h-3.5" />
+                                                                                            {/* CETAK COUNTSHEET PER RONDE (R1, R2, R3) */}
+                                                                                            <div className="p-2 bg-slate-50 border border-slate-200/80 rounded-xl space-y-1.5">
+                                                                                                <div className="flex items-center justify-between px-1">
+                                                                                                    <span className="text-[10px] font-black text-slate-600 uppercase tracking-wider flex items-center gap-1.5">
+                                                                                                        <Printer className="w-3.5 h-3.5 text-cyan-700" />
+                                                                                                        <span>Cetak Countsheet</span>
+                                                                                                    </span>
+                                                                                                    <span className="text-[9px] font-mono font-bold text-cyan-700 bg-cyan-50 px-1 rounded border border-cyan-200">Blind A4</span>
                                                                                                 </div>
-                                                                                                <div className="flex-1 min-w-0">
-                                                                                                    <div className="text-xs font-bold leading-tight">Cetak Countsheet R{cMaxRound}</div>
-                                                                                                    <div className="text-[10px] text-slate-400 font-normal">Blind Count ({cName})</div>
+                                                                                                <div className="grid grid-cols-3 gap-1">
+                                                                                                    {[1, 2, 3].map(rnd => (
+                                                                                                        <button
+                                                                                                            key={rnd}
+                                                                                                            type="button"
+                                                                                                            onClick={(e) => {
+                                                                                                                e.stopPropagation();
+                                                                                                                setMenuAnchor(null);
+                                                                                                                handlePrintCountsheet(cName, rnd);
+                                                                                                            }}
+                                                                                                            className={`py-1.5 px-1.5 rounded-lg text-xs font-black flex items-center justify-center gap-1 transition-all cursor-pointer ${
+                                                                                                                rnd === cMaxRound 
+                                                                                                                    ? 'bg-cyan-500 hover:bg-cyan-400 text-slate-950 shadow-2xs font-black' 
+                                                                                                                    : 'bg-white hover:bg-slate-200 text-slate-700 border border-slate-200 font-bold'
+                                                                                                            }`}
+                                                                                                            title={`Cetak Lembar Kerja Blind Ronde ${rnd} (${cName})`}
+                                                                                                        >
+                                                                                                            <span>Ronde {rnd}</span>
+                                                                                                            {rnd === cMaxRound && <span className="w-1.5 h-1.5 rounded-full bg-slate-950"></span>}
+                                                                                                        </button>
+                                                                                                    ))}
                                                                                                 </div>
-                                                                                            </button>
+                                                                                            </div>
 
-                                                                                            <button
-                                                                                                onClick={(e) => {
-                                                                                                    e.stopPropagation();
-                                                                                                    setMenuAnchor(null);
-                                                                                                    handleExportCountsheetXLSX(cName, cMaxRound);
-                                                                                                }}
-                                                                                                className="w-full text-left px-3 py-2 rounded-xl text-xs font-bold flex items-center space-x-2.5 hover:bg-slate-100 text-slate-700 transition-all cursor-pointer"
-                                                                                            >
-                                                                                                <div className="w-7 h-7 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center shrink-0">
-                                                                                                    <FileDown className="w-3.5 h-3.5" />
+                                                                                            {/* EXCEL COUNTSHEET PER RONDE (R1, R2, R3) */}
+                                                                                            <div className="p-2 bg-slate-50 border border-slate-200/80 rounded-xl space-y-1.5">
+                                                                                                <div className="flex items-center justify-between px-1">
+                                                                                                    <span className="text-[10px] font-black text-slate-600 uppercase tracking-wider flex items-center gap-1.5">
+                                                                                                        <FileDown className="w-3.5 h-3.5 text-emerald-700" />
+                                                                                                        <span>Excel Countsheet</span>
+                                                                                                    </span>
+                                                                                                    <span className="text-[9px] font-mono font-bold text-emerald-700 bg-emerald-50 px-1 rounded border border-emerald-200">.xlsx</span>
                                                                                                 </div>
-                                                                                                <div className="flex-1 min-w-0">
-                                                                                                    <div className="text-xs font-bold leading-tight">Excel Countsheet R{cMaxRound}</div>
-                                                                                                    <div className="text-[10px] text-slate-400 font-normal">Format Blind .xlsx</div>
+                                                                                                <div className="grid grid-cols-3 gap-1">
+                                                                                                    {[1, 2, 3].map(rnd => (
+                                                                                                        <button
+                                                                                                            key={rnd}
+                                                                                                            type="button"
+                                                                                                            onClick={(e) => {
+                                                                                                                e.stopPropagation();
+                                                                                                                setMenuAnchor(null);
+                                                                                                                handleExportCountsheetXLSX(cName, rnd);
+                                                                                                            }}
+                                                                                                            className={`py-1.5 px-1.5 rounded-lg text-xs font-black flex items-center justify-center gap-1 transition-all cursor-pointer ${
+                                                                                                                rnd === cMaxRound 
+                                                                                                                    ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-2xs font-black' 
+                                                                                                                    : 'bg-white hover:bg-slate-200 text-slate-700 border border-slate-200 font-bold'
+                                                                                                            }`}
+                                                                                                            title={`Download File Excel Countsheet Blind Ronde ${rnd} (${cName})`}
+                                                                                                        >
+                                                                                                            <span>Excel R{rnd}</span>
+                                                                                                            {rnd === cMaxRound && <span className="w-1.5 h-1.5 rounded-full bg-slate-950"></span>}
+                                                                                                        </button>
+                                                                                                    ))}
                                                                                                 </div>
-                                                                                            </button>
+                                                                                            </div>
 
                                                                                             <button
                                                                                                 onClick={(e) => {
