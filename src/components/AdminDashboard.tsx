@@ -4938,7 +4938,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
                     {/* ARCHIVED NOTICE BANNER (IF PROJECT IS IN ARCHIVE) */}
                     {activeProject.status === 'ARCHIVED' && (
-                        <div className="bg-gradient-to-r from-amber-500/15 via-amber-500/10 to-amber-500/5 border-b border-amber-300/80 px-4 py-2.5 sm:px-6 flex flex-col md:flex-row justify-between items-center gap-3 text-xs font-mono shadow-2xs">
+                        <div className="bg-linear-to-r from-amber-500/15 via-amber-500/10 to-amber-500/5 border-b border-amber-300/80 px-4 py-2.5 sm:px-6 flex flex-col md:flex-row justify-between items-center gap-3 text-xs font-mono shadow-2xs">
                             <div className="flex items-center gap-2.5 text-amber-900 font-bold">
                                 <div className="w-7 h-7 rounded-lg bg-amber-100 border border-amber-300 flex items-center justify-center shrink-0">
                                     <Archive className="w-4 h-4 text-amber-700" />
