@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { db } from '../firebase';
 import {
-    collection, onSnapshot, doc, setDoc, deleteDoc, writeBatch, getDocs, query, orderBy, limit
+    collection, onSnapshot, doc, setDoc, deleteDoc, writeBatch, getDocs, query, orderBy, limit, updateDoc
 } from 'firebase/firestore';
 import * as XLSX from 'xlsx';
 import emailjs from '@emailjs/browser';
@@ -15,7 +15,8 @@ import {
     LogOut, Contact, Eye, EyeOff, UserCheck, Clock, Store, Link2, KeyRound,
     Mail, Edit2, Smartphone, Lock, Unlock, Repeat, Copy, Tag, RefreshCw, HardDrive, Loader2, AlertCircle, X,
     ChevronLeft, ChevronRight, ChevronDown, Settings, Bell, LayoutDashboard, ArrowRightLeft,
-    Printer, Shuffle, FileDown
+    Printer, Shuffle, FileDown,
+    Archive, ArchiveRestore, ExternalLink, FolderArchive
 } from 'lucide-react';
 import type { UserRole } from '../types';
 import NetworkStatusBadge from './NetworkStatusBadge';
@@ -160,6 +161,10 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
     const [viewState, setViewState] = useState<'LANDING' | 'WIZARD_SETUP' | 'DASHBOARD'>('LANDING');
     const [landingTab, setLandingTab] = useState<'projects' | 'accounts'>('projects');
     const [projectToDelete, setProjectToDelete] = useState<ProjectSession | null>(null);
+    const [projectFilterStatus, setProjectFilterStatus] = useState<'ALL' | 'LIVE_ACTIVE' | 'ARCHIVED'>('ALL');
+    const [projectToArchive, setProjectToArchive] = useState<{ project: ProjectSession; targetStatus: 'ARCHIVED' | 'LIVE_ACTIVE' } | null>(null);
+    const [driveBackupModal, setDriveBackupModal] = useState<{ isOpen: boolean; project: ProjectSession; jsonFilename: string } | null>(null);
+    const [isExportingData, setIsExportingData] = useState<boolean>(false);
 
     const [activeTab, setActiveTab] = useState<string>('progress');
     const [orderedTabs, setOrderedTabs] = useState<TabDefinition[]>([]);
@@ -305,6 +310,11 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
     const [activeProject, setActiveProject] = useState<ProjectSession | null>(null);
     const [masterDataList, setMasterDataList] = useState<MasterSKUItem[]>([]);
     const [catalogDataList, setCatalogDataList] = useState<any[]>([]);
+
+    const filteredProjects = useMemo(() => {
+        if (projectFilterStatus === 'ALL') return projectHistory;
+        return projectHistory.filter(p => (p.status || 'LIVE_ACTIVE') === projectFilterStatus);
+    }, [projectHistory, projectFilterStatus]);
 
     useEffect(() => {
         const unsub1 = onSnapshot(collection(db, "global_accounts"), (snap) => setGlobalAccounts(snap.docs.map(d => ({ id: d.id, ...d.data() } as GlobalAccount))));
@@ -2510,6 +2520,354 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         triggerNotification(`Membuka Dashboard Project "${proj.sessionCode}"`);
     };
 
+    const handleToggleArchiveProject = async (proj: ProjectSession, targetStatus?: 'ARCHIVED' | 'LIVE_ACTIVE') => {
+        const newStatus = targetStatus || (proj.status === 'ARCHIVED' ? 'LIVE_ACTIVE' : 'ARCHIVED');
+        const actionLabel = newStatus === 'ARCHIVED' ? 'diarsipkan' : 'diaktifkan kembali';
+
+        try {
+            await updateDoc(doc(db, "projects", proj.id), {
+                status: newStatus,
+                updatedAt: new Date().toISOString()
+            });
+
+            if (activeProject && activeProject.id === proj.id) {
+                setActiveProject({ ...activeProject, status: newStatus });
+            }
+
+            setProjectToArchive(null);
+            triggerNotification(`Project "${proj.sessionCode}" berhasil ${actionLabel}!`);
+        } catch (err: any) {
+            console.error("Error toggling project archive status:", err);
+            triggerNotification(`Gagal mengubah status project: ${err.message || 'Terjadi kesalahan'}`);
+        }
+    };
+
+    const handleExportComprehensiveRekapXLSX = async (proj: ProjectSession) => {
+        try {
+            triggerNotification(`Menyiapkan Rekap Laporan Excel untuk project "${proj.sessionCode}"...`);
+            setIsExportingData(true);
+
+            // 1. Ambil data tasks (dari memori jika aktif, atau Firestore jika dari landing page)
+            let tasks: MasterSKUItem[] = [];
+            if (activeProject && activeProject.id === proj.id && masterDataList.length > 0) {
+                tasks = masterDataList;
+            } else {
+                const tasksSnap = await getDocs(collection(db, "master_tasks"));
+                tasks = tasksSnap.docs.map(docSnap => {
+                    const data = docSnap.data();
+                    const gQty = data.QTY_GOOD ?? data.qtyGood;
+                    const bQty = data.QTY_BAD ?? data.qtyBad;
+                    const rawActQty = data.QTY_ACTUAL ?? data.countedQty;
+                    const numActQty = parseInt(rawActQty, 10);
+                    const isCounted = !!data.isCounted || (rawActQty !== undefined && rawActQty !== null && !isNaN(numActQty));
+                    const calcGood = gQty !== undefined ? parseInt(gQty, 10) : (isCounted ? (isNaN(numActQty) ? 0 : numActQty) : 0);
+                    const calcBad = bQty !== undefined ? parseInt(bQty, 10) : 0;
+                    const totalActualCalculated = calcGood + calcBad;
+
+                    return {
+                        id: docSnap.id,
+                        Owner: data.Owner || 'DDI',
+                        SKU: data.SKU || '',
+                        Description: data.Description || data.name || '',
+                        UPC1: data.UPC1 || '',
+                        UPC2: data.UPC2 || '',
+                        SKUBrand: data.SKUBrand || '',
+                        satuanHitung: data.satuanHitung || 'PCS',
+                        Location: data.Location || '',
+                        level: data.level || '1',
+                        ailee: data.ailee || '',
+                        Zone: data.Zone || 'RACKING',
+                        LocationType: data.LocationType || 'RACK',
+                        counter: (data.counter || 'Unassigned').toLowerCase().trim(),
+                        Status: data.Status || 'Active',
+                        currentRound: parseInt(data.currentRound, 10) || 1,
+                        expiredDateSystem: data.expiredDateSystem || '',
+                        expiredDateActual: data.expDateActual || data.expiredDateActual || '',
+                        Qty: parseInt(data.Qty || data.QTY_SYSTEM) || 0,
+                        countedQty: isCounted ? totalActualCalculated : undefined,
+                        QTY_ACTUAL: isCounted ? totalActualCalculated : null,
+                        qtyGood: isCounted ? calcGood : undefined,
+                        qtyBad: isCounted ? calcBad : undefined,
+                        Remarks: data.badRemarks || data.Remarks || '',
+                        isCounted: !!isCounted,
+                        unitPrice: parseInt(data.unitPrice) || 0,
+                        round1Actual: data.round1Actual,
+                        round2Actual: data.round2Actual,
+                        round3Actual: data.round3Actual
+                    } as MasterSKUItem;
+                });
+            }
+
+            if (tasks.length === 0) {
+                triggerNotification(`Data task kosong untuk project "${proj.sessionCode}".`);
+                setIsExportingData(false);
+                return;
+            }
+
+            // Hitung kalkulasi
+            const totalSKU = tasks.length;
+            const countedTasks = tasks.filter(t => t.isCounted);
+            const totalCountedSKU = countedTasks.length;
+            const totalSystemQty = tasks.reduce((acc, t) => acc + (t.Qty || 0), 0);
+            const totalActualQty = tasks.reduce((acc, t) => acc + (t.isCounted ? (t.QTY_ACTUAL ?? 0) : 0), 0);
+            const totalGoodQty = tasks.reduce((acc, t) => acc + (t.isCounted ? (t.qtyGood ?? t.QTY_ACTUAL ?? 0) : 0), 0);
+            const totalBadQty = tasks.reduce((acc, t) => acc + (t.isCounted ? (t.qtyBad ?? 0) : 0), 0);
+            const netVariance = totalActualQty - totalSystemQty;
+            const absVariance = tasks.reduce((acc, t) => acc + Math.abs((t.isCounted ? (t.QTY_ACTUAL ?? 0) : 0) - (t.Qty || 0)), 0);
+            const accuracyRate = totalSystemQty > 0 ? Math.max(0, (1 - (absVariance / totalSystemQty)) * 100).toFixed(2) : '100.00';
+            const totalVarianceValue = tasks.reduce((acc, t) => {
+                const diff = (t.isCounted ? (t.QTY_ACTUAL ?? 0) : 0) - (t.Qty || 0);
+                return acc + (diff * (t.unitPrice || 0));
+            }, 0);
+
+            // SHEET 1: Ringkasan Eksekutif
+            const summaryRows = [
+                { "PARAMETER LAPORAN": "KODE PROJECT", "NILAI / KETERANGAN": proj.sessionCode },
+                { "PARAMETER LAPORAN": "LOKASI WAREHOUSE / TOKO", "NILAI / KETERANGAN": proj.locationName },
+                { "PARAMETER LAPORAN": "TANGGAL OPNAME", "NILAI / KETERANGAN": proj.opnameDate },
+                { "PARAMETER LAPORAN": "METODE STOCK OPNAME", "NILAI / KETERANGAN": proj.method },
+                { "PARAMETER LAPORAN": "STATUS SESI", "NILAI / KETERANGAN": proj.status || 'LIVE_ACTIVE' },
+                { "PARAMETER LAPORAN": "WAKTU EXPORT LAPORAN", "NILAI / KETERANGAN": new Date().toLocaleString('id-ID') },
+                { "PARAMETER LAPORAN": "-------------------------", "NILAI / KETERANGAN": "-------------------------" },
+                { "PARAMETER LAPORAN": "TOTAL RAK / LOKASI", "NILAI / KETERANGAN": Array.from(new Set(tasks.map(t => t.Location))).length },
+                { "PARAMETER LAPORAN": "TOTAL ITEM SKU", "NILAI / KETERANGAN": totalSKU },
+                { "PARAMETER LAPORAN": "TOTAL SKU TERHITUNG", "NILAI / KETERANGAN": totalCountedSKU },
+                { "PARAMETER LAPORAN": "PERSENTASE SELESAI HITUNG", "NILAI / KETERANGAN": `${((totalCountedSKU / (totalSKU || 1)) * 100).toFixed(1)}%` },
+                { "PARAMETER LAPORAN": "-------------------------", "NILAI / KETERANGAN": "-------------------------" },
+                { "PARAMETER LAPORAN": "TOTAL QTY SISTEM (WMS)", "NILAI / KETERANGAN": totalSystemQty },
+                { "PARAMETER LAPORAN": "TOTAL QTY FISIK AKTUAL", "NILAI / KETERANGAN": totalActualQty },
+                { "PARAMETER LAPORAN": "TOTAL QTY GOOD (BAGUS)", "NILAI / KETERANGAN": totalGoodQty },
+                { "PARAMETER LAPORAN": "TOTAL QTY BAD (RUSAK)", "NILAI / KETERANGAN": totalBadQty },
+                { "PARAMETER LAPORAN": "NET VARIANCE (FISIK - SISTEM)", "NILAI / KETERANGAN": netVariance },
+                { "PARAMETER LAPORAN": "ABSOLUTE VARIANCE (|SELISIH|)", "NILAI / KETERANGAN": absVariance },
+                { "PARAMETER LAPORAN": "AKURASI HITUNG FISIK", "NILAI / KETERANGAN": `${accuracyRate}%` },
+                { "PARAMETER LAPORAN": "TOTAL NILAI SELISIH (ESTIMASI RP)", "NILAI / KETERANGAN": `Rp ${totalVarianceValue.toLocaleString('id-ID')}` }
+            ];
+
+            // SHEET 2: Rekap Per Rak
+            const racksMap: { [loc: string]: {
+                location: string;
+                level: string;
+                zone: string;
+                totalSKU: number;
+                countedSKU: number;
+                sysQty: number;
+                actQty: number;
+                goodQty: number;
+                badQty: number;
+                counters: Set<string>;
+            } } = {};
+
+            tasks.forEach(t => {
+                const locKey = t.Location || 'TANPA_LOKASI';
+                if (!racksMap[locKey]) {
+                    racksMap[locKey] = {
+                        location: locKey,
+                        level: t.level || '-',
+                        zone: t.Zone || '-',
+                        totalSKU: 0,
+                        countedSKU: 0,
+                        sysQty: 0,
+                        actQty: 0,
+                        goodQty: 0,
+                        badQty: 0,
+                        counters: new Set()
+                    };
+                }
+                const r = racksMap[locKey];
+                r.totalSKU += 1;
+                r.sysQty += (t.Qty || 0);
+                if (t.isCounted) {
+                    r.countedSKU += 1;
+                    r.actQty += (t.QTY_ACTUAL ?? 0);
+                    r.goodQty += (t.qtyGood ?? t.QTY_ACTUAL ?? 0);
+                    r.badQty += (t.qtyBad ?? 0);
+                }
+                if (t.counter) r.counters.add(t.counter);
+            });
+
+            const rekapRakRows = Object.values(racksMap).map((r, idx) => ({
+                "NO": idx + 1,
+                "LOKASI / RAK": r.location,
+                "LEVEL": r.level,
+                "ZONE": r.zone,
+                "TOTAL SKU": r.totalSKU,
+                "SKU TERHITUNG": r.countedSKU,
+                "PROGRESS": `${((r.countedSKU / (r.totalSKU || 1)) * 100).toFixed(0)}%`,
+                "QTY SISTEM": r.sysQty,
+                "QTY FISIK AKTUAL": r.actQty,
+                "QTY GOOD": r.goodQty,
+                "QTY BAD": r.badQty,
+                "SELISIH QTY": r.actQty - r.sysQty,
+                "STATUS RAK": r.countedSKU === r.totalSKU ? "SELESAI" : (r.countedSKU > 0 ? "SEBAGIAN" : "BELUM HITUNG"),
+                "PIC COUNTER": Array.from(r.counters).join(", ") || "-"
+            }));
+
+            // SHEET 3: Detail SKU & Hasil Hitung
+            const detailSKURows = tasks.map((t, idx) => {
+                const actQty = t.isCounted ? (t.QTY_ACTUAL ?? 0) : 0;
+                const sysQty = t.Qty || 0;
+                const diff = actQty - sysQty;
+                let statusVariance = "BELUM HITUNG";
+                if (t.isCounted) {
+                    if (diff === 0) statusVariance = "MATCH";
+                    else if (diff > 0) statusVariance = "SURPLUS (+)";
+                    else statusVariance = "SHORTAGE (-)";
+                }
+
+                return {
+                    "NO": idx + 1,
+                    "LOKASI / RAK": t.Location,
+                    "LEVEL": t.level || '1',
+                    "AISLE": t.ailee || '-',
+                    "SKU": t.SKU,
+                    "DESKRIPSI BARANG": t.Description,
+                    "BRAND": t.SKUBrand || '-',
+                    "BARCODE / UPC": t.UPC1 || t.UPC2 || '-',
+                    "SATUAN": t.satuanHitung || 'PCS',
+                    "QTY SISTEM": sysQty,
+                    "ROUND 1": t.round1Actual !== undefined ? t.round1Actual : '-',
+                    "ROUND 2": t.round2Actual !== undefined ? t.round2Actual : '-',
+                    "ROUND 3": t.round3Actual !== undefined ? t.round3Actual : '-',
+                    "FINAL FISIK": t.isCounted ? actQty : '-',
+                    "QTY GOOD": t.isCounted ? (t.qtyGood ?? actQty) : '-',
+                    "QTY BAD": t.isCounted ? (t.qtyBad ?? 0) : '-',
+                    "SELISIH": t.isCounted ? diff : '-',
+                    "STATUS VARIANSI": statusVariance,
+                    "HARGA SATUAN": t.unitPrice || 0,
+                    "ESTIMASI NILAI SELISIH": t.isCounted ? (diff * (t.unitPrice || 0)) : 0,
+                    "COUNTER": t.counter || '-',
+                    "KETERANGAN": t.Remarks || '-'
+                };
+            });
+
+            // SHEET 4: Barang Rusak / Bad Stock
+            const badStockRows = tasks
+                .filter(t => (t.qtyBad && t.qtyBad > 0) || (t.Remarks && t.Remarks.trim().length > 0))
+                .map((t, idx) => ({
+                    "NO": idx + 1,
+                    "LOKASI / RAK": t.Location,
+                    "SKU": t.SKU,
+                    "DESKRIPSI BARANG": t.Description,
+                    "BRAND": t.SKUBrand || '-',
+                    "QTY GOOD": t.qtyGood ?? 0,
+                    "QTY BAD / RUSAK": t.qtyBad ?? 0,
+                    "SATUAN": t.satuanHitung || 'PCS',
+                    "KONDISI KERUSAKAN / REMARKS": t.Remarks || '-',
+                    "EXPIRED DATE FISIK": t.expiredDateActual || '-',
+                    "COUNTER PIC": t.counter || '-'
+                }));
+
+            // Bikin Workbook XLSX
+            const wb = XLSX.utils.book_new();
+
+            const wsSummary = XLSX.utils.json_to_sheet(summaryRows);
+            XLSX.utils.book_append_sheet(wb, wsSummary, "Ringkasan_Opname");
+
+            const wsRekapRak = XLSX.utils.json_to_sheet(rekapRakRows);
+            XLSX.utils.book_append_sheet(wb, wsRekapRak, "Rekap_Per_Rak");
+
+            const wsDetail = XLSX.utils.json_to_sheet(detailSKURows);
+            XLSX.utils.book_append_sheet(wb, wsDetail, "Detail_SKU_Hasil_Hitung");
+
+            if (badStockRows.length > 0) {
+                const wsBadStock = XLSX.utils.json_to_sheet(badStockRows);
+                XLSX.utils.book_append_sheet(wb, wsBadStock, "Barang_Rusak_BadStock");
+            }
+
+            const cleanDateStr = (proj.opnameDate || new Date().toISOString().slice(0, 10)).replace(/[^a-zA-Z0-9-]/g, '_');
+            const cleanCodeStr = (proj.sessionCode || 'SO').replace(/[^a-zA-Z0-9-]/g, '_');
+            const filename = `Rekap_Laporan_SO_${cleanCodeStr}_${cleanDateStr}.xlsx`;
+
+            XLSX.writeFile(wb, filename);
+            setIsExportingData(false);
+            triggerNotification(`📊 Rekap Laporan Excel berhasil diunduh: ${filename}!`);
+        } catch (err: any) {
+            console.error("Error export rekap excel:", err);
+            setIsExportingData(false);
+            triggerNotification(`Gagal mengekspor laporan: ${err.message || 'Terjadi kesalahan'}`);
+        }
+    };
+
+    const handleDownloadHardBackupJSON = async (proj: ProjectSession) => {
+        try {
+            triggerNotification(`Menyiapkan Hard Backup JSON untuk "${proj.sessionCode}"...`);
+            setIsExportingData(true);
+
+            // 1. Ambil Tasks
+            let tasks: any[] = [];
+            if (activeProject && activeProject.id === proj.id && masterDataList.length > 0) {
+                tasks = masterDataList;
+            } else {
+                const tasksSnap = await getDocs(collection(db, "master_tasks"));
+                tasks = tasksSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+            }
+
+            // 2. Ambil Tim
+            const teams = allProjectTeams.filter(t => t.projectId === proj.id);
+
+            // 3. Ambil Audit Logs
+            let logs: any[] = [];
+            if (auditLogs.length > 0) {
+                logs = auditLogs;
+            } else {
+                const auditSnap = await getDocs(collection(db, "audit_logs"));
+                logs = auditSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+            }
+
+            // Summary metrics
+            const totalTasks = tasks.length;
+            const countedTasks = tasks.filter(t => t.isCounted || t.countedQty !== undefined || (t.QTY_ACTUAL !== undefined && t.QTY_ACTUAL !== null));
+            const totalSystem = tasks.reduce((sum, t) => sum + (parseInt(t.Qty || t.QTY_SYSTEM) || 0), 0);
+            const totalActual = tasks.reduce((sum, t) => sum + (parseInt(t.QTY_ACTUAL || t.countedQty) || 0), 0);
+
+            const backupPayload = {
+                _schema: "NOCTUS_COUNT_HARD_BACKUP_V2",
+                _generatedAt: new Date().toISOString(),
+                _generatedBy: currentUserEmail || 'admin',
+                _instructions: "Simpan file ini di folder Google Drive tim Anda untuk arsip audit permanen.",
+                project: proj,
+                metrics: {
+                    totalTasks,
+                    countedTasks: countedTasks.length,
+                    totalSystemQuantity: totalSystem,
+                    totalActualQuantity: totalActual,
+                    varianceQuantity: totalActual - totalSystem,
+                    accuracyRate: totalSystem > 0 ? ((1 - Math.abs(totalActual - totalSystem) / totalSystem) * 100).toFixed(2) + '%' : '100%'
+                },
+                teamMembers: teams,
+                auditLogs: logs,
+                tasks: tasks
+            };
+
+            const cleanDateStr = (proj.opnameDate || new Date().toISOString().slice(0, 10)).replace(/[^a-zA-Z0-9-]/g, '_');
+            const cleanCodeStr = (proj.sessionCode || 'SO').replace(/[^a-zA-Z0-9-]/g, '_');
+            const filename = `HARD_BACKUP_SO_${cleanCodeStr}_${cleanDateStr}.json`;
+
+            const blob = new Blob([JSON.stringify(backupPayload, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+            setIsExportingData(false);
+            setDriveBackupModal({
+                isOpen: true,
+                project: proj,
+                jsonFilename: filename
+            });
+            triggerNotification(`💾 Hard Backup JSON berhasil diunduh: ${filename}!`);
+        } catch (err: any) {
+            console.error("Error creating hard backup JSON:", err);
+            setIsExportingData(false);
+            triggerNotification(`Gagal membuat hard backup: ${err.message || 'Terjadi kesalahan'}`);
+        }
+    };
+
     const handleConfirmDeleteProject = async () => {
         if (!projectToDelete) return;
 
@@ -3380,6 +3738,168 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 </div>
             )}
 
+            {/* MODAL KONFIRMASI ARSIP / PULIHKAN */}
+            {projectToArchive && (
+                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+                    <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-5 shadow-2xl border border-slate-200">
+                        <div className="flex items-center space-x-3 text-amber-600">
+                            <div className="w-12 h-12 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center shrink-0">
+                                {projectToArchive.targetStatus === 'ARCHIVED' ? (
+                                    <Archive className="w-6 h-6 text-amber-600" />
+                                ) : (
+                                    <ArchiveRestore className="w-6 h-6 text-emerald-600" />
+                                )}
+                            </div>
+                            <div>
+                                <h3 className="text-base font-black text-slate-900">
+                                    {projectToArchive.targetStatus === 'ARCHIVED' ? 'Arsipkan Sesi Project' : 'Pulihkan Sesi Project'}
+                                </h3>
+                                <span className="text-xs font-mono font-bold text-slate-500">
+                                    {projectToArchive.project.sessionCode}
+                                </span>
+                            </div>
+                        </div>
+
+                        <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200/80 text-xs text-slate-600 space-y-2 font-mono">
+                            {projectToArchive.targetStatus === 'ARCHIVED' ? (
+                                <>
+                                    <p className="font-bold text-slate-800">Efek saat project diarsipkan:</p>
+                                    <ul className="list-disc list-inside space-y-1 text-slate-600">
+                                        <li>Project <strong>otomatis disembunyikan dari aplikasi HP counter</strong>.</li>
+                                        <li>Mencegah salah input atau modifikasi data pada project yang sudah selesai.</li>
+                                        <li>Data tetap aman di Cloud dan laporan Excel/JSON tetap bisa diunduh kapan saja.</li>
+                                    </ul>
+                                </>
+                            ) : (
+                                <>
+                                    <p className="font-bold text-slate-800">Efek saat project dipulihkan:</p>
+                                    <ul className="list-disc list-inside space-y-1 text-slate-600">
+                                        <li>Project akan berstatus <strong>LIVE_ACTIVE</strong> kembali.</li>
+                                        <li>Dapat dipilih kembali oleh tim counter di lapangan untuk melanjutkan perhitungan.</li>
+                                    </ul>
+                                </>
+                            )}
+                        </div>
+
+                        <div className="flex justify-end space-x-3 pt-3 border-t border-slate-100">
+                            <button
+                                onClick={() => setProjectToArchive(null)}
+                                className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold font-mono cursor-pointer transition-colors"
+                            >
+                                Batal
+                            </button>
+                            <button
+                                onClick={() => handleToggleArchiveProject(projectToArchive.project, projectToArchive.targetStatus)}
+                                className={`px-5 py-2.5 rounded-xl text-xs font-mono font-extrabold shadow-sm transition-all flex items-center space-x-2 cursor-pointer ${
+                                    projectToArchive.targetStatus === 'ARCHIVED'
+                                        ? 'bg-amber-600 hover:bg-amber-700 text-white'
+                                        : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                                }`}
+                            >
+                                {projectToArchive.targetStatus === 'ARCHIVED' ? (
+                                    <>
+                                        <Archive className="w-4 h-4" />
+                                        <span>Ya, Arsipkan Sesi</span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <ArchiveRestore className="w-4 h-4" />
+                                        <span>Ya, Pulihkan ke LIVE</span>
+                                    </>
+                                )}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* MODAL PANDUAN HARD BACKUP & GOOGLE DRIVE */}
+            {driveBackupModal && driveBackupModal.isOpen && (
+                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+                    <div className="bg-white rounded-3xl max-w-lg w-full p-6 space-y-5 shadow-2xl border border-slate-200">
+                        <div className="flex justify-between items-start border-b border-slate-100 pb-4">
+                            <div className="flex items-center space-x-3">
+                                <div className="w-12 h-12 rounded-2xl bg-indigo-50 border border-indigo-200 text-indigo-700 flex items-center justify-center shrink-0">
+                                    <HardDrive className="w-6 h-6 text-indigo-600" />
+                                </div>
+                                <div>
+                                    <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
+                                        <span>Hard Backup Siap Simpan</span>
+                                        <span className="px-2 py-0.5 rounded-md bg-indigo-100 text-indigo-700 text-[10px] font-mono font-bold">JSON Dump</span>
+                                    </h3>
+                                    <p className="text-xs text-slate-500 font-mono mt-0.5">
+                                        {driveBackupModal.project.sessionCode} • {driveBackupModal.project.locationName}
+                                    </p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => setDriveBackupModal(null)}
+                                className="p-2 text-slate-400 hover:text-slate-700 bg-slate-100 rounded-xl cursor-pointer"
+                            >
+                                <X className="w-4 h-4" />
+                            </button>
+                        </div>
+
+                        <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center space-x-3">
+                            <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                            <div className="text-xs font-mono">
+                                <span className="font-bold text-emerald-900 block">File berhasil di-download ke komputer Anda:</span>
+                                <span className="text-emerald-700 break-all text-[11px] font-semibold">{driveBackupModal.jsonFilename}</span>
+                            </div>
+                        </div>
+
+                        <div className="space-y-3 font-mono">
+                            <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+                                <FolderArchive className="w-4 h-4 text-cyan-600" />
+                                <span>Langkah Menyimpan ke Google Drive:</span>
+                            </h4>
+                            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200/80 text-xs text-slate-600 space-y-2">
+                                <div className="flex items-start gap-2">
+                                    <span className="w-5 h-5 rounded-full bg-slate-200 text-slate-800 text-[10px] font-bold flex items-center justify-center shrink-0 mt-0.5">1</span>
+                                    <span>Klik tombol <strong>Buka Google Drive</strong> di bawah untuk membuka Drive tim Anda di tab baru.</span>
+                                </div>
+                                <div className="flex items-start gap-2">
+                                    <span className="w-5 h-5 rounded-full bg-slate-200 text-slate-800 text-[10px] font-bold flex items-center justify-center shrink-0 mt-0.5">2</span>
+                                    <span>Tarik (drag & drop) file <strong>{driveBackupModal.jsonFilename}</strong> dari folder Download Anda ke folder Google Drive arsip.</span>
+                                </div>
+                                <div className="flex items-start gap-2">
+                                    <span className="w-5 h-5 rounded-full bg-slate-200 text-slate-800 text-[10px] font-bold flex items-center justify-center shrink-0 mt-0.5">3</span>
+                                    <span>File ini berisi backup utuh seluruh master task, status hitung, audit log, dan profil sesi yang dapat direstore kapan saja.</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="flex flex-col sm:flex-row justify-between items-center gap-3 pt-3 border-t border-slate-100">
+                            <button
+                                onClick={() => handleExportComprehensiveRekapXLSX(driveBackupModal.project)}
+                                className="w-full sm:w-auto px-4 py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-xl text-xs font-mono font-bold flex items-center justify-center space-x-1.5 shadow-xs cursor-pointer transition-colors"
+                            >
+                                <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                                <span>Unduh Rekap Excel (.xlsx)</span>
+                            </button>
+
+                            <div className="flex items-center space-x-2 w-full sm:w-auto justify-end">
+                                <button
+                                    onClick={() => setDriveBackupModal(null)}
+                                    className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-mono font-bold cursor-pointer"
+                                >
+                                    Selesai
+                                </button>
+                                <a
+                                    href="https://drive.google.com/drive/my-drive"
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-mono font-extrabold flex items-center justify-center space-x-1.5 shadow-md cursor-pointer transition-all"
+                                >
+                                    <span>Buka Google Drive</span>
+                                    <ExternalLink className="w-3.5 h-3.5" />
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {deployModal.isOpen && (
                 <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
                     <div className="bg-white rounded-3xl max-w-xl w-full p-6 space-y-5 shadow-2xl border border-slate-200 animate-in zoom-in-95 duration-200">
@@ -3861,15 +4381,57 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
                             {/* LIVE FIRESTORE PROJECTS TABLE */}
                             <div className="rounded-3xl bg-white border border-slate-200/90 p-6 shadow-sm space-y-5">
-                                <div className="flex justify-between items-center border-b border-slate-100 pb-3">
-                                    <h3 className="text-sm font-mono font-black text-slate-900 uppercase tracking-wider flex items-center space-x-2">
-                                        <Database className="w-4 h-4 text-cyan-600" />
-                                        <span>Live Firestore Projects</span>
-                                    </h3>
-                                    <span className="text-[10px] font-mono text-slate-500 uppercase tracking-wider font-bold">
-                                        {projectHistory.length} sesi terarsip
-                                    </span>
+                                <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 border-b border-slate-100 pb-3">
+                                    <div>
+                                        <h3 className="text-sm font-mono font-black text-slate-900 uppercase tracking-wider flex items-center space-x-2">
+                                            <Database className="w-4 h-4 text-cyan-600" />
+                                            <span>Firestore Projects Management</span>
+                                        </h3>
+                                        <p className="text-[11px] font-mono text-slate-500 mt-0.5">
+                                            Kelola sesi aktif, arsip project, unduh rekap laporan Excel & backup Google Drive
+                                        </p>
+                                    </div>
+
+                                    {/* STATUS FILTER TABS */}
+                                    <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl shrink-0 self-start sm:self-auto">
+                                        <button
+                                            type="button"
+                                            onClick={() => setProjectFilterStatus('ALL')}
+                                            className={`px-3 py-1.5 text-[11px] font-mono font-bold rounded-lg transition-all cursor-pointer ${
+                                                projectFilterStatus === 'ALL'
+                                                    ? 'bg-white text-slate-900 shadow-xs'
+                                                    : 'text-slate-500 hover:text-slate-800'
+                                            }`}
+                                        >
+                                            Semua ({projectHistory.length})
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setProjectFilterStatus('LIVE_ACTIVE')}
+                                            className={`px-3 py-1.5 text-[11px] font-mono font-bold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
+                                                projectFilterStatus === 'LIVE_ACTIVE'
+                                                    ? 'bg-white text-emerald-700 shadow-xs'
+                                                    : 'text-slate-500 hover:text-emerald-700'
+                                            }`}
+                                        >
+                                            <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                                            <span>Aktif ({projectHistory.filter(p => (p.status || 'LIVE_ACTIVE') === 'LIVE_ACTIVE').length})</span>
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setProjectFilterStatus('ARCHIVED')}
+                                            className={`px-3 py-1.5 text-[11px] font-mono font-bold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
+                                                projectFilterStatus === 'ARCHIVED'
+                                                    ? 'bg-white text-amber-700 shadow-xs'
+                                                    : 'text-slate-500 hover:text-amber-700'
+                                            }`}
+                                        >
+                                            <Archive className="w-3 h-3 text-amber-600" />
+                                            <span>Arsip ({projectHistory.filter(p => p.status === 'ARCHIVED').length})</span>
+                                        </button>
+                                    </div>
                                 </div>
+
                                 <div className="overflow-x-auto border border-slate-200 rounded-2xl">
                                     <table className="w-full text-left text-xs font-mono">
                                         <thead className="bg-slate-50 font-bold text-slate-600 border-b border-slate-200">
@@ -3882,40 +4444,109 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-slate-100">
-                                            {projectHistory.map((proj) => (
-                                                <tr key={proj.id} className="hover:bg-slate-50/80 transition-colors">
-                                                    <td className="p-4 font-black text-cyan-700">{proj.sessionCode}</td>
-                                                    <td className="p-4 font-bold text-slate-800">{proj.locationName}</td>
-                                                    <td className="p-4 text-slate-500">{proj.opnameDate}</td>
-                                                    <td className="p-4 text-center">
-                                                        <span className="px-2.5 py-1 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-300 text-[10px] font-black uppercase tracking-wider">
-                                                            {proj.status}
-                                                        </span>
-                                                    </td>
-                                                    <td className="p-4 text-right space-x-2">
-                                                        <button 
-                                                            onClick={() => handleOpenHistoricalProject(proj)} 
-                                                            className="px-3.5 py-1.5 bg-cyan-400 hover:bg-cyan-300 text-slate-950 rounded-xl text-xs font-bold inline-flex items-center space-x-1.5 shadow-xs transition-all cursor-pointer"
-                                                        >
-                                                            <PlayCircle className="w-3.5 h-3.5" />
-                                                            <span>Buka Dashboard</span>
-                                                        </button>
-                                                        {effectiveRole === 'owner' && (
+                                            {filteredProjects.map((proj) => {
+                                                const isArchived = proj.status === 'ARCHIVED';
+                                                return (
+                                                    <tr key={proj.id} className={`hover:bg-slate-50/80 transition-colors ${isArchived ? 'bg-slate-50/40' : ''}`}>
+                                                        <td className="p-4 font-black text-cyan-700">
+                                                            <div className="flex items-center gap-2">
+                                                                {isArchived && <Archive className="w-3.5 h-3.5 text-amber-500 shrink-0" />}
+                                                                <span>{proj.sessionCode}</span>
+                                                            </div>
+                                                        </td>
+                                                        <td className="p-4 font-bold text-slate-800">{proj.locationName}</td>
+                                                        <td className="p-4 text-slate-500">{proj.opnameDate}</td>
+                                                        <td className="p-4 text-center">
+                                                            {isArchived ? (
+                                                                <span className="px-2.5 py-1 rounded-md bg-amber-50 text-amber-700 border border-amber-300 text-[10px] font-black uppercase tracking-wider inline-flex items-center gap-1">
+                                                                    <Archive className="w-3 h-3" />
+                                                                    <span>ARCHIVED</span>
+                                                                </span>
+                                                            ) : (
+                                                                <span className="px-2.5 py-1 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-300 text-[10px] font-black uppercase tracking-wider inline-flex items-center gap-1.5">
+                                                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                                                                    <span>LIVE_ACTIVE</span>
+                                                                </span>
+                                                            )}
+                                                        </td>
+                                                        <td className="p-4 text-right space-x-1.5 whitespace-nowrap">
+                                                            {/* Buka Dashboard */}
                                                             <button 
-                                                                onClick={() => setProjectToDelete(proj)} 
-                                                                className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors cursor-pointer"
-                                                                title="Hapus Project"
+                                                                onClick={() => handleOpenHistoricalProject(proj)} 
+                                                                className="px-3.5 py-1.5 bg-cyan-400 hover:bg-cyan-300 text-slate-950 rounded-xl text-xs font-bold inline-flex items-center space-x-1.5 shadow-xs transition-all cursor-pointer"
+                                                                title="Buka Dashboard Monitoring"
                                                             >
-                                                                <Trash2 className="w-3.5 h-3.5" />
+                                                                <PlayCircle className="w-3.5 h-3.5" />
+                                                                <span>Buka Dashboard</span>
                                                             </button>
-                                                        )}
-                                                    </td>
-                                                </tr>
-                                            ))}
-                                            {projectHistory.length === 0 && (
+
+                                                            {/* Rekap Excel */}
+                                                            <button
+                                                                onClick={() => handleExportComprehensiveRekapXLSX(proj)}
+                                                                disabled={isExportingData}
+                                                                className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-bold inline-flex items-center space-x-1 shadow-xs transition-all cursor-pointer"
+                                                                title="Download Rekap Laporan Lengkap (.xlsx)"
+                                                            >
+                                                                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                                                                <span className="hidden xl:inline">Rekap Excel</span>
+                                                            </button>
+
+                                                            {/* Hard Backup JSON (Google Drive) */}
+                                                            <button
+                                                                onClick={() => handleDownloadHardBackupJSON(proj)}
+                                                                disabled={isExportingData}
+                                                                className="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 rounded-xl text-xs font-bold inline-flex items-center space-x-1 shadow-xs transition-all cursor-pointer"
+                                                                title="Download Hard Backup JSON untuk Google Drive"
+                                                            >
+                                                                <HardDrive className="w-3.5 h-3.5 text-indigo-600" />
+                                                                <span className="hidden xl:inline">Backup JSON</span>
+                                                            </button>
+
+                                                            {/* Arsipkan / Pulihkan Toggle */}
+                                                            <button
+                                                                onClick={() => setProjectToArchive({ project: proj, targetStatus: isArchived ? 'LIVE_ACTIVE' : 'ARCHIVED' })}
+                                                                className={`px-2.5 py-1.5 rounded-xl text-xs font-bold inline-flex items-center space-x-1 shadow-xs transition-all cursor-pointer border ${
+                                                                    isArchived
+                                                                        ? 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-300'
+                                                                        : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
+                                                                }`}
+                                                                title={isArchived ? "Pulihkan Project ke LIVE_ACTIVE" : "Arsipkan Project"}
+                                                            >
+                                                                {isArchived ? (
+                                                                    <>
+                                                                        <ArchiveRestore className="w-3.5 h-3.5 text-amber-600" />
+                                                                        <span className="hidden sm:inline">Pulihkan</span>
+                                                                    </>
+                                                                ) : (
+                                                                    <>
+                                                                        <Archive className="w-3.5 h-3.5 text-slate-600" />
+                                                                        <span className="hidden sm:inline">Arsipkan</span>
+                                                                    </>
+                                                                )}
+                                                            </button>
+
+                                                            {/* Delete Project */}
+                                                            {effectiveRole === 'owner' && (
+                                                                <button 
+                                                                    onClick={() => setProjectToDelete(proj)} 
+                                                                    className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors cursor-pointer"
+                                                                    title="Hapus Project Permanen"
+                                                                >
+                                                                    <Trash2 className="w-3.5 h-3.5" />
+                                                                </button>
+                                                            )}
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
+                                            {filteredProjects.length === 0 && (
                                                 <tr>
                                                     <td colSpan={5} className="p-8 text-center text-slate-400 font-bold">
-                                                        Belum ada project aktif di Firestore. Klik + New Project untuk membuat baru.
+                                                        {projectFilterStatus === 'ALL'
+                                                            ? 'Belum ada project aktif di Firestore. Klik + New Project untuk membuat baru.'
+                                                            : projectFilterStatus === 'LIVE_ACTIVE'
+                                                            ? 'Tidak ada project berstatus LIVE_ACTIVE.'
+                                                            : 'Tidak ada project dalam arsip (ARCHIVED).'}
                                                     </td>
                                                 </tr>
                                             )}
@@ -4186,6 +4817,17 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                         <span className="text-sm font-black tracking-tight text-slate-900 font-mono">
                                             {activeProject.sessionCode}
                                         </span>
+                                        {activeProject.status === 'ARCHIVED' ? (
+                                            <span className="px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 border border-amber-300 text-[10px] font-black uppercase tracking-wider inline-flex items-center gap-1 font-mono">
+                                                <Archive className="w-3 h-3" />
+                                                <span>ARCHIVED</span>
+                                            </span>
+                                        ) : (
+                                            <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-300 text-[10px] font-black uppercase tracking-wider inline-flex items-center gap-1 font-mono">
+                                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                                                <span>LIVE_ACTIVE</span>
+                                            </span>
+                                        )}
                                         <span className="text-[10px] text-slate-400 font-medium">•</span>
                                         <span className="text-xs font-bold text-slate-600 flex items-center gap-1">
                                             <MapPin className="w-3 h-3 text-slate-400" />
@@ -4249,6 +4891,40 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                 </button>
                             )}
 
+                            <div className="hidden lg:flex items-center space-x-1.5 border-l border-slate-200 pl-2.5">
+                                <button
+                                    onClick={() => handleExportComprehensiveRekapXLSX(activeProject)}
+                                    disabled={isExportingData}
+                                    className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-bold flex items-center space-x-1 cursor-pointer transition-colors"
+                                    title="Download Rekap Laporan Excel Lengkap (.xlsx)"
+                                >
+                                    <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                                    <span>Rekap Excel</span>
+                                </button>
+                                <button
+                                    onClick={() => handleDownloadHardBackupJSON(activeProject)}
+                                    disabled={isExportingData}
+                                    className="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 rounded-xl text-xs font-bold flex items-center space-x-1 cursor-pointer transition-colors"
+                                    title="Download Hard Backup JSON untuk Google Drive"
+                                >
+                                    <HardDrive className="w-3.5 h-3.5 text-indigo-600" />
+                                    <span>Hard Backup JSON</span>
+                                </button>
+                                {effectiveRole === 'owner' && (
+                                    <button
+                                        onClick={() => setProjectToArchive({ project: activeProject, targetStatus: activeProject.status === 'ARCHIVED' ? 'LIVE_ACTIVE' : 'ARCHIVED' })}
+                                        className={`p-1.5 rounded-xl border cursor-pointer transition-colors ${
+                                            activeProject.status === 'ARCHIVED'
+                                                ? 'bg-amber-50 text-amber-700 border-amber-300 hover:bg-amber-100'
+                                                : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                                        }`}
+                                        title={activeProject.status === 'ARCHIVED' ? "Pulihkan Project ke LIVE_ACTIVE" : "Arsipkan Project"}
+                                    >
+                                        {activeProject.status === 'ARCHIVED' ? <ArchiveRestore className="w-4 h-4 text-amber-600" /> : <Archive className="w-4 h-4 text-slate-600" />}
+                                    </button>
+                                )}
+                            </div>
+
                             <button
                                 onClick={() => setViewState('LANDING')}
                                 title="Keluar ke Daftar Project"
@@ -4259,6 +4935,50 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                             </button>
                         </div>
                     </div>
+
+                    {/* ARCHIVED NOTICE BANNER (IF PROJECT IS IN ARCHIVE) */}
+                    {activeProject.status === 'ARCHIVED' && (
+                        <div className="bg-gradient-to-r from-amber-500/15 via-amber-500/10 to-amber-500/5 border-b border-amber-300/80 px-4 py-2.5 sm:px-6 flex flex-col md:flex-row justify-between items-center gap-3 text-xs font-mono shadow-2xs">
+                            <div className="flex items-center gap-2.5 text-amber-900 font-bold">
+                                <div className="w-7 h-7 rounded-lg bg-amber-100 border border-amber-300 flex items-center justify-center shrink-0">
+                                    <Archive className="w-4 h-4 text-amber-700" />
+                                </div>
+                                <span>
+                                    Sesi ini dalam status <strong>ARSIP (ARCHIVED)</strong>. Project ditutup dari tim lapangan di HP, data terlindungi dalam mode audit snapshot.
+                                </span>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                                <button
+                                    onClick={() => handleExportComprehensiveRekapXLSX(activeProject)}
+                                    disabled={isExportingData}
+                                    className="px-3 py-1.5 bg-white hover:bg-emerald-50 text-emerald-800 border border-emerald-300 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-2xs cursor-pointer transition-colors"
+                                    title="Download Rekap Laporan Excel"
+                                >
+                                    <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                                    <span>Rekap Excel</span>
+                                </button>
+                                <button
+                                    onClick={() => handleDownloadHardBackupJSON(activeProject)}
+                                    disabled={isExportingData}
+                                    className="px-3 py-1.5 bg-white hover:bg-indigo-50 text-indigo-800 border border-indigo-300 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-2xs cursor-pointer transition-colors"
+                                    title="Download Hard Backup JSON untuk Google Drive"
+                                >
+                                    <HardDrive className="w-3.5 h-3.5 text-indigo-600" />
+                                    <span>Hard Backup JSON</span>
+                                </button>
+                                {effectiveRole === 'owner' && (
+                                    <button
+                                        onClick={() => setProjectToArchive({ project: activeProject, targetStatus: 'LIVE_ACTIVE' })}
+                                        className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-2xs cursor-pointer transition-colors"
+                                        title="Aktifkan Kembali Project"
+                                    >
+                                        <ArchiveRestore className="w-3.5 h-3.5" />
+                                        <span>Buka Kembali ke LIVE</span>
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+                    )}
 
                     {/* MAIN BODY: LABELED SIDEBAR + FULL WIDTH EXPANSIVE CONTENT */}
                     <div className="flex flex-1 flex-col md:flex-row min-h-[calc(100vh-65px)]">
