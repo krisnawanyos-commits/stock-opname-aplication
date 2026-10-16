@@ -1755,15 +1755,6 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                         }`}>
                           {currentSku.isUnmappedFound ? '📦 TEMUAN' : currentSku.sku}
                         </span>
-                        <span className="text-xs font-bold uppercase bg-cyan-50 text-cyan-800 border border-cyan-200 px-2 py-0.5 rounded-md">
-                          {currentSku.uom}
-                        </span>
-                        {/* BADGE KONVERSI JIKA AKTIF / BERBEDA DARI SISTEM ATAU SISTEMNYA KARTON */}
-                        {((currentSku.inputUom && currentSku.inputUom !== currentSku.uom) || (currentSku.uom === 'CARTON' && currentSku.pcsPerCarton > 1)) && (
-                          <span className="text-[10px] font-mono font-bold bg-amber-100 text-amber-950 border border-amber-300 px-2 py-0.5 rounded-md">
-                            📦 1 Ctn = {currentSku.pcsPerCarton || 24} Pcs
-                          </span>
-                        )}
                       </div>
                       <h3 className="font-headline-sm text-slate-900 font-bold text-xs sm:text-sm leading-snug line-clamp-2">
                         {currentSku.name}
