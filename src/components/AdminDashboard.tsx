@@ -249,6 +249,9 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         timestamp: string;
     } | null>(null);
 
+    // EXPORT CONFIG: Default false agar aman dibagikan ke 3rd party vendor (Blind Count - Tanpa Qty Sistem & Status)
+    const [exportIncludeSystemQty, setExportIncludeSystemQty] = useState<boolean>(false);
+
     // MASS AUTO-PAIR SWAP MODAL STATE (100 COUNTER SCALE)
     const [autoPairModal, setAutoPairModal] = useState<{
         isOpen: boolean;
@@ -2343,7 +2346,8 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
     };
 
     // FITUR EXPORT HASIL HITUNGAN AKTUAL FISIK PER RONDE (R1 / R2 / R3)
-    const handleExportSingleRoundResultsXLSX = (selectedCounter?: string, roundNumber: number = 1) => {
+    // Default: Blind format untuk 3rd party vendor (QTY SISTEM, SELISIH, dan STATUS disembunyikan)
+    const handleExportSingleRoundResultsXLSX = (selectedCounter?: string, roundNumber: number = 1, includeSystemAndStatus: boolean = exportIncludeSystemQty) => {
         if (!masterDataList || masterDataList.length === 0) {
             triggerNotification("Tidak ada data SKU untuk diexport!");
             return;
@@ -2399,16 +2403,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 picCounter = item.round3Counter || (item.currentRound >= 3 ? item.counter : '-');
             }
 
-            const isCountedThisRound = typeof actualVal === 'number';
-            const diff: number | string = isCountedThisRound ? ((actualVal as number) - sysQty) : '-';
-            let status = 'BELUM HITUNG';
-            if (typeof diff === 'number') {
-                if (diff === 0) status = 'MATCH (SESUAI)';
-                else if (diff > 0) status = 'SURPLUS (+)';
-                else status = 'SHORTAGE (-)';
-            }
-
-            return {
+            const rowData: Record<string, any> = {
                 'NO': idx + 1,
                 'RONDE': roundNumber,
                 'LOKASI / RAK': item.Location || '-',
@@ -2419,18 +2414,44 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 'UPC 2': item.UPC2 || '-',
                 'DESKRIPSI PRODUK': item.Description || '-',
                 'BRAND': item.SKUBrand || '-',
-                'SATUAN': item.satuanHitung || 'PCS',
-                'QTY SISTEM (WMS)': sysQty,
-                'PIC COUNTER': picCounter,
-                'HASIL FISIK AKTUAL': actualVal,
-                'SELISIH (FISIK - SISTEM)': diff,
-                'STATUS': status,
-                'KONDISI / REMARKS': item.Remarks || '-'
+                'SATUAN': item.satuanHitung || 'PCS'
             };
+
+            if (includeSystemAndStatus) {
+                const isCountedThisRound = typeof actualVal === 'number';
+                const diff: number | string = isCountedThisRound ? ((actualVal as number) - sysQty) : '-';
+                let status = 'BELUM HITUNG';
+                if (typeof diff === 'number') {
+                    if (diff === 0) status = 'MATCH (SESUAI)';
+                    else if (diff > 0) status = 'SURPLUS (+)';
+                    else status = 'SHORTAGE (-)';
+                }
+
+                rowData['QTY SISTEM (WMS)'] = sysQty;
+                rowData['PIC COUNTER'] = picCounter;
+                rowData['HASIL FISIK AKTUAL'] = actualVal;
+                rowData['SELISIH (FISIK - SISTEM)'] = diff;
+                rowData['STATUS'] = status;
+            } else {
+                rowData['PIC COUNTER'] = picCounter;
+                rowData['HASIL FISIK AKTUAL'] = actualVal;
+            }
+
+            rowData['KONDISI / REMARKS'] = item.Remarks || '-';
+
+            return rowData;
         });
 
         const wb = XLSX.utils.book_new();
         const ws = XLSX.utils.json_to_sheet(rows);
+
+        // Auto-width column sizes agar tampilan rapi saat dibuka
+        if (rows.length > 0) {
+            ws['!cols'] = Object.keys(rows[0]).map(key => ({
+                wch: Math.max(key.length + 3, 12)
+            }));
+        }
+
         XLSX.utils.book_append_sheet(wb, ws, `Hasil_Hitung_Ronde_${roundNumber}`);
 
         const cleanDateStr = new Date().toISOString().slice(0, 10);
@@ -2440,7 +2461,11 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             : `Hasil_Hitung_R${roundNumber}_SEMUA_COUNTER_${cleanProjCode}_${cleanDateStr}.xlsx`;
 
         XLSX.writeFile(wb, filename);
-        triggerNotification(`📊 File Hasil Hitung Ronde ${roundNumber} (.xlsx) berhasil diunduh: ${filename}`);
+        triggerNotification(
+            includeSystemAndStatus
+                ? `📊 File Hasil Hitung Ronde ${roundNumber} (Internal Lengkap) berhasil diunduh: ${filename}`
+                : `🔒 File Hasil Hitung Ronde ${roundNumber} (.xlsx) berhasil diunduh (Format Vendor - Tanpa Qty Sistem & Status): ${filename}`
+        );
     };
 
     const handleRevertLastSwap = async () => {
@@ -6596,13 +6621,25 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                                     <button
                                                                         key={rnd}
                                                                         type="button"
-                                                                        onClick={() => handleExportSingleRoundResultsXLSX(undefined, rnd)}
+                                                                        onClick={() => handleExportSingleRoundResultsXLSX(undefined, rnd, exportIncludeSystemQty)}
                                                                         className="px-2 py-1 text-[11px] font-black text-slate-700 hover:text-emerald-800 hover:bg-emerald-50/60 rounded-lg cursor-pointer transition-all active:scale-95"
-                                                                        title={`Download File Excel Hasil Hitungan Fisik Ronde ${rnd} Semua Counter`}
+                                                                        title={`Download File Excel Hasil Hitungan Fisik Ronde ${rnd} Semua Counter ${exportIncludeSystemQty ? '(Internal - Ada Qty Sistem & Selisih)' : '(Format 3rd Party Vendor - Tanpa Qty Sistem & Status)'}`}
                                                                     >
                                                                         R{rnd}
                                                                     </button>
                                                                 ))}
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setExportIncludeSystemQty(prev => !prev)}
+                                                                    className={`ml-1 px-2 py-0.5 text-[10px] font-bold rounded-lg transition-all cursor-pointer border ${
+                                                                        exportIncludeSystemQty 
+                                                                            ? 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100' 
+                                                                            : 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
+                                                                    }`}
+                                                                    title={exportIncludeSystemQty ? "Saat ini Mode Internal (Qty Sistem & Selisih disertakan). Klik untuk beralih ke Format 3rd Party Vendor." : "Saat ini Format 3rd Party Vendor (Qty Sistem & Status disembunyikan). Klik jika ingin beralih ke Mode Internal."}
+                                                                >
+                                                                    {exportIncludeSystemQty ? 'Mode: Internal' : 'Format: 3rd Party'}
+                                                                </button>
                                                             </div>
 
                                                             {/* Rekap Komparasi R1-R2-R3 */}
