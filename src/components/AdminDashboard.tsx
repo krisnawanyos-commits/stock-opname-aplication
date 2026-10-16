@@ -2342,6 +2342,107 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         triggerNotification(`📊 File Excel Rekap Ronde berhasil diunduh: ${filename}`);
     };
 
+    // FITUR EXPORT HASIL HITUNGAN AKTUAL FISIK PER RONDE (R1 / R2 / R3)
+    const handleExportSingleRoundResultsXLSX = (selectedCounter?: string, roundNumber: number = 1) => {
+        if (!masterDataList || masterDataList.length === 0) {
+            triggerNotification("Tidak ada data SKU untuk diexport!");
+            return;
+        }
+
+        const project = activeProject;
+        let targetList = masterDataList;
+        if (selectedCounter) {
+            const cleanC = selectedCounter.toLowerCase().trim();
+            targetList = masterDataList.filter(m => {
+                const c = (m.counter || '').toLowerCase().trim();
+                const r1C = (m.round1Counter || '').toLowerCase().trim();
+                const r2C = (m.round2Counter || '').toLowerCase().trim();
+                const r3C = (m.round3Counter || '').toLowerCase().trim();
+                if (roundNumber === 1) return (r1C === cleanC) || (!r1C && c === cleanC);
+                if (roundNumber === 2) return (r2C === cleanC) || (m.currentRound === 2 && c === cleanC);
+                if (roundNumber === 3) return (r3C === cleanC) || (m.currentRound >= 3 && c === cleanC);
+                return c === cleanC;
+            });
+        } else {
+            if (roundNumber === 1) {
+                targetList = [...masterDataList];
+            } else if (roundNumber === 2) {
+                targetList = masterDataList.filter(m => m.currentRound >= 2 || !!m.round2Counter || m.round2Actual !== undefined);
+            } else if (roundNumber === 3) {
+                targetList = masterDataList.filter(m => m.currentRound >= 3 || !!m.round3Counter || m.round3Actual !== undefined);
+            }
+        }
+
+        if (targetList.length === 0) {
+            triggerNotification(`Tidak ditemukan data hasil hitungan Ronde ${roundNumber} untuk ${selectedCounter || 'semua counter'}`);
+            return;
+        }
+
+        const sortedList = [...targetList].sort((a, b) => 
+            (a.Location || '').localeCompare(b.Location || '') || 
+            (a.SKU || '').localeCompare(b.SKU || '')
+        );
+
+        const rows = sortedList.map((item, idx) => {
+            const sysQty = item.Qty || 0;
+            let actualVal: any = '-';
+            let picCounter: string = '-';
+
+            if (roundNumber === 1) {
+                actualVal = item.round1Actual !== undefined ? item.round1Actual : (item.currentRound === 1 && item.isCounted ? (item.countedQty ?? item.QTY_ACTUAL) : '-');
+                picCounter = item.round1Counter || (item.currentRound === 1 ? item.counter : '-');
+            } else if (roundNumber === 2) {
+                actualVal = item.round2Actual !== undefined ? item.round2Actual : (item.currentRound === 2 && item.isCounted ? (item.countedQty ?? item.QTY_ACTUAL) : '-');
+                picCounter = item.round2Counter || (item.currentRound === 2 ? item.counter : '-');
+            } else {
+                actualVal = item.round3Actual !== undefined ? item.round3Actual : (item.currentRound >= 3 && item.isCounted ? (item.countedQty ?? item.QTY_ACTUAL) : '-');
+                picCounter = item.round3Counter || (item.currentRound >= 3 ? item.counter : '-');
+            }
+
+            const isCountedThisRound = typeof actualVal === 'number';
+            const diff: number | string = isCountedThisRound ? ((actualVal as number) - sysQty) : '-';
+            let status = 'BELUM HITUNG';
+            if (typeof diff === 'number') {
+                if (diff === 0) status = 'MATCH (SESUAI)';
+                else if (diff > 0) status = 'SURPLUS (+)';
+                else status = 'SHORTAGE (-)';
+            }
+
+            return {
+                'NO': idx + 1,
+                'RONDE': roundNumber,
+                'LOKASI / RAK': item.Location || '-',
+                'LEVEL': item.level || '-',
+                'ZONE': item.Zone || '-',
+                'BARCODE / SKU': item.SKU,
+                'UPC 1': item.UPC1 || '-',
+                'UPC 2': item.UPC2 || '-',
+                'DESKRIPSI PRODUK': item.Description || '-',
+                'BRAND': item.SKUBrand || '-',
+                'SATUAN': item.satuanHitung || 'PCS',
+                'QTY SISTEM (WMS)': sysQty,
+                'PIC COUNTER': picCounter,
+                'HASIL FISIK AKTUAL': actualVal,
+                'SELISIH (FISIK - SISTEM)': diff,
+                'STATUS': status,
+                'KONDISI / REMARKS': item.Remarks || '-'
+            };
+        });
+
+        const wb = XLSX.utils.book_new();
+        const ws = XLSX.utils.json_to_sheet(rows);
+        XLSX.utils.book_append_sheet(wb, ws, `Hasil_Hitung_Ronde_${roundNumber}`);
+
+        const cleanDateStr = new Date().toISOString().slice(0, 10);
+        const cleanProjCode = (project?.sessionCode || 'SO').replace(/[^a-zA-Z0-9-]/g, '_');
+        const filename = selectedCounter
+            ? `Hasil_Hitung_R${roundNumber}_${selectedCounter.toUpperCase()}_${cleanProjCode}_${cleanDateStr}.xlsx`
+            : `Hasil_Hitung_R${roundNumber}_SEMUA_COUNTER_${cleanProjCode}_${cleanDateStr}.xlsx`;
+
+        XLSX.writeFile(wb, filename);
+        triggerNotification(`📊 File Hasil Hitung Ronde ${roundNumber} (.xlsx) berhasil diunduh: ${filename}`);
+    };
+
     const handleRevertLastSwap = async () => {
         if (!lastSwapEvent || isDeploySubmitting) return;
         const { sourceCounter, targetCounter, round, sourceItemIds, targetItemIds } = lastSwapEvent;
@@ -6485,19 +6586,19 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                                 ))}
                                                             </div>
 
-                                                            {/* Segmented Excel R1, R2, R3 */}
+                                                            {/* Segmented Excel Hasil Hitungan R1, R2, R3 */}
                                                             <div className="flex items-center bg-white rounded-xl p-0.5 border border-slate-200/90 shadow-2xs">
                                                                 <span className="px-2.5 py-1 text-[11px] font-black text-slate-700 flex items-center gap-1">
-                                                                    <FileDown className="w-3.5 h-3.5 text-slate-600" />
-                                                                    <span>Excel:</span>
+                                                                    <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
+                                                                    <span>Hasil Excel:</span>
                                                                 </span>
                                                                 {[1, 2, 3].map(rnd => (
                                                                     <button
                                                                         key={rnd}
                                                                         type="button"
-                                                                        onClick={() => handleExportCountsheetXLSX(undefined, rnd)}
+                                                                        onClick={() => handleExportSingleRoundResultsXLSX(undefined, rnd)}
                                                                         className="px-2 py-1 text-[11px] font-black text-slate-700 hover:text-emerald-800 hover:bg-emerald-50/60 rounded-lg cursor-pointer transition-all active:scale-95"
-                                                                        title={`Download File Excel Countsheet Blind Ronde ${rnd} Semua Counter`}
+                                                                        title={`Download File Excel Hasil Hitungan Fisik Ronde ${rnd} Semua Counter`}
                                                                     >
                                                                         R{rnd}
                                                                     </button>
@@ -6642,74 +6743,90 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                                                 </button>
 
                                                                                 {menuAnchor?.counter === cName && createPortal(
-                                                                                    <>
+                                                                                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-slate-950/45 backdrop-blur-xs animate-in fade-in duration-200" onClick={(e) => { e.stopPropagation(); setMenuAnchor(null); }}>
                                                                                         <div
-                                                                                            className="fixed inset-0 z-50 bg-transparent"
-                                                                                            onClick={(e) => { e.stopPropagation(); setMenuAnchor(null); }}
-                                                                                        />
-                                                                                        <div
-                                                                                            className={`fixed w-64 max-w-[calc(100vw-32px)] bg-white rounded-2xl shadow-2xl border border-slate-200 p-2 z-50 space-y-1 animate-in fade-in zoom-in-95 duration-150 ${
-                                                                                                menuAnchor.isDropup ? '-translate-y-full' : ''
-                                                                                            }`}
-                                                                                            style={{
-                                                                                                top: `${menuAnchor.top}px`,
-                                                                                                right: `${menuAnchor.right}px`
-                                                                                            }}
+                                                                                            className="w-full max-w-sm bg-white rounded-3xl shadow-2xl border border-slate-200/90 p-4 space-y-3 animate-in zoom-in-95 duration-150 overflow-hidden"
+                                                                                            onClick={(e) => e.stopPropagation()}
                                                                                         >
-                                                                                            <div className="px-3 py-1.5 text-[10px] font-extrabold text-slate-400 uppercase tracking-wider border-b border-slate-100 mb-1 flex items-center justify-between">
-                                                                                                <span>Aksi PIC: <b className="text-slate-900">{cName}</b></span>
-                                                                                                <span className="font-mono text-cyan-600">Ronde {cMaxRound}</span>
+                                                                                            {/* MODAL HEADER */}
+                                                                                            <div className="flex items-center justify-between pb-2.5 border-b border-slate-100">
+                                                                                                <div className="flex items-center space-x-2.5">
+                                                                                                    <div className="w-8 h-8 rounded-xl bg-slate-900 text-white text-xs font-black flex items-center justify-center uppercase shrink-0">
+                                                                                                        {cName.slice(0, 2)}
+                                                                                                    </div>
+                                                                                                    <div>
+                                                                                                        <div className="flex items-center space-x-2">
+                                                                                                            <span className="text-sm font-black text-slate-900 capitalize">{cName}</span>
+                                                                                                            <span className="text-[10px] font-black text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
+                                                                                                                Ronde {cMaxRound}
+                                                                                                            </span>
+                                                                                                        </div>
+                                                                                                        <p className="text-[10px] text-slate-400 font-medium">
+                                                                                                            {cData.counted} / {cData.total} SKU Terhitung ({pct}%)
+                                                                                                        </p>
+                                                                                                    </div>
+                                                                                                </div>
+                                                                                                <button
+                                                                                                    type="button"
+                                                                                                    onClick={() => setMenuAnchor(null)}
+                                                                                                    className="w-7 h-7 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-800 flex items-center justify-center text-xs font-black transition-all cursor-pointer"
+                                                                                                >
+                                                                                                    ✕
+                                                                                                </button>
                                                                                             </div>
 
-                                                                                            {effectiveRole === 'owner' && (
+                                                                                            {/* OPERATIONAL ACTIONS */}
+                                                                                            <div className="space-y-1.5">
+                                                                                                {effectiveRole === 'owner' && (
+                                                                                                    <button
+                                                                                                        onClick={(e) => {
+                                                                                                            e.stopPropagation();
+                                                                                                            setMenuAnchor(null);
+                                                                                                            handleOpenDeployModal(cName);
+                                                                                                        }}
+                                                                                                        disabled={cMaxRound >= 3}
+                                                                                                        className={`w-full text-left px-3 py-2 rounded-xl text-xs font-bold flex items-center space-x-2.5 transition-all cursor-pointer ${
+                                                                                                            cMaxRound >= 3
+                                                                                                                ? 'bg-slate-50 text-slate-400 cursor-not-allowed'
+                                                                                                                : 'hover:bg-red-50 text-slate-700 hover:text-red-700'
+                                                                                                        }`}
+                                                                                                    >
+                                                                                                        <div className="w-7 h-7 rounded-lg bg-red-100 text-red-600 flex items-center justify-center shrink-0">
+                                                                                                            <Repeat className="w-3.5 h-3.5" />
+                                                                                                        </div>
+                                                                                                        <div className="flex-1 min-w-0">
+                                                                                                            <div className="text-xs font-bold leading-tight">Deploy / Swap Ronde</div>
+                                                                                                            <div className="text-[10px] text-slate-400 font-normal">
+                                                                                                                {cMaxRound >= 3 ? 'Sudah max ronde 3' : `Lanjut ke Ronde ${cMaxRound + 1}`}
+                                                                                                            </div>
+                                                                                                        </div>
+                                                                                                    </button>
+                                                                                                )}
+
                                                                                                 <button
                                                                                                     onClick={(e) => {
                                                                                                         e.stopPropagation();
                                                                                                         setMenuAnchor(null);
-                                                                                                        handleOpenDeployModal(cName);
+                                                                                                        handleOpenReassignModal(cName);
                                                                                                     }}
-                                                                                                    disabled={cMaxRound >= 3}
-                                                                                                    className={`w-full text-left px-3 py-2 rounded-xl text-xs font-bold flex items-center space-x-2.5 transition-all cursor-pointer ${
-                                                                                                        cMaxRound >= 3
-                                                                                                            ? 'bg-slate-50 text-slate-400 cursor-not-allowed'
-                                                                                                            : 'hover:bg-red-50 text-slate-700 hover:text-red-700'
-                                                                                                    }`}
+                                                                                                    className="w-full text-left px-3 py-2 rounded-xl text-xs font-bold flex items-center space-x-2.5 hover:bg-cyan-50 text-slate-700 hover:text-cyan-800 transition-all cursor-pointer"
                                                                                                 >
-                                                                                                    <div className="w-7 h-7 rounded-lg bg-red-100 text-red-600 flex items-center justify-center shrink-0">
-                                                                                                        <Repeat className="w-3.5 h-3.5" />
+                                                                                                    <div className="w-7 h-7 rounded-lg bg-cyan-100 text-cyan-700 flex items-center justify-center shrink-0">
+                                                                                                        <ArrowRightLeft className="w-3.5 h-3.5" />
                                                                                                     </div>
                                                                                                     <div className="flex-1 min-w-0">
-                                                                                                        <div className="text-xs font-bold leading-tight">Deploy / Swap Ronde</div>
-                                                                                                        <div className="text-[10px] text-slate-400 font-normal">
-                                                                                                            {cMaxRound >= 3 ? 'Sudah max ronde 3' : `Lanjut ke Ronde ${cMaxRound + 1}`}
-                                                                                                        </div>
+                                                                                                        <div className="text-xs font-bold leading-tight">Oper Sisa Rak Pending</div>
+                                                                                                        <div className="text-[10px] text-slate-400 font-normal">Pindahkan rak belum beres</div>
                                                                                                     </div>
                                                                                                 </button>
-                                                                                            )}
+                                                                                            </div>
 
-                                                                                            <button
-                                                                                                onClick={(e) => {
-                                                                                                    e.stopPropagation();
-                                                                                                    setMenuAnchor(null);
-                                                                                                    handleOpenReassignModal(cName);
-                                                                                                }}
-                                                                                                className="w-full text-left px-3 py-2 rounded-xl text-xs font-bold flex items-center space-x-2.5 hover:bg-cyan-50 text-slate-700 hover:text-cyan-800 transition-all cursor-pointer"
-                                                                                            >
-                                                                                                <div className="w-7 h-7 rounded-lg bg-cyan-100 text-cyan-700 flex items-center justify-center shrink-0">
-                                                                                                    <ArrowRightLeft className="w-3.5 h-3.5" />
-                                                                                                </div>
-                                                                                                <div className="flex-1 min-w-0">
-                                                                                                    <div className="text-xs font-bold leading-tight">Oper Sisa Rak Pending</div>
-                                                                                                    <div className="text-[10px] text-slate-400 font-normal">Pindahkan rak belum beres</div>
-                                                                                                </div>
-                                                                                            </button>
-
-                                                                                            {/* CETAK COUNTSHEET PER RONDE (R1, R2, R3) */}
-                                                                                            <div className="p-2 bg-slate-50 border border-slate-200/80 rounded-xl space-y-1.5">
+                                                                                            {/* CETAK COUNTSHEET PDF / A4 BLIND */}
+                                                                                            <div className="p-2.5 bg-slate-50 border border-slate-200/80 rounded-2xl space-y-1.5">
                                                                                                 <div className="flex items-center justify-between px-1">
                                                                                                     <span className="text-[10px] font-black text-slate-600 uppercase tracking-wider flex items-center gap-1.5">
                                                                                                         <Printer className="w-3.5 h-3.5 text-cyan-700" />
-                                                                                                        <span>Cetak Countsheet</span>
+                                                                                                        <span>Cetak Countsheet Fisik</span>
                                                                                                     </span>
                                                                                                     <span className="text-[9px] font-mono font-bold text-cyan-700 bg-cyan-50 px-1 rounded border border-cyan-200">Blind A4</span>
                                                                                                 </div>
@@ -6737,14 +6854,14 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                                                                 </div>
                                                                                             </div>
 
-                                                                                            {/* EXCEL COUNTSHEET PER RONDE (R1, R2, R3) */}
-                                                                                            <div className="p-2 bg-slate-50 border border-slate-200/80 rounded-xl space-y-1.5">
+                                                                                            {/* EXCEL HASIL HITUNGAN AKTUAL FISIK PER RONDE (R1, R2, R3) */}
+                                                                                            <div className="p-2.5 bg-emerald-50/60 border border-emerald-200/80 rounded-2xl space-y-1.5">
                                                                                                 <div className="flex items-center justify-between px-1">
-                                                                                                    <span className="text-[10px] font-black text-slate-600 uppercase tracking-wider flex items-center gap-1.5">
-                                                                                                        <FileDown className="w-3.5 h-3.5 text-emerald-700" />
-                                                                                                        <span>Excel Countsheet</span>
+                                                                                                    <span className="text-[10px] font-black text-emerald-800 uppercase tracking-wider flex items-center gap-1.5">
+                                                                                                        <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
+                                                                                                        <span>Excel Hasil Hitung</span>
                                                                                                     </span>
-                                                                                                    <span className="text-[9px] font-mono font-bold text-emerald-700 bg-emerald-50 px-1 rounded border border-emerald-200">.xlsx</span>
+                                                                                                    <span className="text-[9px] font-mono font-bold text-emerald-700 bg-emerald-100/60 px-1 rounded border border-emerald-300/80">.xlsx</span>
                                                                                                 </div>
                                                                                                 <div className="grid grid-cols-3 gap-1">
                                                                                                     {[1, 2, 3].map(rnd => (
@@ -6754,22 +6871,23 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                                                                             onClick={(e) => {
                                                                                                                 e.stopPropagation();
                                                                                                                 setMenuAnchor(null);
-                                                                                                                handleExportCountsheetXLSX(cName, rnd);
+                                                                                                                handleExportSingleRoundResultsXLSX(cName, rnd);
                                                                                                             }}
                                                                                                             className={`py-1.5 px-1.5 rounded-lg text-xs font-black flex items-center justify-center gap-1 transition-all cursor-pointer ${
                                                                                                                 rnd === cMaxRound 
                                                                                                                     ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-2xs font-black' 
                                                                                                                     : 'bg-white hover:bg-slate-200 text-slate-700 border border-slate-200 font-bold'
                                                                                                             }`}
-                                                                                                            title={`Download File Excel Countsheet Blind Ronde ${rnd} (${cName})`}
+                                                                                                            title={`Download File Excel Hasil Hitungan Fisik Ronde ${rnd} (${cName})`}
                                                                                                         >
-                                                                                                            <span>Excel R{rnd}</span>
+                                                                                                            <span>Hasil R{rnd}</span>
                                                                                                             {rnd === cMaxRound && <span className="w-1.5 h-1.5 rounded-full bg-slate-950"></span>}
                                                                                                         </button>
                                                                                                     ))}
                                                                                                 </div>
                                                                                             </div>
 
+                                                                                            {/* REKAP LENGKAP SEMUA RONDE (R1-R3) */}
                                                                                             <button
                                                                                                 onClick={(e) => {
                                                                                                     e.stopPropagation();
@@ -6782,7 +6900,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                                                                     <FileSpreadsheet className="w-3.5 h-3.5" />
                                                                                                 </div>
                                                                                                 <div className="flex-1 min-w-0">
-                                                                                                    <div className="text-xs font-bold leading-tight">Rekap Riwayat Ronde ({cName})</div>
+                                                                                                    <div className="text-xs font-bold leading-tight">Rekap Komparasi R1-R3 ({cName})</div>
                                                                                                     <div className="text-[10px] text-slate-400 font-normal">Hasil hitung R1, R2, R3 lengkap .xlsx</div>
                                                                                                 </div>
                                                                                             </button>
@@ -6807,7 +6925,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                                                             )}
 
                                                                                             {effectiveRole === 'owner' && (
-                                                                                                <div className="pt-1 border-t border-slate-100 mt-1">
+                                                                                                <div className="pt-2 border-t border-slate-100">
                                                                                                     <button
                                                                                                         onClick={(e) => {
                                                                                                             e.stopPropagation();
@@ -6835,7 +6953,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                                                                 </div>
                                                                                             )}
                                                                                         </div>
-                                                                                    </>,
+                                                                                    </div>,
                                                                                     document.body
                                                                                 )}
                                                                             </div>
