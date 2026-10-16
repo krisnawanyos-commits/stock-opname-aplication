@@ -39,6 +39,7 @@ interface GroupedSKUItem {
   isBadStock: boolean;
   badRemarks: string;
   selectedCategories: string[];
+  badBreakdown?: Record<string, string>;
   isCounted: boolean;
   currentRound: number;
   docIds: string[];
@@ -46,6 +47,38 @@ interface GroupedSKUItem {
   allSystemEds: string[];
   isUnmappedFound?: boolean;
 }
+
+// HELPER PARSE BAD REMARKS STRING KE BREAKDOWN OBJECT
+export const parseBadRemarksToBreakdown = (remarks?: string): Record<string, string> => {
+  if (!remarks) return {};
+  const breakdown: Record<string, string> = {};
+  const cleaned = remarks.replace(/^\[BAD STOCK\]\s*/i, '').trim();
+  if (!cleaned) return {};
+  const items = cleaned.split(/,\s*/);
+  for (const item of items) {
+    const match = item.match(/^(.+?):\s*([0-9.]+)/);
+    if (match) {
+      breakdown[match[1].trim()] = match[2].trim();
+    } else if (item.trim()) {
+      breakdown[item.trim()] = "1";
+    }
+  }
+  return breakdown;
+};
+
+// HELPER FORMAT BREAKDOWN OBJECT KE BAD REMARKS STRING
+export const formatBadRemarks = (
+  breakdown: Record<string, string>,
+  uom: string = 'PCS'
+): string => {
+  const entries = Object.entries(breakdown).filter(([_, qty]) => {
+    const n = parseFloat(qty);
+    return !isNaN(n) && n > 0;
+  });
+  if (entries.length === 0) return '';
+  const parts = entries.map(([cat, qty]) => `${cat}: ${qty} ${uom}`);
+  return `[BAD STOCK] ${parts.join(', ')}`;
+};
 
 // HELPER KONVERSI DARI INPUT COUNTER KE SATUAN SISTEM
 export const convertToSystemQty = (
@@ -117,20 +150,22 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     isOpen: false, title: '', message: '',
   });
 
-  // MODAL EDIT KONVERSI ISI PER KARTON
+  // MODAL EDIT KONVERSI ISI PER KARTON / SATUAN FISIK
   const [conversionModal, setConversionModal] = useState<{
     isOpen: boolean;
     skuIndex: number | null;
     sku: string;
     skuName: string;
     systemUom: string;
+    selectedUom: 'PCS' | 'CARTON';
     tempValue: string;
   }>({
     isOpen: false,
     skuIndex: null,
     sku: '',
     skuName: '',
-    systemUom: 'CARTON',
+    systemUom: 'PCS',
+    selectedUom: 'CARTON',
     tempValue: '24'
   });
 
@@ -252,7 +287,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
   useEffect(() => {
     if (!isDirty || skuList.length === 0) return;
 
-    const draftData: Record<string, { qtyGood: string; qtyBad: string; expDateActual: string; isBadStock: boolean; badRemarks: string; selectedCategories: string[]; inputUom?: string; pcsPerCarton?: number }> = {};
+    const draftData: Record<string, { qtyGood: string; qtyBad: string; expDateActual: string; isBadStock: boolean; badRemarks: string; selectedCategories: string[]; badBreakdown?: Record<string, string>; inputUom?: string; pcsPerCarton?: number }> = {};
     let hasCount = false;
 
     skuList.forEach((item) => {
@@ -265,6 +300,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
           isBadStock: item.isBadStock,
           badRemarks: item.badRemarks,
           selectedCategories: item.selectedCategories || [],
+          badBreakdown: item.badBreakdown || {},
           inputUom: item.inputUom || item.uom,
           pcsPerCarton: item.pcsPerCarton || 1
         };
@@ -390,7 +426,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
           }
         }
 
-        const localStateMap: Record<string, { qtyGood: string; qtyBad: string; expDateActual: string; isBadStock: boolean; badRemarks: string; selectedCategories: string[]; inputUom?: string; pcsPerCarton?: number }> = {};
+        const localStateMap: Record<string, { qtyGood: string; qtyBad: string; expDateActual: string; isBadStock: boolean; badRemarks: string; selectedCategories: string[]; badBreakdown?: Record<string, string>; inputUom?: string; pcsPerCarton?: number }> = {};
         prevSkuList.forEach(item => {
           localStateMap[item.sku] = {
             qtyGood: item.qtyGood,
@@ -399,6 +435,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             isBadStock: item.isBadStock,
             badRemarks: item.badRemarks,
             selectedCategories: item.selectedCategories || [],
+            badBreakdown: item.badBreakdown || {},
             inputUom: item.inputUom || item.uom,
             pcsPerCarton: item.pcsPerCarton || 1
           };
@@ -431,8 +468,6 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
           const isUnmapped = sysQty === 0 || docSnap.id.includes('_TEMUAN_');
 
           const existingRemarks = data.badRemarks || '';
-          const initialCats = existingRemarks.replace(/^\[BAD STOCK\]\s*/, '').split(', ').filter(Boolean);
-
           const rawSatuan = (data.satuanHitung || 'PCS').toString().toUpperCase().trim();
           const sysUom = rawSatuan === 'CARTON' || rawSatuan === 'KARTON' || rawSatuan === 'CTN' ? 'CARTON' : 'PCS';
           const defaultPcsRatio = parseInt(data.pcsPerCarton || data.qtyPerCarton || '0', 10) || (sysUom === 'CARTON' ? 24 : 1);
@@ -441,6 +476,17 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             const existingLocal = localStateMap[skuKey] || draftMap[skuKey];
             const itemPcsRatio = existingLocal?.pcsPerCarton || defaultPcsRatio;
             const itemInputUom = existingLocal?.inputUom || sysUom;
+
+            const initialBreakdown = (existingLocal && existingLocal.badBreakdown && Object.keys(existingLocal.badBreakdown).length > 0)
+              ? existingLocal.badBreakdown
+              : (data.badBreakdown && typeof data.badBreakdown === 'object' && Object.keys(data.badBreakdown).length > 0)
+                ? data.badBreakdown
+                : parseBadRemarksToBreakdown(existingRemarks);
+            const initialCats = (existingLocal && existingLocal.selectedCategories && existingLocal.selectedCategories.length > 0)
+              ? existingLocal.selectedCategories
+              : (Object.keys(initialBreakdown).length > 0
+                ? Object.keys(initialBreakdown)
+                : existingRemarks.replace(/^\[BAD STOCK\]\s*/, '').split(', ').filter(Boolean));
 
             groupedMap[skuKey] = {
               sku: skuKey,
@@ -458,7 +504,8 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
               expDateActual: existingLocal ? existingLocal.expDateActual : (data.expDateActual || data.expiredDateActual || edSys || ''),
               isBadStock: existingLocal ? existingLocal.isBadStock : ((!isNaN(numBadQty) && numBadQty > 0) || !!data.badRemarks),
               badRemarks: existingLocal ? existingLocal.badRemarks : existingRemarks,
-              selectedCategories: existingLocal ? existingLocal.selectedCategories : initialCats,
+              selectedCategories: initialCats,
+              badBreakdown: initialBreakdown,
               isCounted: !!data.isCounted || hasActQty,
               currentRound: taskRound,
               docIds: [docSnap.id],
@@ -518,6 +565,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
   const [unmappedIsBadStock, setUnmappedIsBadStock] = useState<boolean>(false);
   const [unmappedBadQty, setUnmappedBadQty] = useState<string>("");
   const [unmappedSelectedCategories, setUnmappedSelectedCategories] = useState<string[]>([]);
+  const [unmappedBadBreakdown, setUnmappedBadBreakdown] = useState<Record<string, string>>({});
 
   const [unmappedList, setUnmappedList] = useState<UnmappedItem[]>([]);
 
@@ -661,36 +709,241 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     if (isSessionLocked) return;
     setIsDirty(true);
     setSkuList((prev) =>
-      prev.map((item, idx) => (idx === index ? { ...item, isBadStock: !item.isBadStock } : item))
+      prev.map((item, idx) => {
+        if (idx === index) {
+          const nextState = !item.isBadStock;
+          return {
+            ...item,
+            isBadStock: nextState,
+            qtyBad: nextState ? item.qtyBad : '',
+            badBreakdown: nextState ? (item.badBreakdown || {}) : {},
+            badRemarks: nextState ? item.badRemarks : '',
+            selectedCategories: nextState ? item.selectedCategories : []
+          };
+        }
+        return item;
+      })
     );
   };
 
-  const toggleCategoryChip = (skuIdx: number, catName: string) => {
+  // MULTI-KATEGORI BAD STOCK DENGAN RINCIAN QTY PER KATEGORI
+  const toggleBadCategory = (skuIdx: number, catName: string) => {
     if (isSessionLocked) return;
     setIsDirty(true);
     setSkuList(prev => prev.map((item, idx) => {
       if (idx === skuIdx) {
-        const currentCats = item.selectedCategories || [];
-        const exists = currentCats.includes(catName);
-        const nextCats = exists ? currentCats.filter(c => c !== catName) : [...currentCats, catName];
+        const curBreakdown = { ...(item.badBreakdown || {}) };
+        const uom = item.inputUom || item.uom;
+        if (curBreakdown[catName] !== undefined) {
+          delete curBreakdown[catName];
+        } else {
+          curBreakdown[catName] = "1";
+        }
+        const activeCats = Object.keys(curBreakdown);
+        let totalBad = 0;
+        activeCats.forEach(c => {
+          const n = parseFloat(curBreakdown[c] || "0");
+          if (!isNaN(n)) totalBad += n;
+        });
+        totalBad = Math.round(totalBad * 1000) / 1000;
+
+        const remarksStr = formatBadRemarks(curBreakdown, uom);
+
         return {
           ...item,
-          selectedCategories: nextCats,
-          badRemarks: nextCats.length > 0 ? `[BAD STOCK] ${nextCats.join(', ')}` : ''
+          badBreakdown: curBreakdown,
+          selectedCategories: activeCats,
+          qtyBad: totalBad > 0 ? totalBad.toString() : (activeCats.length > 0 ? "0" : ""),
+          badRemarks: remarksStr
         };
       }
       return item;
     }));
   };
 
-  const toggleUnmappedCategoryChip = (catName: string) => {
+  const handleCategoryQtyChange = (skuIdx: number, catName: string, rawVal: string) => {
     if (isSessionLocked) return;
     setIsDirty(true);
-    setUnmappedSelectedCategories(prev => {
-      if (prev.includes(catName)) {
-        return prev.filter(c => c !== catName);
+    let cleanVal = rawVal.replace(/[^0-9.]/g, '');
+    const parts = cleanVal.split('.');
+    if (parts.length > 2) {
+      cleanVal = parts[0] + '.' + parts.slice(1).join('');
+    }
+    if (cleanVal.length > 1 && cleanVal.startsWith('0') && !cleanVal.startsWith('0.')) {
+      cleanVal = cleanVal.replace(/^0+/, '') || '0';
+    }
+
+    setSkuList(prev => prev.map((item, idx) => {
+      if (idx === skuIdx) {
+        const curBreakdown = { ...(item.badBreakdown || {}) };
+        const uom = item.inputUom || item.uom;
+        curBreakdown[catName] = cleanVal;
+
+        const activeCats = Object.keys(curBreakdown);
+        let totalBad = 0;
+        activeCats.forEach(c => {
+          const n = parseFloat(curBreakdown[c] || "0");
+          if (!isNaN(n)) totalBad += n;
+        });
+        totalBad = Math.round(totalBad * 1000) / 1000;
+
+        const remarksStr = formatBadRemarks(curBreakdown, uom);
+
+        return {
+          ...item,
+          badBreakdown: curBreakdown,
+          selectedCategories: activeCats,
+          qtyBad: totalBad > 0 ? totalBad.toString() : (cleanVal !== '' ? "0" : ""),
+          badRemarks: remarksStr
+        };
       }
-      return [...prev, catName];
+      return item;
+    }));
+  };
+
+  const adjustCategoryQty = (skuIdx: number, catName: string, delta: number) => {
+    if (isSessionLocked) return;
+    setIsDirty(true);
+    setSkuList(prev => prev.map((item, idx) => {
+      if (idx === skuIdx) {
+        const curBreakdown = { ...(item.badBreakdown || {}) };
+        const uom = item.inputUom || item.uom;
+        const curVal = parseFloat(curBreakdown[catName] || "0");
+        const nextVal = Math.max(0, Math.round((curVal + delta) * 1000) / 1000);
+        curBreakdown[catName] = nextVal.toString();
+
+        const activeCats = Object.keys(curBreakdown);
+        let totalBad = 0;
+        activeCats.forEach(c => {
+          const n = parseFloat(curBreakdown[c] || "0");
+          if (!isNaN(n)) totalBad += n;
+        });
+        totalBad = Math.round(totalBad * 1000) / 1000;
+
+        const remarksStr = formatBadRemarks(curBreakdown, uom);
+
+        return {
+          ...item,
+          badBreakdown: curBreakdown,
+          selectedCategories: activeCats,
+          qtyBad: totalBad > 0 ? totalBad.toString() : "",
+          badRemarks: remarksStr
+        };
+      }
+      return item;
+    }));
+  };
+
+  const removeBadCategory = (skuIdx: number, catName: string) => {
+    if (isSessionLocked) return;
+    setIsDirty(true);
+    setSkuList(prev => prev.map((item, idx) => {
+      if (idx === skuIdx) {
+        const curBreakdown = { ...(item.badBreakdown || {}) };
+        const uom = item.inputUom || item.uom;
+        delete curBreakdown[catName];
+
+        const activeCats = Object.keys(curBreakdown);
+        let totalBad = 0;
+        activeCats.forEach(c => {
+          const n = parseFloat(curBreakdown[c] || "0");
+          if (!isNaN(n)) totalBad += n;
+        });
+        totalBad = Math.round(totalBad * 1000) / 1000;
+
+        const remarksStr = formatBadRemarks(curBreakdown, uom);
+
+        return {
+          ...item,
+          badBreakdown: curBreakdown,
+          selectedCategories: activeCats,
+          qtyBad: totalBad > 0 ? totalBad.toString() : "",
+          badRemarks: remarksStr
+        };
+      }
+      return item;
+    }));
+  };
+
+  // MULTI-KATEGORI BAD STOCK UNTUK FORM UNMAPPED
+  const toggleUnmappedBadCategory = (catName: string) => {
+    if (isSessionLocked) return;
+    setIsDirty(true);
+    setUnmappedBadBreakdown(prev => {
+      const next = { ...prev };
+      if (next[catName] !== undefined) {
+        delete next[catName];
+      } else {
+        next[catName] = "1";
+      }
+      const activeCats = Object.keys(next);
+      setUnmappedSelectedCategories(activeCats);
+      let total = 0;
+      activeCats.forEach(c => {
+        const n = parseFloat(next[c] || "0");
+        if (!isNaN(n)) total += n;
+      });
+      setUnmappedBadQty(total > 0 ? total.toString() : (activeCats.length > 0 ? "0" : ""));
+      return next;
+    });
+  };
+
+  const handleUnmappedCategoryQtyChange = (catName: string, rawVal: string) => {
+    if (isSessionLocked) return;
+    setIsDirty(true);
+    let cleanVal = rawVal.replace(/[^0-9.]/g, '');
+    const parts = cleanVal.split('.');
+    if (parts.length > 2) {
+      cleanVal = parts[0] + '.' + parts.slice(1).join('');
+    }
+    setUnmappedBadBreakdown(prev => {
+      const next = { ...prev, [catName]: cleanVal };
+      const activeCats = Object.keys(next);
+      setUnmappedSelectedCategories(activeCats);
+      let total = 0;
+      activeCats.forEach(c => {
+        const n = parseFloat(next[c] || "0");
+        if (!isNaN(n)) total += n;
+      });
+      setUnmappedBadQty(total > 0 ? total.toString() : (cleanVal !== '' ? "0" : ""));
+      return next;
+    });
+  };
+
+  const adjustUnmappedCategoryQty = (catName: string, delta: number) => {
+    if (isSessionLocked) return;
+    setIsDirty(true);
+    setUnmappedBadBreakdown(prev => {
+      const cur = parseFloat(prev[catName] || "0");
+      const nextVal = Math.max(0, Math.round((cur + delta) * 1000) / 1000);
+      const next = { ...prev, [catName]: nextVal.toString() };
+      const activeCats = Object.keys(next);
+      setUnmappedSelectedCategories(activeCats);
+      let total = 0;
+      activeCats.forEach(c => {
+        const n = parseFloat(next[c] || "0");
+        if (!isNaN(n)) total += n;
+      });
+      setUnmappedBadQty(total > 0 ? total.toString() : "");
+      return next;
+    });
+  };
+
+  const removeUnmappedBadCategory = (catName: string) => {
+    if (isSessionLocked) return;
+    setIsDirty(true);
+    setUnmappedBadBreakdown(prev => {
+      const next = { ...prev };
+      delete next[catName];
+      const activeCats = Object.keys(next);
+      setUnmappedSelectedCategories(activeCats);
+      let total = 0;
+      activeCats.forEach(c => {
+        const n = parseFloat(next[c] || "0");
+        if (!isNaN(n)) total += n;
+      });
+      setUnmappedBadQty(total > 0 ? total.toString() : "");
+      return next;
     });
   };
 
@@ -712,32 +965,90 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     );
   };
 
-  // UOM SWITCHING: Ganti mode input KARTON <-> PCS dengan live auto-convert nilai input
-  const handleSwitchInputUom = (index: number, newUom: 'PCS' | 'CARTON') => {
+  // UOM SWITCHING & RESET KE SATUAN SISTEM
+  const handleResetToSystemUom = (index: number) => {
     if (isSessionLocked) return;
-    const targetItem = skuList[index];
-    if (targetItem && newUom === 'CARTON' && (!targetItem.pcsPerCarton || targetItem.pcsPerCarton <= 1)) {
-      openConversionModal(index);
+    const item = skuList[index];
+    if (!item) return;
+    const oldUom = item.inputUom || item.uom;
+    const sysUom = item.uom;
+    if (oldUom === sysUom) return;
+
+    const pcsRatio = item.pcsPerCarton || (item.uom === 'CARTON' ? 24 : 1);
+    const convertValue = (valStr: string) => {
+      if (!valStr || valStr === '0') return valStr;
+      const num = parseFloat(valStr);
+      if (isNaN(num)) return valStr;
+      if (sysUom === 'PCS' && oldUom === 'CARTON') {
+        const res = Math.round(num * pcsRatio * 100) / 100;
+        return res.toString();
+      } else if (sysUom === 'CARTON' && oldUom === 'PCS') {
+        const res = Math.round((num / pcsRatio) * 1000) / 1000;
+        return res.toString();
+      }
+      return valStr;
+    };
+
+    setIsDirty(true);
+    setSkuList(prev => prev.map((it, idx) => (idx === index ? {
+      ...it,
+      inputUom: sysUom,
+      qtyGood: convertValue(it.qtyGood),
+      qtyBad: convertValue(it.qtyBad)
+    } : it)));
+    triggerHapticFeedback('success');
+  };
+
+  // PENGATURAN POP-UP: "BARANG FISIK TIDAK SESUAI SATUAN HITUNG"
+  const openConversionModal = (index: number) => {
+    if (isSessionLocked) return;
+    const item = skuList[index];
+    if (!item) return;
+    const defaultRatio = item.pcsPerCarton || (item.uom === 'CARTON' ? 24 : 1);
+    const initialTargetUom = (item.inputUom === 'CARTON' || item.uom === 'CARTON') ? 'CARTON' : 'CARTON';
+
+    setConversionModal({
+      isOpen: true,
+      skuIndex: index,
+      sku: item.sku,
+      skuName: item.name,
+      systemUom: item.uom,
+      selectedUom: initialTargetUom,
+      tempValue: defaultRatio > 1 ? defaultRatio.toString() : '24'
+    });
+  };
+
+  const handleSaveConversionRatio = async () => {
+    if (conversionModal.skuIndex === null) return;
+    const targetIndex = conversionModal.skuIndex;
+    const targetSku = skuList[targetIndex];
+    if (!targetSku) return;
+
+    const newTargetUom = conversionModal.selectedUom;
+    const newRatio = parseInt(conversionModal.tempValue, 10);
+    if (newTargetUom === 'CARTON' && (isNaN(newRatio) || newRatio <= 0)) {
+      setModal({ isOpen: true, type: 'warning', title: 'Nilai Tidak Valid', message: 'Isi per karton harus berupa angka lebih dari 0.' });
+      return;
     }
+
+    const appliedRatio = newTargetUom === 'CARTON' ? (newRatio || 24) : (targetSku.pcsPerCarton || 1);
+
     setIsDirty(true);
     setSkuList(prev => prev.map((item, idx) => {
-      if (idx !== index) return item;
+      if (idx !== targetIndex) return item;
       const oldUom = item.inputUom || item.uom;
-      if (oldUom === newUom) return item;
-
-      const pcsRatio = item.pcsPerCarton || (item.uom === 'CARTON' ? 24 : 1);
 
       const convertValue = (valStr: string) => {
         if (!valStr || valStr === '0') return valStr;
         const num = parseFloat(valStr);
         if (isNaN(num)) return valStr;
-        if (newUom === 'PCS' && oldUom === 'CARTON') {
+        if (newTargetUom === 'PCS' && oldUom === 'CARTON') {
           // Karton -> PCS
-          const res = Math.round(num * pcsRatio * 100) / 100;
+          const res = Math.round(num * appliedRatio * 100) / 100;
           return res.toString();
-        } else if (newUom === 'CARTON' && oldUom === 'PCS') {
+        } else if (newTargetUom === 'CARTON' && oldUom === 'PCS') {
           // PCS -> Karton
-          const res = Math.round((num / pcsRatio) * 1000) / 1000;
+          const res = Math.round((num / appliedRatio) * 1000) / 1000;
           return res.toString();
         }
         return valStr;
@@ -745,42 +1056,12 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
 
       return {
         ...item,
-        inputUom: newUom,
+        inputUom: newTargetUom,
+        pcsPerCarton: appliedRatio,
         qtyGood: convertValue(item.qtyGood),
         qtyBad: convertValue(item.qtyBad)
       };
     }));
-  };
-
-  // PENGATURAN CONVERSION RATIO (Isi per Karton)
-  const openConversionModal = (index: number) => {
-    if (isSessionLocked) return;
-    const item = skuList[index];
-    if (!item) return;
-    setConversionModal({
-      isOpen: true,
-      skuIndex: index,
-      sku: item.sku,
-      skuName: item.name,
-      systemUom: item.uom,
-      tempValue: (item.pcsPerCarton || (item.uom === 'CARTON' ? 24 : 1)).toString()
-    });
-  };
-
-  const handleSaveConversionRatio = async () => {
-    if (conversionModal.skuIndex === null) return;
-    const newRatio = parseInt(conversionModal.tempValue, 10);
-    if (isNaN(newRatio) || newRatio <= 0) {
-      setModal({ isOpen: true, type: 'warning', title: 'Nilai Tidak Valid', message: 'Isi per karton harus berupa angka lebih dari 0.' });
-      return;
-    }
-
-    const targetIndex = conversionModal.skuIndex;
-    const targetSku = skuList[targetIndex];
-    if (!targetSku) return;
-
-    setIsDirty(true);
-    setSkuList(prev => prev.map((item, idx) => (idx === targetIndex ? { ...item, pcsPerCarton: newRatio } : item)));
 
     // Simpan ke Firestore master_tasks agar tersinkron ke semua perangkat & reload
     try {
@@ -788,7 +1069,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       targetSku.docIds.forEach(docId => {
         const tRef = doc(db, "master_tasks", docId);
         batch.set(tRef, {
-          pcsPerCarton: newRatio,
+          pcsPerCarton: appliedRatio,
           updatedAt: new Date().toISOString()
         }, { merge: true });
       });
@@ -989,7 +1270,9 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     const unmDesc = unmappedDesc.trim() || (matchedMasterSKU ? (matchedMasterSKU.Description || matchedMasterSKU.SKU) : 'Barang Fisik Baru Unmapped');
     const totalSubmitted = qtyNumber + badQtyNum;
 
-    const badCatRemarks = unmappedSelectedCategories.length > 0 ? `[BAD STOCK] ${unmappedSelectedCategories.join(', ')}` : '[BARANG TEMUAN FISIK]';
+    const badCatRemarks = unmappedIsBadStock && (unmappedBadQty && parseFloat(unmappedBadQty) > 0)
+      ? (formatBadRemarks(unmappedBadBreakdown, unmappedUnit) || (unmappedSelectedCategories.length > 0 ? `[BAD STOCK] ${unmappedSelectedCategories.join(', ')}` : '[BAD STOCK]'))
+      : '[BARANG TEMUAN FISIK]';
 
     const batch = writeBatch(db);
 
@@ -1009,9 +1292,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       const conversionNote = inputUnit !== sysUnit
         ? ` [Input: ${rawGood + rawBad} ${inputUnit} (isi ${pcsRatio}/ctn) -> Converted: ${skuTotalSubmitted} ${sysUnit}]`
         : '';
-      const finalRemarks = (skuItem.selectedCategories && skuItem.selectedCategories.length > 0
-        ? `[BAD STOCK] ${skuItem.selectedCategories.join(', ')}`
-        : (skuItem.badRemarks || '')) + conversionNote;
+      const finalRemarks = (skuItem.badRemarks || (skuItem.badBreakdown ? formatBadRemarks(skuItem.badBreakdown, inputUnit) : '')) + conversionNote;
 
       if (skuTotalSubmitted > 0 || skuItem.expDateActual) {
         skuItem.docIds.forEach((docId, i) => {
@@ -1025,6 +1306,8 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             QTY_GOOD: i === 0 ? finalGoodQty : 0,
             QTY_BAD: i === 0 ? finalBadQty : 0,
             badRemarks: i === 0 ? finalRemarks : '',
+            badBreakdown: i === 0 ? (skuItem.badBreakdown || {}) : {},
+            selectedCategories: i === 0 ? (skuItem.selectedCategories || []) : [],
             expDateActual: skuItem.expDateActual || '',
             pcsPerCarton: pcsRatio,
             countedInUom: inputUnit,
@@ -1060,6 +1343,8 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       isCounted: true,
       unitPrice: unmPrice,
       badRemarks: badCatRemarks,
+      badBreakdown: unmappedBadBreakdown || {},
+      selectedCategories: unmappedSelectedCategories || [],
       updatedAt: new Date().toISOString()
     }, { merge: true });
 
@@ -1094,6 +1379,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     setUnmappedIsBadStock(false);
     setUnmappedBadQty("");
     setUnmappedSelectedCategories([]);
+    setUnmappedBadBreakdown({});
     setUnmappedDrawerOpen(false);
     setModal({ isOpen: true, type: 'success', title: 'Item Temuan Tersimpan!', message: `Item ${unmSku} & seluruh inputan SKU lain pada Rak ${rack.rackNumber} tersimpan aman!` });
   };
@@ -1128,9 +1414,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
           ? ` [Dihitung: ${rawGood + rawBad} ${inputUnit} (isi ${pcsRatio}/ctn) -> Dikonversi ke ${totalSubmitted} ${sysUnit}]`
           : '';
 
-        const remarksText = (skuItem.selectedCategories && skuItem.selectedCategories.length > 0
-          ? `[BAD STOCK] ${skuItem.selectedCategories.join(', ')}`
-          : (skuItem.badRemarks || '-')) + conversionNote;
+        const remarksText = (skuItem.badRemarks || (skuItem.badBreakdown ? formatBadRemarks(skuItem.badBreakdown, inputUnit) : '-')) + conversionNote;
 
         skuItem.docIds.forEach((docId, i) => {
           const taskRef = doc(db, "master_tasks", docId);
@@ -1143,6 +1427,8 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             QTY_GOOD: i === 0 ? finalGoodQty : 0,
             QTY_BAD: i === 0 ? finalBadQty : 0,
             badRemarks: i === 0 ? remarksText : '',
+            badBreakdown: i === 0 ? (skuItem.badBreakdown || {}) : {},
+            selectedCategories: i === 0 ? (skuItem.selectedCategories || []) : [],
             expDateActual: skuItem.expDateActual || '',
             pcsPerCarton: pcsRatio,
             countedInUom: inputUnit,
@@ -1445,19 +1731,22 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                         <span className="text-xs font-bold uppercase bg-cyan-50 text-cyan-800 border border-cyan-200 px-2 py-0.5 rounded-md">
                           {currentSku.uom}
                         </span>
-                        <button
-                          type="button"
-                          disabled={isSessionLocked}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            openConversionModal(idx);
-                          }}
-                          className="text-[10px] font-mono font-bold bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 px-2 py-0.5 rounded-md flex items-center gap-1 cursor-pointer transition-colors shadow-2xs"
-                          title="Klik untuk setting rasio / isi per karton"
-                        >
-                          <span>📦 1 Ctn = {currentSku.pcsPerCarton || (currentSku.uom === 'CARTON' ? 24 : 1)} Pcs</span>
-                          <Edit2 className="w-2.5 h-2.5 text-amber-700" />
-                        </button>
+                        {/* HANYA MUNCULKAN BADGE KONVERSI JIKA AKTIF / BERBEDA DARI SISTEM ATAU SISTEMNYA KARTON */}
+                        {((currentSku.inputUom && currentSku.inputUom !== currentSku.uom) || (currentSku.uom === 'CARTON' && currentSku.pcsPerCarton > 1)) && (
+                          <button
+                            type="button"
+                            disabled={isSessionLocked}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openConversionModal(idx);
+                            }}
+                            className="text-[10px] font-mono font-bold bg-amber-100 hover:bg-amber-200 text-amber-950 border border-amber-300 px-2 py-0.5 rounded-md flex items-center gap-1 cursor-pointer transition-colors shadow-2xs"
+                            title="Klik untuk setting rasio / isi per karton"
+                          >
+                            <span>📦 1 Ctn = {currentSku.pcsPerCarton || 24} Pcs</span>
+                            <Edit2 className="w-2.5 h-2.5 text-amber-700" />
+                          </button>
+                        )}
                       </div>
                       <h3 className="font-headline-sm text-slate-900 font-bold text-xs sm:text-sm leading-snug line-clamp-2">
                         {currentSku.name}
@@ -1601,149 +1890,153 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                       )}
                     </div>
 
-                    {/* PILIH SATUAN HITUNG & SETTING RASIO */}
-                    <div className="bg-linear-to-r from-slate-50 to-cyan-50/40 border border-slate-200 p-2.5 rounded-xl space-y-2">
-                      <div className="flex items-center justify-between gap-1 flex-wrap">
-                        <span className="text-[10px] font-black uppercase text-slate-600 tracking-wider flex items-center gap-1">
-                          <Zap className="w-3 h-3 text-cyan-600" />
-                          <span>Satuan Input Hitung:</span>
-                        </span>
-
+                    {/* TRIGGER / STATUS: APAKAH BARANG FISIK SESUAI SATUAN HITUNG SISTEM */}
+                    {(currentSku.inputUom || currentSku.uom) === currentSku.uom ? (
+                      <div className="pt-0.5">
                         <button
                           type="button"
                           disabled={isSessionLocked}
                           onClick={() => openConversionModal(idx)}
-                          className="text-[10px] font-bold text-amber-900 bg-amber-100/80 hover:bg-amber-200/80 border border-amber-300 px-2 py-0.5 rounded-lg flex items-center gap-1 cursor-pointer transition-colors shadow-2xs"
-                          title="Ubah isi per karton"
+                          className="w-full py-2 px-3 bg-slate-50 hover:bg-amber-50/80 text-slate-600 hover:text-amber-900 border border-dashed border-slate-300 hover:border-amber-300 rounded-xl text-xs font-semibold flex items-center justify-between transition-all cursor-pointer shadow-2xs group"
                         >
-                          <span>📦 1 Ctn = {currentSku.pcsPerCarton || (currentSku.uom === 'CARTON' ? 24 : 1)} Pcs</span>
-                          <Edit2 className="w-2.5 h-2.5 text-amber-700" />
+                          <span className="flex items-center gap-1.5">
+                            <span className="text-amber-600 font-bold">⚠️</span>
+                            <span className="text-slate-700 group-hover:text-amber-950 font-bold">Barang fisik tidak sesuai satuan hitung?</span>
+                          </span>
+                          <span className="text-[11px] text-cyan-700 font-bold group-hover:underline flex items-center gap-1">
+                            <span>Atur Dus / Satuan</span>
+                            <span>→</span>
+                          </span>
                         </button>
                       </div>
-
-                      <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-200/70 rounded-xl">
-                        <button
-                          type="button"
-                          disabled={isSessionLocked}
-                          onClick={() => handleSwitchInputUom(idx, 'CARTON')}
-                          className={`py-2 px-3 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                            (currentSku.inputUom || currentSku.uom) === 'CARTON'
-                              ? 'bg-cyan-500 text-slate-950 shadow-sm scale-[1.01]'
-                              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/50'
-                          }`}
-                        >
-                          <span>📦</span>
-                          <span>KARTON</span>
-                          {currentSku.uom === 'CARTON' && (
-                            <span className="text-[9px] px-1 py-0.2 bg-cyan-900/10 rounded font-normal">(Sistem)</span>
-                          )}
-                        </button>
-
-                        <button
-                          type="button"
-                          disabled={isSessionLocked}
-                          onClick={() => handleSwitchInputUom(idx, 'PCS')}
-                          className={`py-2 px-3 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                            (currentSku.inputUom || currentSku.uom) === 'PCS'
-                              ? 'bg-cyan-500 text-slate-950 shadow-sm scale-[1.01]'
-                              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/50'
-                          }`}
-                        >
-                          <span>🛍️</span>
-                          <span>PCS</span>
-                          {currentSku.uom === 'PCS' && (
-                            <span className="text-[9px] px-1 py-0.2 bg-cyan-900/10 rounded font-normal">(Sistem)</span>
-                          )}
-                        </button>
-                      </div>
-
-                      {/* TOMBOL KALKULATOR CAMPURAN (DUS UTUH + ECERAN) */}
-                      <button
-                        type="button"
-                        disabled={isSessionLocked}
-                        onClick={() => toggleMixedCalc(currentSku.sku)}
-                        className="w-full py-1.5 px-2 bg-white hover:bg-cyan-50/70 border border-slate-300 hover:border-cyan-300 text-slate-700 hover:text-cyan-900 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors shadow-2xs"
-                      >
-                        <Calculator className="w-3.5 h-3.5 text-cyan-600" />
-                        <span>{mixedCalc[currentSku.sku]?.isOpen ? 'Tutup Kalkulator Dus + Pcs' : '🧮 Hitung Campuran: Dus Utuh + Eceran Pcs'}</span>
-                      </button>
-
-                      {/* PANEL KALKULATOR CAMPURAN JIKA DIAKTIFKAN */}
-                      {mixedCalc[currentSku.sku]?.isOpen && (
-                        <div className="bg-white border-2 border-cyan-400 p-2.5 rounded-xl space-y-2 animate-in fade-in shadow-xs">
-                          <div className="text-[11px] font-bold text-cyan-950 flex items-center justify-between">
-                            <span className="flex items-center gap-1">
-                              <Sparkles className="w-3 h-3 text-cyan-600" />
-                              <span>Kalkulator Dus + Eceran Pcs</span>
-                            </span>
-                            <span className="text-[10px] text-slate-500 font-mono">1 Ctn = {currentSku.pcsPerCarton || (currentSku.uom === 'CARTON' ? 24 : 1)} Pcs</span>
-                          </div>
-
-                          <div className="grid grid-cols-2 gap-2">
+                    ) : (
+                      /* KONDISI AKTIF: JIKA COUNTER SUDAH MEMILIH SATUAN LAIN / DUS */
+                      <div className="bg-amber-50/90 border border-amber-300 p-2.5 rounded-xl space-y-2 shadow-xs">
+                        <div className="flex items-center justify-between gap-1 flex-wrap">
+                          <div className="flex items-center gap-2">
+                            <span className="text-lg">📦</span>
                             <div>
-                              <label className="text-[10px] font-bold text-slate-600 block uppercase mb-0.5">Dus Utuh (Ctn)</label>
-                              <input
-                                type="number"
-                                min="0"
-                                step="1"
-                                placeholder="0"
-                                value={mixedCalc[currentSku.sku]?.cartons || ''}
-                                onChange={(e) => updateMixedCalcValue(currentSku.sku, 'cartons', e.target.value)}
-                                className="w-full p-1.5 border border-slate-300 rounded-lg text-center font-bold text-sm bg-white outline-none"
-                              />
-                            </div>
-                            <div>
-                              <label className="text-[10px] font-bold text-slate-600 block uppercase mb-0.5">Eceran (Pcs)</label>
-                              <input
-                                type="number"
-                                min="0"
-                                step="1"
-                                placeholder="0"
-                                value={mixedCalc[currentSku.sku]?.loosePcs || ''}
-                                onChange={(e) => updateMixedCalcValue(currentSku.sku, 'loosePcs', e.target.value)}
-                                className="w-full p-1.5 border border-slate-300 rounded-lg text-center font-bold text-sm bg-white outline-none"
-                              />
+                              <div className="font-extrabold text-xs text-amber-950 flex items-center gap-1.5">
+                                <span>Fisik Dihitung: {currentSku.inputUom || currentSku.uom}</span>
+                                <span className="px-1.5 py-0.2 bg-amber-200 text-amber-900 rounded font-mono text-[10px]">
+                                  1 Ctn = {currentSku.pcsPerCarton || 24} Pcs
+                                </span>
+                              </div>
+                              <div className="text-[10px] text-amber-800">
+                                Otomatis dikonversi ke sistem ({currentSku.uom})
+                              </div>
                             </div>
                           </div>
 
-                          <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-100">
-                            <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-600">
-                              <span>Target:</span>
-                              <button
-                                type="button"
-                                onClick={() => updateMixedCalcValue(currentSku.sku, 'targetField', 'good')}
-                                className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                  (mixedCalc[currentSku.sku]?.targetField || 'good') === 'good'
-                                    ? 'bg-cyan-500 text-slate-950'
-                                    : 'bg-slate-100 text-slate-600'
-                                }`}
-                              >
-                                Baik
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => updateMixedCalcValue(currentSku.sku, 'targetField', 'bad')}
-                                className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                  mixedCalc[currentSku.sku]?.targetField === 'bad'
-                                    ? 'bg-amber-500 text-slate-950'
-                                    : 'bg-slate-100 text-slate-600'
-                                }`}
-                              >
-                                Rusak
-                              </button>
-                            </div>
-
+                          <div className="flex items-center gap-1">
                             <button
                               type="button"
-                              onClick={() => applyMixedCalc(idx)}
-                              className="px-3 py-1 bg-cyan-400 hover:bg-cyan-300 text-slate-950 rounded-lg font-black text-xs cursor-pointer shadow-xs active:scale-95 transition-all"
+                              disabled={isSessionLocked}
+                              onClick={() => openConversionModal(idx)}
+                              className="px-2.5 py-1 bg-amber-200 hover:bg-amber-300 text-amber-950 font-bold rounded-lg text-xs cursor-pointer shadow-2xs"
                             >
-                              ✓ Terapkan
+                              Ubah
+                            </button>
+                            <button
+                              type="button"
+                              disabled={isSessionLocked}
+                              onClick={() => handleResetToSystemUom(idx)}
+                              className="px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-700 font-bold rounded-lg text-xs border border-slate-300 cursor-pointer shadow-2xs"
+                              title="Kembalikan ke satuan default sistem"
+                            >
+                              Reset
                             </button>
                           </div>
                         </div>
-                      )}
-                    </div>
+
+                        {/* TOMBOL KALKULATOR CAMPURAN (DUS UTUH + ECERAN) */}
+                        <button
+                          type="button"
+                          disabled={isSessionLocked}
+                          onClick={() => toggleMixedCalc(currentSku.sku)}
+                          className="w-full py-1.5 px-2 bg-white hover:bg-amber-100/50 border border-amber-300 text-amber-900 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors shadow-2xs"
+                        >
+                          <Calculator className="w-3.5 h-3.5 text-amber-700" />
+                          <span>{mixedCalc[currentSku.sku]?.isOpen ? 'Tutup Kalkulator Dus + Pcs' : '🧮 Hitung Campuran: Dus Utuh + Eceran Pcs'}</span>
+                        </button>
+
+                        {/* PANEL KALKULATOR CAMPURAN JIKA DIAKTIFKAN */}
+                        {mixedCalc[currentSku.sku]?.isOpen && (
+                          <div className="bg-white border-2 border-amber-400 p-2.5 rounded-xl space-y-2 animate-in fade-in shadow-xs">
+                            <div className="text-[11px] font-bold text-amber-950 flex items-center justify-between">
+                              <span className="flex items-center gap-1">
+                                <Sparkles className="w-3 h-3 text-amber-600" />
+                                <span>Kalkulator Dus + Eceran Pcs</span>
+                              </span>
+                              <span className="text-[10px] text-slate-500 font-mono">1 Ctn = {currentSku.pcsPerCarton || (currentSku.uom === 'CARTON' ? 24 : 1)} Pcs</span>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <label className="text-[10px] font-bold text-slate-600 block uppercase mb-0.5">Dus Utuh (Ctn)</label>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="1"
+                                  placeholder="0"
+                                  value={mixedCalc[currentSku.sku]?.cartons || ''}
+                                  onChange={(e) => updateMixedCalcValue(currentSku.sku, 'cartons', e.target.value)}
+                                  className="w-full p-1.5 border border-slate-300 rounded-lg text-center font-bold text-sm bg-white outline-none"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[10px] font-bold text-slate-600 block uppercase mb-0.5">Eceran (Pcs)</label>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="1"
+                                  placeholder="0"
+                                  value={mixedCalc[currentSku.sku]?.loosePcs || ''}
+                                  onChange={(e) => updateMixedCalcValue(currentSku.sku, 'loosePcs', e.target.value)}
+                                  className="w-full p-1.5 border border-slate-300 rounded-lg text-center font-bold text-sm bg-white outline-none"
+                                />
+                              </div>
+                            </div>
+
+                            <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-100">
+                              <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-600">
+                                <span>Target:</span>
+                                <button
+                                  type="button"
+                                  onClick={() => updateMixedCalcValue(currentSku.sku, 'targetField', 'good')}
+                                  className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                    (mixedCalc[currentSku.sku]?.targetField || 'good') === 'good'
+                                      ? 'bg-cyan-500 text-slate-950'
+                                      : 'bg-slate-100 text-slate-600'
+                                  }`}
+                                >
+                                  Baik
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => updateMixedCalcValue(currentSku.sku, 'targetField', 'bad')}
+                                  className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                    mixedCalc[currentSku.sku]?.targetField === 'bad'
+                                      ? 'bg-amber-500 text-slate-950'
+                                      : 'bg-slate-100 text-slate-600'
+                                  }`}
+                                >
+                                  Rusak
+                                </button>
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={() => applyMixedCalc(idx)}
+                                className="px-3 py-1 bg-cyan-400 hover:bg-cyan-300 text-slate-950 rounded-lg font-black text-xs cursor-pointer shadow-xs active:scale-95 transition-all"
+                              >
+                                ✓ Terapkan
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {/* INPUT KONDISI BAIK (QTY GOOD) */}
                     <div className="bg-slate-50 border border-slate-200 p-space-md rounded-xl space-y-space-sm">
@@ -1768,49 +2061,149 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                       </div>
                     </div>
 
-                    {/* BAD STOCK DETECTED DENGAN TOMBOL CHIP KATEGORI */}
+                    {/* BAD STOCK DETECTED DENGAN RINCIAN QTY PER KATEGORI */}
                     <div className="bg-amber-50/70 border border-amber-200 p-space-md rounded-xl space-y-space-sm">
                       <div className="flex items-center justify-between">
                         <span className="font-body-lg text-amber-900 font-bold">{t('badStockQuestion')}</span>
-                        <button type="button" disabled={isSessionLocked} onClick={() => toggleBadStock(idx)} className={`min-h-11 min-w-11 px-3 py-1 rounded-full text-xs font-bold cursor-pointer ${isSessionLocked ? 'opacity-50 cursor-not-allowed' : ''} ${currentSku.isBadStock ? 'bg-amber-500 text-slate-950' : 'bg-slate-200 text-slate-600'}`}>{currentSku.isBadStock ? 'ON' : 'OFF'}</button>
+                        <button
+                          type="button"
+                          disabled={isSessionLocked}
+                          onClick={() => toggleBadStock(idx)}
+                          className={`min-h-11 min-w-11 px-3 py-1 rounded-full text-xs font-bold cursor-pointer ${
+                            isSessionLocked ? 'opacity-50 cursor-not-allowed' : ''
+                          } ${currentSku.isBadStock ? 'bg-amber-500 text-slate-950 shadow-xs' : 'bg-slate-200 text-slate-600'}`}
+                        >
+                          {currentSku.isBadStock ? 'ON' : 'OFF'}
+                        </button>
                       </div>
+
                       {currentSku.isBadStock && (
                         <div className="pt-2 space-y-3 border-t border-amber-200">
-                          <div>
-                            <label className="text-xs font-bold text-amber-900 flex items-center justify-between mb-1">
-                              <span>{t('damagedQtyLabel')}</span>
-                              <span className="px-2 py-0.5 rounded-md bg-amber-200/80 text-amber-950 font-black text-[11px] uppercase">{currentSku.inputUom || currentSku.uom}</span>
-                            </label>
-                            <input
-                              type="text"
-                              inputMode="decimal"
-                              disabled={isSessionLocked}
-                              value={currentSku.qtyBad}
-                              onChange={(e) => handleInputText(idx, 'qtyBad', e.target.value)}
-                              placeholder="0"
-                              className={`w-full p-2 border border-amber-300 rounded-lg text-center font-bold text-lg ${isSessionLocked ? 'bg-slate-100 opacity-60' : 'bg-white'}`}
-                            />
+                          {/* RINGKASAN TOTAL BAD QTY */}
+                          <div className="p-2.5 bg-amber-100/70 border border-amber-300 rounded-xl flex items-center justify-between">
+                            <div>
+                              <span className="text-[10px] font-bold uppercase text-amber-800 tracking-wider block">
+                                Total Qty Rusak / Bad Stock:
+                              </span>
+                              <span className="text-xl font-black text-amber-950 font-mono">
+                                {currentSku.qtyBad || '0'}{' '}
+                                <span className="text-xs font-bold uppercase">{currentSku.inputUom || currentSku.uom}</span>
+                              </span>
+                            </div>
+                            <span className="text-xs font-bold text-amber-900 bg-white/80 px-2 py-1 rounded-lg border border-amber-200">
+                              {Object.keys(currentSku.badBreakdown || {}).length} Kategori Dipilih
+                            </span>
                           </div>
 
+                          {/* CHIP PILIH KATEGORI KERUSAKAN */}
                           <div>
-                            <label className="text-xs font-bold text-amber-900 block mb-1.5">{t('selectDamageCatLabel')}</label>
+                            <label className="text-xs font-bold text-amber-900 block mb-1.5">
+                              Pilih Kategori Kerusakan (Bisa lebih dari 1):
+                            </label>
                             <div className="flex flex-wrap gap-1.5">
                               {availableCategories.map((cat, cIdx) => {
-                                const isSelected = (currentSku.selectedCategories || []).includes(cat);
+                                const isSelected = !!(currentSku.badBreakdown && currentSku.badBreakdown[cat] !== undefined);
                                 return (
                                   <button
                                     key={cIdx}
                                     type="button"
                                     disabled={isSessionLocked}
-                                    onClick={() => toggleCategoryChip(idx, cat)}
-                                    className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${isSelected ? 'bg-amber-500 text-slate-950 border-amber-600 shadow-xs' : 'bg-white text-slate-700 border-amber-200 hover:bg-amber-100/50'}`}
+                                    onClick={() => toggleBadCategory(idx, cat)}
+                                    className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer flex items-center gap-1.5 ${
+                                      isSelected
+                                        ? 'bg-amber-500 text-slate-950 border-amber-600 shadow-xs'
+                                        : 'bg-white text-slate-700 border-amber-200 hover:bg-amber-100/50'
+                                    }`}
                                   >
-                                    {isSelected ? '✓ ' : ''}{translateDamageCat(cat)}
+                                    <span>{isSelected ? '✓' : '+'}</span>
+                                    <span>{translateDamageCat(cat)}</span>
                                   </button>
                                 );
                               })}
                             </div>
                           </div>
+
+                          {/* RINCIAN INPUT QTY PER KATEGORI YANG AKTIF */}
+                          {Object.keys(currentSku.badBreakdown || {}).length > 0 ? (
+                            <div className="space-y-2 pt-1">
+                              <span className="text-[11px] font-black text-amber-950 uppercase tracking-wider block">
+                                Rincian Qty Kerusakan per Kategori:
+                              </span>
+                              <div className="space-y-1.5">
+                                {Object.entries(currentSku.badBreakdown || {}).map(([catName, catQty]) => (
+                                  <div
+                                    key={catName}
+                                    className="p-2 bg-white border border-amber-300 rounded-xl flex items-center justify-between gap-2 shadow-2xs"
+                                  >
+                                    <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                                      <span className="text-amber-600 font-bold text-xs shrink-0">⚠️</span>
+                                      <span className="text-xs font-bold text-slate-800 truncate" title={catName}>
+                                        {catName}
+                                      </span>
+                                    </div>
+
+                                    <div className="flex items-center gap-1 shrink-0">
+                                      <button
+                                        type="button"
+                                        disabled={isSessionLocked}
+                                        onClick={() => adjustCategoryQty(idx, catName, -1)}
+                                        className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-black flex items-center justify-center text-sm cursor-pointer active:scale-95"
+                                      >
+                                        -
+                                      </button>
+                                      <input
+                                        type="text"
+                                        inputMode="decimal"
+                                        disabled={isSessionLocked}
+                                        value={catQty}
+                                        onChange={(e) => handleCategoryQtyChange(idx, catName, e.target.value)}
+                                        placeholder="0"
+                                        className="w-14 h-8 border border-amber-300 rounded-lg text-center font-black text-sm text-slate-900 bg-amber-50/40 outline-none"
+                                      />
+                                      <button
+                                        type="button"
+                                        disabled={isSessionLocked}
+                                        onClick={() => adjustCategoryQty(idx, catName, 1)}
+                                        className="w-8 h-8 rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 font-black flex items-center justify-center text-sm cursor-pointer active:scale-95"
+                                      >
+                                        +
+                                      </button>
+                                      <span className="text-[10px] font-bold text-slate-500 uppercase ml-0.5">
+                                        {currentSku.inputUom || currentSku.uom}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        disabled={isSessionLocked}
+                                        onClick={() => removeBadCategory(idx, catName)}
+                                        className="ml-1 p-1 hover:bg-red-50 text-slate-400 hover:text-red-600 rounded-lg cursor-pointer transition-colors"
+                                        title="Hapus rincian kategori ini"
+                                      >
+                                        ✕
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ) : (
+                            /* JIKA BELUM MEMILIH KATEGORI, COUNTER BISA INPUT TOTAL SECARA LANGSUNG */
+                            <div>
+                              <label className="text-[11px] font-bold text-amber-900 block mb-1">
+                                Atau Input Qty Rusak Langsung:
+                              </label>
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                disabled={isSessionLocked}
+                                value={currentSku.qtyBad}
+                                onChange={(e) => handleInputText(idx, 'qtyBad', e.target.value)}
+                                placeholder="0"
+                                className={`w-full p-2 border border-amber-300 rounded-lg text-center font-bold text-lg ${
+                                  isSessionLocked ? 'bg-slate-100 opacity-60' : 'bg-white'
+                                }`}
+                              />
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -1997,15 +2390,23 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                   </div>
                 </div>
 
-                {/* FORM BAD STOCK UNMAPPED DENGAN CHIPS */}
+                {/* FORM BAD STOCK UNMAPPED DENGAN RINCIAN QTY PER KATEGORI */}
                 <div className="p-3 bg-amber-50/80 border border-amber-200 rounded-xl space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold text-amber-900">Temuan Ini Memiliki Bad Stock?</span>
                     <button
                       type="button"
                       disabled={isSessionLocked}
-                      onClick={() => setUnmappedIsBadStock(!unmappedIsBadStock)}
-                      className={`px-3 py-1 rounded-full text-[10px] font-bold cursor-pointer ${unmappedIsBadStock ? 'bg-amber-500 text-slate-950' : 'bg-slate-200 text-slate-600'}`}
+                      onClick={() => {
+                        const next = !unmappedIsBadStock;
+                        setUnmappedIsBadStock(next);
+                        if (!next) {
+                          setUnmappedBadQty("");
+                          setUnmappedSelectedCategories([]);
+                          setUnmappedBadBreakdown({});
+                        }
+                      }}
+                      className={`px-3 py-1 rounded-full text-[10px] font-bold cursor-pointer ${unmappedIsBadStock ? 'bg-amber-500 text-slate-950 font-bold shadow-xs' : 'bg-slate-200 text-slate-600'}`}
                     >
                       {unmappedIsBadStock ? 'ON' : 'OFF'}
                     </button>
@@ -2013,37 +2414,104 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
 
                   {unmappedIsBadStock && (
                     <div className="space-y-3 pt-2 border-t border-amber-200">
-                      <div>
-                        <label className="text-[10px] font-bold text-amber-900 block mb-0.5">Qty Bad (Jumlah Rusak):</label>
-                        <input
-                          type="text"
-                          inputMode="numeric"
-                          disabled={isSessionLocked}
-                          value={unmappedBadQty}
-                          onChange={(e) => handleInputBadQtyText(e.target.value)}
-                          placeholder="0"
-                          className="w-full h-9 border border-amber-300 rounded-lg text-xs font-bold text-center bg-white"
-                        />
+                      {/* RINGKASAN TOTAL BAD QTY UNMAPPED */}
+                      <div className="p-2 bg-amber-100/70 border border-amber-300 rounded-xl flex items-center justify-between">
+                        <div>
+                          <span className="text-[9px] font-bold uppercase text-amber-800 tracking-wider block">
+                            Total Rusak:
+                          </span>
+                          <span className="text-base font-black text-amber-950 font-mono">
+                            {unmappedBadQty || '0'} <span className="text-[10px] uppercase font-bold">{unmappedUnit}</span>
+                          </span>
+                        </div>
+                        <span className="text-[10px] font-bold text-amber-900 bg-white/80 px-2 py-0.5 rounded-lg border border-amber-200">
+                          {Object.keys(unmappedBadBreakdown).length} Kategori
+                        </span>
                       </div>
+
                       <div>
                         <label className="text-[10px] font-bold text-amber-900 block mb-1">Pilih Kategori Kerusakan (Bisa lebih dari 1):</label>
                         <div className="flex flex-wrap gap-1.5">
                           {availableCategories.map((cat, cIdx) => {
-                            const isSelected = unmappedSelectedCategories.includes(cat);
+                            const isSelected = !!(unmappedBadBreakdown[cat] !== undefined);
                             return (
                               <button
                                 key={cIdx}
                                 type="button"
                                 disabled={isSessionLocked}
-                                onClick={() => toggleUnmappedCategoryChip(cat)}
-                                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-all cursor-pointer ${isSelected ? 'bg-amber-500 text-slate-950 border-amber-600 shadow-xs' : 'bg-white text-slate-700 border-amber-200 hover:bg-amber-100/50'}`}
+                                onClick={() => toggleUnmappedBadCategory(cat)}
+                                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-all cursor-pointer flex items-center gap-1 ${isSelected ? 'bg-amber-500 text-slate-950 border-amber-600 shadow-xs' : 'bg-white text-slate-700 border-amber-200 hover:bg-amber-100/50'}`}
                               >
-                                {isSelected ? '✓ ' : ''}{cat}
+                                <span>{isSelected ? '✓' : '+'}</span>
+                                <span>{cat}</span>
                               </button>
                             );
                           })}
                         </div>
                       </div>
+
+                      {/* RINCIAN QTY PER KATEGORI UNMAPPED */}
+                      {Object.keys(unmappedBadBreakdown).length > 0 ? (
+                        <div className="space-y-1.5 pt-1">
+                          <span className="text-[10px] font-black text-amber-950 uppercase tracking-wider block">
+                            Rincian Qty per Kategori:
+                          </span>
+                          {Object.entries(unmappedBadBreakdown).map(([catName, catQty]) => (
+                            <div key={catName} className="p-1.5 bg-white border border-amber-300 rounded-lg flex items-center justify-between gap-2 shadow-2xs">
+                              <span className="text-[11px] font-bold text-slate-800 truncate">{catName}</span>
+                              <div className="flex items-center gap-1 shrink-0">
+                                <button
+                                  type="button"
+                                  disabled={isSessionLocked}
+                                  onClick={() => adjustUnmappedCategoryQty(catName, -1)}
+                                  className="w-7 h-7 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-black text-xs flex items-center justify-center cursor-pointer"
+                                >
+                                  -
+                                </button>
+                                <input
+                                  type="text"
+                                  inputMode="decimal"
+                                  disabled={isSessionLocked}
+                                  value={catQty}
+                                  onChange={(e) => handleUnmappedCategoryQtyChange(catName, e.target.value)}
+                                  placeholder="0"
+                                  className="w-12 h-7 border border-amber-300 rounded text-center font-black text-xs bg-amber-50/40 outline-none"
+                                />
+                                <button
+                                  type="button"
+                                  disabled={isSessionLocked}
+                                  onClick={() => adjustUnmappedCategoryQty(catName, 1)}
+                                  className="w-7 h-7 rounded bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs flex items-center justify-center cursor-pointer"
+                                >
+                                  +
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={isSessionLocked}
+                                  onClick={() => removeUnmappedBadCategory(catName)}
+                                  className="ml-1 p-1 hover:bg-red-50 text-slate-400 hover:text-red-600 rounded cursor-pointer"
+                                  title="Hapus kategori ini"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div>
+                          <label className="text-[10px] font-bold text-amber-900 block mb-0.5">Atau Input Qty Rusak Langsung:</label>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            disabled={isSessionLocked}
+                            value={unmappedBadQty}
+                            onChange={(e) => handleInputBadQtyText(e.target.value)}
+                            placeholder="0"
+                            className="w-full h-9 border border-amber-300 rounded-lg text-xs font-bold text-center bg-white"
+                          />
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -2135,18 +2603,18 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
         </div>
       </div>
 
-      {/* MODAL SETTING ISI PER KARTON (CONVERSION RATIO) */}
+      {/* MODAL POP-UP: BARANG FISIK TIDAK SESUAI SATUAN HITUNG */}
       {conversionModal.isOpen && (
         <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
           <div className="bg-white rounded-2xl w-full max-w-sm border border-slate-200 shadow-2xl p-5 space-y-4">
             <div className="flex items-center justify-between border-b pb-3 border-slate-100">
               <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-lg bg-amber-100 text-amber-900 flex items-center justify-center font-bold">
-                  📦
+                <div className="w-8 h-8 rounded-lg bg-amber-100 text-amber-900 flex items-center justify-center font-bold text-base">
+                  ⚠️
                 </div>
                 <div>
-                  <h3 className="font-bold text-sm text-slate-900">Setting Isi per Karton</h3>
-                  <p className="text-[10px] text-slate-500">Konversi UOM Karton ⇄ PCS</p>
+                  <h3 className="font-bold text-sm text-slate-900 leading-tight">Barang Fisik Tidak Sesuai Satuan Hitung?</h3>
+                  <p className="text-[10px] text-slate-500">Sesuaikan satuan fisik yang ditemukan di rak</p>
                 </div>
               </div>
               <button
@@ -2169,48 +2637,87 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                 <div className="text-[11px] text-slate-600 font-medium line-clamp-1">{conversionModal.skuName}</div>
               </div>
 
+              {/* PILIHAN SATUAN FISIK */}
               <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">
-                  Jumlah Pcs dalam 1 Karton (Pack Size):
+                <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                  Pilih Satuan Fisik Barang di Rak:
                 </label>
-                <div className="relative">
-                  <input
-                    type="number"
-                    min="1"
-                    step="1"
-                    autoFocus
-                    value={conversionModal.tempValue}
-                    onChange={(e) => setConversionModal(prev => ({ ...prev, tempValue: e.target.value }))}
-                    placeholder="24"
-                    className="w-full p-3 border-2 border-amber-400 rounded-xl text-center font-black text-2xl text-slate-900 bg-white outline-none"
-                  />
-                  <span className="absolute right-3.5 top-4 text-xs font-extrabold text-slate-400 uppercase">Pcs / Dus</span>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setConversionModal(prev => ({ ...prev, selectedUom: 'PCS' }))}
+                    className={`py-2 px-3 rounded-xl border text-xs font-black flex items-center justify-center gap-1.5 cursor-pointer transition-all ${
+                      conversionModal.selectedUom === 'PCS'
+                        ? 'bg-cyan-500 text-slate-950 border-cyan-600 shadow-sm'
+                        : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
+                    }`}
+                  >
+                    <span>🛍️</span>
+                    <span>PCS (Eceran)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setConversionModal(prev => ({ ...prev, selectedUom: 'CARTON' }))}
+                    className={`py-2 px-3 rounded-xl border text-xs font-black flex items-center justify-center gap-1.5 cursor-pointer transition-all ${
+                      conversionModal.selectedUom === 'CARTON'
+                        ? 'bg-amber-400 text-slate-950 border-amber-500 shadow-sm'
+                        : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
+                    }`}
+                  >
+                    <span>📦</span>
+                    <span>KARTON / DUS</span>
+                  </button>
                 </div>
               </div>
 
-              {/* TOMBOL PRESET CEPAT */}
-              <div className="space-y-1">
-                <span className="text-[10px] font-bold text-slate-500 uppercase">Preset Populer:</span>
-                <div className="grid grid-cols-5 gap-1.5">
-                  {[6, 12, 24, 48, 100].map((presetVal) => (
-                    <button
-                      key={presetVal}
-                      type="button"
-                      onClick={() => setConversionModal(prev => ({ ...prev, tempValue: presetVal.toString() }))}
-                      className={`py-1.5 rounded-lg text-xs font-bold border transition-colors cursor-pointer ${
-                        conversionModal.tempValue === presetVal.toString()
-                          ? 'bg-amber-500 text-slate-950 border-amber-600 shadow-2xs font-black'
-                          : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
-                      }`}
-                    >
-                      {presetVal}
-                    </button>
-                  ))}
+              {/* JIKA MEMILIH KARTON, TAMPILKAN INPUT ISI PER KARTON */}
+              {conversionModal.selectedUom === 'CARTON' && (
+                <div className="space-y-2.5 pt-1 animate-in fade-in">
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-1">
+                      Jumlah Pcs dalam 1 Karton fisik ini (Pack Size):
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="number"
+                        min="1"
+                        step="1"
+                        autoFocus
+                        value={conversionModal.tempValue}
+                        onChange={(e) => setConversionModal(prev => ({ ...prev, tempValue: e.target.value }))}
+                        placeholder="24"
+                        className="w-full p-2.5 border-2 border-amber-400 rounded-xl text-center font-black text-2xl text-slate-900 bg-white outline-none"
+                      />
+                      <span className="absolute right-3.5 top-3.5 text-xs font-extrabold text-slate-400 uppercase">Pcs / Dus</span>
+                    </div>
+                  </div>
+
+                  {/* TOMBOL PRESET CEPAT */}
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-bold text-slate-500 uppercase">Preset Populer:</span>
+                    <div className="grid grid-cols-5 gap-1.5">
+                      {[6, 12, 24, 48, 100].map((presetVal) => (
+                        <button
+                          key={presetVal}
+                          type="button"
+                          onClick={() => setConversionModal(prev => ({ ...prev, tempValue: presetVal.toString() }))}
+                          className={`py-1.5 rounded-lg text-xs font-bold border transition-colors cursor-pointer ${
+                            conversionModal.tempValue === presetVal.toString()
+                              ? 'bg-amber-500 text-slate-950 border-amber-600 shadow-2xs font-black'
+                              : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
+                          }`}
+                        >
+                          {presetVal}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
-              </div>
+              )}
 
               <div className="p-2.5 bg-amber-50/80 border border-amber-200 rounded-xl text-[11px] text-amber-900 leading-relaxed">
-                💡 <b>Info:</b> Jika counter menghitung dalam Pcs namun satuan sistem adalah Karton (atau sebaliknya), angka akan otomatis dikonversikan sesuai rasio ini dan tetap disimpan sesuai satuan sistem diawal.
+                💡 <b>Info:</b> Angka hitungan akan otomatis dikonversikan dan disimpan ke sistem dalam satuan asli (<b>{conversionModal.systemUom}</b>).
               </div>
             </div>
 
@@ -2227,7 +2734,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                 onClick={handleSaveConversionRatio}
                 className="flex-1 py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs cursor-pointer shadow-md active:scale-95 transition-all"
               >
-                Simpan Rasio
+                Terapkan Satuan Fisik
               </button>
             </div>
           </div>

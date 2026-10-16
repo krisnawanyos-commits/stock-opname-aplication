@@ -66,6 +66,7 @@ export interface UnmappedItem {
   batchNumber?: string;
   photoUrl?: string;
   remarks?: string;
+  badBreakdown?: Record<string, number | string>;
 }
 
 export interface SKUItem {
@@ -81,6 +82,7 @@ export interface SKUItem {
   qtyBad: number;
   expDate?: string;
   badRemarks?: string;
+  badBreakdown?: Record<string, number | string>;
 }
 
 // Rules & Mapping
