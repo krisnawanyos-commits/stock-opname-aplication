@@ -60,6 +60,7 @@ interface MasterSKUItem {
     counter: string;
     currentRound: number;
     satuanHitung: string;
+    pcsPerCarton?: number;
     SKUBrand: string;
     expiredDateSystem: string;
     expiredDateActual: string;
@@ -1123,11 +1124,12 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             if (tasks.length === 0 && selectedCounter) return;
             tasks.sort((a, b) => (a.Location || '').localeCompare(b.Location || '') || (a.SKU || '').localeCompare(b.SKU || ''));
 
-            const totalPagesForCounter = Math.max(1, Math.ceil(tasks.length / ROWS_PER_PAGE));
+            const taskPagesCount = Math.max(1, Math.ceil(tasks.length / ROWS_PER_PAGE));
+            const totalPagesForCounter = taskPagesCount + 1; // Ditambahkan 1 halaman khusus untuk Lembar Catatan Barang Temuan Baru (Unmapped SKU)
 
-            for (let pageIdx = 0; pageIdx < totalPagesForCounter; pageIdx++) {
+            for (let pageIdx = 0; pageIdx < taskPagesCount; pageIdx++) {
                 const pageTasks = tasks.slice(pageIdx * ROWS_PER_PAGE, (pageIdx + 1) * ROWS_PER_PAGE);
-                const isLastPage = pageIdx === totalPagesForCounter - 1;
+                const isLastTaskPage = pageIdx === taskPagesCount - 1;
 
                 const rowsHtml = pageTasks.map((item, tIdx) => {
                     const globalNo = pageIdx * ROWS_PER_PAGE + tIdx + 1;
@@ -1196,27 +1198,102 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                             </tbody>
                         </table>
 
-                        ${isLastPage ? `
-                            <div class="sig-container">
-                                <div class="sig-box">
-                                    <div class="sig-title">Petugas Penghitung (Internal)</div>
-                                    <div class="sig-line"></div>
-                                    <div class="sig-name">${cName}</div>
-                                </div>
-                                <div class="sig-box">
-                                    <div class="sig-title">Counter Vendor</div>
-                                    <div class="sig-line"></div>
-                                    <div class="sig-name">(........................................)</div>
-                                </div>
+                        ${isLastTaskPage ? `
+                            <div style="margin-top: 10px; display: flex; justify-content: space-between; align-items: center; font-size: 8.5px; color: #475569; border-top: 1px dashed #cbd5e1; padding-top: 5px;">
+                                <span>✓ <b>Total SKU Sistem PIC Ini:</b> ${tasks.length} Item</span>
+                                <span style="font-weight: bold; color: #2563eb;">➔ Lanjut ke Halaman ${totalPagesForCounter}: Lembar Catatan Barang Temuan Baru (Unmapped SKU)</span>
                             </div>
                         ` : `
-                            <div style="margin-top: 15px; text-align: right; font-size: 8px; color: #64748b; font-style: italic;">
+                            <div style="margin-top: 12px; text-align: right; font-size: 8px; color: #64748b; font-style: italic;">
                                 Bersambung ke halaman ${pageIdx + 2}...
                             </div>
                         `}
                     </div>
                 `;
             }
+
+            // HALAMAN KHUSUS: LEMBAR CATATAN BARANG TEMUAN BARU (UNMAPPED SKU)
+            const UNMAPPED_ROWS_COUNT = 14;
+            const unmappedRowsHtml = Array.from({ length: UNMAPPED_ROWS_COUNT }, (_, i) => `
+                <tr style="height: 27px;">
+                    <td style="text-align: center; font-weight: bold; color: #64748b; font-size: 8.5px;">${i + 1}</td>
+                    <td style="height: 27px;"></td>
+                    <td style="height: 27px;"></td>
+                    <td style="height: 27px;"></td>
+                    <td style="height: 27px; text-align: center;"></td>
+                    <td style="height: 27px; background-color: #f0fdf4;"></td>
+                    <td style="height: 27px; background-color: #fef2f2;"></td>
+                    <td style="height: 27px; text-align: center;"></td>
+                    <td style="height: 27px;"></td>
+                    <td style="height: 27px;"></td>
+                </tr>
+            `).join('');
+
+            pagesHtml += `
+                <div class="sheet-page">
+                    <div class="header-container">
+                        <div class="header-left">
+                            <h2 class="doc-title" style="color: #b45309;">LEMBAR KERJA STOCK OPNAME - CATATAN BARANG TEMUAN BARU</h2>
+                            <div class="sub-meta">
+                                <span><b>Sesi:</b> ${project?.sessionCode || 'SO-360'}</span> | 
+                                <span><b>Lokasi:</b> ${project?.locationName || 'Gudang Utama'}</span> | 
+                                <span><b>Tanggal:</b> ${project?.opnameDate || new Date().toISOString().split('T')[0]}</span> | 
+                                <span><b>Halaman:</b> ${totalPagesForCounter} dari ${totalPagesForCounter} (LEMBAR TEMUAN)</span>
+                            </div>
+                        </div>
+                        <div class="header-right">
+                            <div class="counter-badge" style="border-color: #d97706; background-color: #fffbeb;">
+                                <span class="badge-label" style="color: #92400e;">PETUGAS / PIC:</span>
+                                <span class="badge-name" style="color: #78350f;">${cName.toUpperCase()}</span>
+                            </div>
+                            <div class="round-badge" style="background: #d97706;">RONDE ${roundNumber}</div>
+                        </div>
+                    </div>
+
+                    <div class="notice-bar" style="background: #fffbeb; border-color: #f59e0b; color: #92400e;">
+                        📝 <b>PETUNJUK PENCATATAN BARANG TEMUAN FISIK (UNMAPPED SKU):</b><br/>
+                        Tuliskan seluruh barang fisik yang ditemukan di rak atau area kerja yang <b>TIDAK ADA</b> pada lembar task sistem sebelumnya. Cantumkan Lokasi Rak, Barcode/UPC, Deskripsi, Exp Date, Satuan, dan Kategori Kerusakan (jika rusak) secara teliti.
+                    </div>
+
+                    <table class="count-table">
+                        <thead>
+                            <tr style="background-color: #fef3c7;">
+                                <th style="width: 26px; text-align: center;">NO</th>
+                                <th style="width: 75px;">LOKASI / RAK</th>
+                                <th style="width: 100px;">BARCODE / UPC / SKU</th>
+                                <th>DESKRIPSI NAMA PRODUK</th>
+                                <th style="width: 65px; text-align: center;">EXP DATE</th>
+                                <th style="width: 55px; text-align: center; background-color: #dcfce7;">QTY BAIK</th>
+                                <th style="width: 55px; text-align: center; background-color: #fee2e2;">QTY RUSAK</th>
+                                <th style="width: 48px; text-align: center;">SATUAN</th>
+                                <th style="width: 110px;">KONDISI / KET</th>
+                                <th style="width: 45px; text-align: center;">PARAF</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${unmappedRowsHtml}
+                        </tbody>
+                    </table>
+
+                    <div class="sig-container" style="margin-top: 25px;">
+                        <div class="sig-box">
+                            <div class="sig-title">Petugas Penghitung (Internal)</div>
+                            <div class="sig-line"></div>
+                            <div class="sig-name">${cName}</div>
+                        </div>
+                        <div class="sig-box">
+                            <div class="sig-title">Counter Vendor / Pendamping WH</div>
+                            <div class="sig-line"></div>
+                            <div class="sig-name">(........................................)</div>
+                        </div>
+                        <div class="sig-box">
+                            <div class="sig-title">Koordinator / SPV Lapangan</div>
+                            <div class="sig-line"></div>
+                            <div class="sig-name">(........................................)</div>
+                        </div>
+                    </div>
+                </div>
+            `;
         });
 
         printWindow.document.write(`
@@ -2855,7 +2932,8 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                         UPC1: row['UPC 1']?.toString() || '',
                                         UPC2: row['UPC 2']?.toString() || '',
                                         SKUBrand: row['SKU Brand'] || '',
-                                        satuanHitung: row['satuan hitung'] || 'PCS',
+                                        satuanHitung: (row['satuan hitung'] || row['SATUAN HITUNG'] || row['Satuan'] || row['UOM'] || 'PCS').toString().trim().toUpperCase(),
+                                        pcsPerCarton: parseInt(row['Isi per Karton'] || row['ISI PER KARTON'] || row['Pcs per Karton'] || row['Qty per Carton'] || row['Konversi'] || row['pcsPerCarton'] || '0', 10) || 1,
                                         Location: locStr,
                                         level: row['level']?.toString() || '1',
                                         ailee: row['ailee']?.toString() || '',
@@ -2981,7 +3059,8 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             'Location Type': 'RACK',
             counter: 'bambang',
             'current round': 1,
-            'satuan hitung': 'PCS',
+            'satuan hitung': 'CARTON',
+            'Isi per Karton': 24,
             'SKU Brand': 'ENFAGROW',
             'expired date by system': '2026-12-31',
             'expired date by actual': '',
@@ -3015,6 +3094,8 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             'level': item.level,
             'Location Type': item.LocationType,
             'counter': item.counter,
+            'satuan hitung': item.satuanHitung || 'PCS',
+            'Isi per Karton': item.pcsPerCarton || 1,
             'expired date by system': item.expiredDateSystem,
             'expired date by actual': item.expiredDateActual,
             'Qty System': item.Qty,
@@ -3135,7 +3216,9 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     const upc1 = (row['UPC 1'] || row['UPC1'] || row['UPC 1 (ECERAN)'] || row['Barcode'] || row['barcode'] || row['upc1'] || '').toString().trim();
                     const upc2 = (row['UPC 2'] || row['UPC2'] || row['UPC 2 (KARDUS)'] || row['Barcode Kardus'] || row['upc2'] || '').toString().trim();
                     const brand = (row['SKU Brand'] || row['BRAND'] || row['Brand'] || row['Merk'] || row['brand'] || '').toString().trim();
-                    const satuan = (row['satuan hitung'] || row['SATUAN HITUNG'] || row['Satuan'] || row['UOM'] || 'PCS').toString().trim();
+                    const satuan = (row['satuan hitung'] || row['SATUAN HITUNG'] || row['Satuan'] || row['UOM'] || 'PCS').toString().trim().toUpperCase();
+                    const rawPcsPerCtn = row['Isi per Karton'] || row['ISI PER KARTON'] || row['Pcs per Karton'] || row['Qty per Carton'] || row['Konversi'] || row['pcsPerCarton'];
+                    const pcsPerCarton = parseInt(rawPcsPerCtn, 10) || (satuan === 'CARTON' ? 24 : 1);
                     const rawPrice = row['Unit Price'] ?? row['HARGA SATUAN'] ?? row['Harga Satuan'] ?? row['Price'] ?? row['harga'];
                     const unitPrice = parseInt(rawPrice, 10) || 0;
 
@@ -3147,6 +3230,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                         UPC2: upc2,
                         SKUBrand: brand,
                         satuanHitung: satuan,
+                        pcsPerCarton: pcsPerCarton,
                         unitPrice: unitPrice,
                         updatedAt: new Date().toISOString()
                     };
@@ -3165,6 +3249,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                             if (upc2) syncUpdates.UPC2 = upc2;
                             if (brand) syncUpdates.SKUBrand = brand;
                             if (satuan) syncUpdates.satuanHitung = satuan;
+                            if (pcsPerCarton > 0) syncUpdates.pcsPerCarton = pcsPerCarton;
                             if (unitPrice > 0) syncUpdates.unitPrice = unitPrice;
                             if (Object.keys(syncUpdates).length > 0) {
                                 batch.set(tRef, syncUpdates, { merge: true });

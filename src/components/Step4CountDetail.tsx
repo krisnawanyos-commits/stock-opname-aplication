@@ -10,7 +10,8 @@ import { compressImage } from '../utils/imageCompressor';
 import { playScanSuccessBeep, playErrorBuzzer, triggerHapticFeedback } from '../utils/soundAndHaptics';
 import { 
   ChevronLeft, LogOut, Users, MapPin, Calendar, Minus, Plus, ChevronDown, 
-  ChevronUp, Camera, Scan, PlusCircle, Trash2, Loader2, CheckCircle2, Lock 
+  ChevronUp, Camera, Scan, PlusCircle, Trash2, Loader2, CheckCircle2, Lock,
+  Edit2, Calculator, Zap, Sparkles 
 } from 'lucide-react';
 
 interface Step4CountDetailProps {
@@ -27,7 +28,9 @@ interface GroupedSKUItem {
   upc2?: string;
   name: string;
   category: string;
-  uom: 'PCS' | 'CARTON';
+  uom: 'PCS' | 'CARTON' | string;
+  pcsPerCarton: number;
+  inputUom: 'PCS' | 'CARTON' | string;
   totalSystemQty: number;
   qtyGood: string;
   qtyBad: string;
@@ -43,6 +46,42 @@ interface GroupedSKUItem {
   allSystemEds: string[];
   isUnmappedFound?: boolean;
 }
+
+// HELPER KONVERSI DARI INPUT COUNTER KE SATUAN SISTEM
+export const convertToSystemQty = (
+  inputQty: number,
+  inputUom: string,
+  systemUom: string,
+  pcsPerCarton: number
+): { finalQty: number; displayFormula?: string } => {
+  if (inputQty <= 0 || isNaN(inputQty)) return { finalQty: 0 };
+  const ratio = pcsPerCarton > 0 ? pcsPerCarton : 1;
+  const inU = (inputUom || 'PCS').toUpperCase();
+  const sysU = (systemUom || 'PCS').toUpperCase();
+
+  if (inU === sysU) {
+    return { finalQty: inputQty };
+  }
+
+  // Jika sistem KARTON, counter input PCS (eceran)
+  if (sysU === 'CARTON' && inU === 'PCS') {
+    const rawVal = inputQty / ratio;
+    const rounded = Math.round(rawVal * 100) / 100;
+    const intact = Math.floor(inputQty / ratio);
+    const leftover = Math.round((inputQty % ratio) * 100) / 100;
+    const formula = leftover > 0 ? `${intact} Ctn + ${leftover} Pcs` : `${intact} Ctn`;
+    return { finalQty: rounded, displayFormula: formula };
+  }
+
+  // Jika sistem PCS, counter input KARTON
+  if (sysU === 'PCS' && inU === 'CARTON') {
+    const rawVal = inputQty * ratio;
+    const rounded = Math.round(rawVal * 100) / 100;
+    return { finalQty: rounded, displayFormula: `${inputQty} Ctn × ${ratio} Pcs` };
+  }
+
+  return { finalQty: inputQty };
+};
 
 // HELPER SANITASI FORMAT TANGGAL DISPLAY (DD/MM/YYYY)
 const formatDateDisplay = (dateStr: string) => {
@@ -77,6 +116,29 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
   const [modal, setModal] = useState<CustomModalState>({
     isOpen: false, title: '', message: '',
   });
+
+  // MODAL EDIT KONVERSI ISI PER KARTON
+  const [conversionModal, setConversionModal] = useState<{
+    isOpen: boolean;
+    skuIndex: number | null;
+    sku: string;
+    skuName: string;
+    systemUom: string;
+    tempValue: string;
+  }>({
+    isOpen: false,
+    skuIndex: null,
+    sku: '',
+    skuName: '',
+    systemUom: 'CARTON',
+    tempValue: '24'
+  });
+
+  // STATE KALKULATOR CAMPURAN (KARTON + PCS) PER SKU
+  const [mixedCalc, setMixedCalc] = useState<{
+    [sku: string]: { cartons: string; loosePcs: string; targetField: 'good' | 'bad'; isOpen: boolean };
+  }>({});
+
   const [isDirty, setIsDirty] = useState<boolean>(false);
 
   const draftKey = `so_draft_${sessionData.sessionId || 'default'}_${rack.rackNumber || rack.id}`;
@@ -190,11 +252,11 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
   useEffect(() => {
     if (!isDirty || skuList.length === 0) return;
 
-    const draftData: Record<string, { qtyGood: string; qtyBad: string; expDateActual: string; isBadStock: boolean; badRemarks: string; selectedCategories: string[] }> = {};
+    const draftData: Record<string, { qtyGood: string; qtyBad: string; expDateActual: string; isBadStock: boolean; badRemarks: string; selectedCategories: string[]; inputUom?: string; pcsPerCarton?: number }> = {};
     let hasCount = false;
 
     skuList.forEach((item) => {
-      if (item.qtyGood !== '' || item.qtyBad !== '' || item.expDateActual !== '' || item.badRemarks !== '') {
+      if (item.qtyGood !== '' || item.qtyBad !== '' || item.expDateActual !== '' || item.badRemarks !== '' || item.inputUom || item.pcsPerCarton) {
         hasCount = true;
         draftData[item.sku] = {
           qtyGood: item.qtyGood,
@@ -202,7 +264,9 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
           expDateActual: item.expDateActual,
           isBadStock: item.isBadStock,
           badRemarks: item.badRemarks,
-          selectedCategories: item.selectedCategories || []
+          selectedCategories: item.selectedCategories || [],
+          inputUom: item.inputUom || item.uom,
+          pcsPerCarton: item.pcsPerCarton || 1
         };
       }
     });
@@ -326,7 +390,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
           }
         }
 
-        const localStateMap: Record<string, { qtyGood: string; qtyBad: string; expDateActual: string; isBadStock: boolean; badRemarks: string; selectedCategories: string[] }> = {};
+        const localStateMap: Record<string, { qtyGood: string; qtyBad: string; expDateActual: string; isBadStock: boolean; badRemarks: string; selectedCategories: string[]; inputUom?: string; pcsPerCarton?: number }> = {};
         prevSkuList.forEach(item => {
           localStateMap[item.sku] = {
             qtyGood: item.qtyGood,
@@ -334,7 +398,9 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             expDateActual: item.expDateActual,
             isBadStock: item.isBadStock,
             badRemarks: item.badRemarks,
-            selectedCategories: item.selectedCategories || []
+            selectedCategories: item.selectedCategories || [],
+            inputUom: item.inputUom || item.uom,
+            pcsPerCarton: item.pcsPerCarton || 1
           };
         });
 
@@ -367,8 +433,14 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
           const existingRemarks = data.badRemarks || '';
           const initialCats = existingRemarks.replace(/^\[BAD STOCK\]\s*/, '').split(', ').filter(Boolean);
 
+          const rawSatuan = (data.satuanHitung || 'PCS').toString().toUpperCase().trim();
+          const sysUom = rawSatuan === 'CARTON' || rawSatuan === 'KARTON' || rawSatuan === 'CTN' ? 'CARTON' : 'PCS';
+          const defaultPcsRatio = parseInt(data.pcsPerCarton || data.qtyPerCarton || '0', 10) || (sysUom === 'CARTON' ? 24 : 1);
+
           if (!groupedMap[skuKey]) {
             const existingLocal = localStateMap[skuKey] || draftMap[skuKey];
+            const itemPcsRatio = existingLocal?.pcsPerCarton || defaultPcsRatio;
+            const itemInputUom = existingLocal?.inputUom || sysUom;
 
             groupedMap[skuKey] = {
               sku: skuKey,
@@ -376,7 +448,9 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
               upc2: (data.UPC2 || data.upc2 || '').toString().trim(),
               name: data.Description || data.name || skuKey,
               category: `${data.Zone || 'RACKING'} • ${data.SKUBrand || 'General'}`,
-              uom: (data.satuanHitung as 'PCS' | 'CARTON') || 'PCS',
+              uom: sysUom,
+              pcsPerCarton: itemPcsRatio,
+              inputUom: itemInputUom,
               totalSystemQty: sysQty,
               qtyGood: existingLocal ? existingLocal.qtyGood : (!isNaN(numGoodQty) ? numGoodQty.toString() : (hasActQty ? numActQty.toString() : "")),
               qtyBad: existingLocal ? existingLocal.qtyBad : (!isNaN(numBadQty) && numBadQty > 0 ? numBadQty.toString() : ""),
@@ -568,13 +642,13 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       prev.map((item, idx) => {
         if (idx === index) {
           if (type === 'good') {
-            const current = parseInt(item.qtyGood || "0", 10);
-            const nextVal = Math.max(0, current + delta);
+            const current = parseFloat(item.qtyGood || "0");
+            const nextVal = Math.max(0, Math.round((current + delta) * 1000) / 1000);
             return { ...item, qtyGood: nextVal === 0 ? "" : nextVal.toString() };
           }
           if (type === 'bad') {
-            const current = parseInt(item.qtyBad || "0", 10);
-            const nextVal = Math.max(0, current + delta);
+            const current = parseFloat(item.qtyBad || "0");
+            const nextVal = Math.max(0, Math.round((current + delta) * 1000) / 1000);
             return { ...item, qtyBad: nextVal === 0 ? "" : nextVal.toString() };
           }
         }
@@ -624,13 +698,153 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     if (isSessionLocked) return;
     setIsDirty(true);
 
-    let cleanVal = rawVal.replace(/^0+/, '');
-    if (cleanVal === "" && rawVal !== "") cleanVal = "0";
-    if (rawVal === "") cleanVal = "";
+    let cleanVal = rawVal.replace(/[^0-9.]/g, '');
+    const parts = cleanVal.split('.');
+    if (parts.length > 2) {
+      cleanVal = parts[0] + '.' + parts.slice(1).join('');
+    }
+    if (cleanVal.length > 1 && cleanVal.startsWith('0') && !cleanVal.startsWith('0.')) {
+      cleanVal = cleanVal.replace(/^0+/, '') || '0';
+    }
 
     setSkuList((prev) =>
       prev.map((item, idx) => (idx === index ? { ...item, [field]: cleanVal } : item))
     );
+  };
+
+  // UOM SWITCHING: Ganti mode input KARTON <-> PCS dengan live auto-convert nilai input
+  const handleSwitchInputUom = (index: number, newUom: 'PCS' | 'CARTON') => {
+    if (isSessionLocked) return;
+    const targetItem = skuList[index];
+    if (targetItem && newUom === 'CARTON' && (!targetItem.pcsPerCarton || targetItem.pcsPerCarton <= 1)) {
+      openConversionModal(index);
+    }
+    setIsDirty(true);
+    setSkuList(prev => prev.map((item, idx) => {
+      if (idx !== index) return item;
+      const oldUom = item.inputUom || item.uom;
+      if (oldUom === newUom) return item;
+
+      const pcsRatio = item.pcsPerCarton || (item.uom === 'CARTON' ? 24 : 1);
+
+      const convertValue = (valStr: string) => {
+        if (!valStr || valStr === '0') return valStr;
+        const num = parseFloat(valStr);
+        if (isNaN(num)) return valStr;
+        if (newUom === 'PCS' && oldUom === 'CARTON') {
+          // Karton -> PCS
+          const res = Math.round(num * pcsRatio * 100) / 100;
+          return res.toString();
+        } else if (newUom === 'CARTON' && oldUom === 'PCS') {
+          // PCS -> Karton
+          const res = Math.round((num / pcsRatio) * 1000) / 1000;
+          return res.toString();
+        }
+        return valStr;
+      };
+
+      return {
+        ...item,
+        inputUom: newUom,
+        qtyGood: convertValue(item.qtyGood),
+        qtyBad: convertValue(item.qtyBad)
+      };
+    }));
+  };
+
+  // PENGATURAN CONVERSION RATIO (Isi per Karton)
+  const openConversionModal = (index: number) => {
+    if (isSessionLocked) return;
+    const item = skuList[index];
+    if (!item) return;
+    setConversionModal({
+      isOpen: true,
+      skuIndex: index,
+      sku: item.sku,
+      skuName: item.name,
+      systemUom: item.uom,
+      tempValue: (item.pcsPerCarton || (item.uom === 'CARTON' ? 24 : 1)).toString()
+    });
+  };
+
+  const handleSaveConversionRatio = async () => {
+    if (conversionModal.skuIndex === null) return;
+    const newRatio = parseInt(conversionModal.tempValue, 10);
+    if (isNaN(newRatio) || newRatio <= 0) {
+      setModal({ isOpen: true, type: 'warning', title: 'Nilai Tidak Valid', message: 'Isi per karton harus berupa angka lebih dari 0.' });
+      return;
+    }
+
+    const targetIndex = conversionModal.skuIndex;
+    const targetSku = skuList[targetIndex];
+    if (!targetSku) return;
+
+    setIsDirty(true);
+    setSkuList(prev => prev.map((item, idx) => (idx === targetIndex ? { ...item, pcsPerCarton: newRatio } : item)));
+
+    // Simpan ke Firestore master_tasks agar tersinkron ke semua perangkat & reload
+    try {
+      const batch = writeBatch(db);
+      targetSku.docIds.forEach(docId => {
+        const tRef = doc(db, "master_tasks", docId);
+        batch.set(tRef, {
+          pcsPerCarton: newRatio,
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+      });
+      await batch.commit();
+    } catch (e) {
+      console.warn("Gagal menyimpan pcsPerCarton ke Firestore:", e);
+    }
+
+    setConversionModal(prev => ({ ...prev, isOpen: false }));
+    triggerHapticFeedback('success');
+  };
+
+  // KALKULATOR CAMPURAN (Dus Utuh + Eceran PCS)
+  const toggleMixedCalc = (sku: string) => {
+    setMixedCalc(prev => ({
+      ...prev,
+      [sku]: prev[sku] ? { ...prev[sku], isOpen: !prev[sku].isOpen } : { isOpen: true, cartons: '', loosePcs: '', targetField: 'good' }
+    }));
+  };
+
+  const updateMixedCalcValue = (sku: string, field: 'cartons' | 'loosePcs' | 'targetField', value: any) => {
+    setMixedCalc(prev => ({
+      ...prev,
+      [sku]: {
+        ...(prev[sku] || { isOpen: true, cartons: '', loosePcs: '', targetField: 'good' }),
+        [field]: value
+      }
+    }));
+  };
+
+  const applyMixedCalc = (index: number) => {
+    const item = skuList[index];
+    if (!item) return;
+    const calcData = mixedCalc[item.sku] || { cartons: '0', loosePcs: '0', targetField: 'good' };
+    const numCartons = parseFloat(calcData.cartons || '0') || 0;
+    const numLoosePcs = parseFloat(calcData.loosePcs || '0') || 0;
+    const ratio = item.pcsPerCarton || (item.uom === 'CARTON' ? 24 : 1);
+
+    const totalPcs = (numCartons * ratio) + numLoosePcs;
+    const activeInputUom = item.inputUom || item.uom;
+    let finalValStr = '';
+    if (activeInputUom === 'PCS') {
+      finalValStr = totalPcs.toString();
+    } else {
+      const valCtn = Math.round((totalPcs / ratio) * 1000) / 1000;
+      finalValStr = valCtn.toString();
+    }
+
+    const fieldToUpdate = calcData.targetField === 'bad' ? 'qtyBad' : 'qtyGood';
+    handleInputText(index, fieldToUpdate, finalValStr);
+
+    setMixedCalc(prev => ({
+      ...prev,
+      [item.sku]: { ...prev[item.sku], isOpen: false }
+    }));
+    triggerHapticFeedback('success');
   };
 
   const handleInputBadQtyText = (rawVal: string) => {
@@ -781,9 +995,23 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
 
     // 1. Simpan inputan lokal SKU lain
     skuList.forEach(skuItem => {
-      const finalGoodQty = parseInt(skuItem.qtyGood || "0", 10);
-      const finalBadQty = parseInt(skuItem.qtyBad || "0", 10);
-      const skuTotalSubmitted = finalGoodQty + finalBadQty;
+      const rawGood = parseFloat(skuItem.qtyGood || "0") || 0;
+      const rawBad = parseFloat(skuItem.qtyBad || "0") || 0;
+      const pcsRatio = skuItem.pcsPerCarton || (skuItem.uom === 'CARTON' ? 24 : 1);
+      const inputUnit = skuItem.inputUom || skuItem.uom;
+      const sysUnit = skuItem.uom;
+
+      // Konversi ke Satuan Sistem (uom)
+      const finalGoodQty = convertToSystemQty(rawGood, inputUnit, sysUnit, pcsRatio).finalQty;
+      const finalBadQty = convertToSystemQty(rawBad, inputUnit, sysUnit, pcsRatio).finalQty;
+      const skuTotalSubmitted = Math.round((finalGoodQty + finalBadQty) * 1000) / 1000;
+
+      const conversionNote = inputUnit !== sysUnit
+        ? ` [Input: ${rawGood + rawBad} ${inputUnit} (isi ${pcsRatio}/ctn) -> Converted: ${skuTotalSubmitted} ${sysUnit}]`
+        : '';
+      const finalRemarks = (skuItem.selectedCategories && skuItem.selectedCategories.length > 0
+        ? `[BAD STOCK] ${skuItem.selectedCategories.join(', ')}`
+        : (skuItem.badRemarks || '')) + conversionNote;
 
       if (skuTotalSubmitted > 0 || skuItem.expDateActual) {
         skuItem.docIds.forEach((docId, i) => {
@@ -796,8 +1024,12 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             QTY_ACTUAL: i === 0 ? skuTotalSubmitted : 0,
             QTY_GOOD: i === 0 ? finalGoodQty : 0,
             QTY_BAD: i === 0 ? finalBadQty : 0,
-            badRemarks: i === 0 ? (skuItem.badRemarks || '') : '',
+            badRemarks: i === 0 ? finalRemarks : '',
             expDateActual: skuItem.expDateActual || '',
+            pcsPerCarton: pcsRatio,
+            countedInUom: inputUnit,
+            rawGoodInput: rawGood,
+            rawBadInput: rawBad,
             updatedAt: new Date().toISOString()
           }, { merge: true });
         });
@@ -880,14 +1112,25 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       const cleanCounter = (sessionData.primaryCounter || 'Unassigned').toLowerCase().trim();
 
       skuList.forEach(skuItem => {
-        const finalGoodQty = parseInt(skuItem.qtyGood || "0", 10);
-        const finalBadQty = parseInt(skuItem.qtyBad || "0", 10);
-        const totalSubmitted = finalGoodQty + finalBadQty;
+        const rawGood = parseFloat(skuItem.qtyGood || "0") || 0;
+        const rawBad = parseFloat(skuItem.qtyBad || "0") || 0;
+        const pcsRatio = skuItem.pcsPerCarton || (skuItem.uom === 'CARTON' ? 24 : 1);
+        const inputUnit = skuItem.inputUom || skuItem.uom;
+        const sysUnit = skuItem.uom;
+
+        // Konversi ke Satuan Sistem yang telah ditentukan diawal (uom)
+        const finalGoodQty = convertToSystemQty(rawGood, inputUnit, sysUnit, pcsRatio).finalQty;
+        const finalBadQty = convertToSystemQty(rawBad, inputUnit, sysUnit, pcsRatio).finalQty;
+        const totalSubmitted = Math.round((finalGoodQty + finalBadQty) * 1000) / 1000;
         const currentRoundNum = skuItem.currentRound || 1;
 
-        const remarksText = skuItem.selectedCategories && skuItem.selectedCategories.length > 0
+        const conversionNote = inputUnit !== sysUnit
+          ? ` [Dihitung: ${rawGood + rawBad} ${inputUnit} (isi ${pcsRatio}/ctn) -> Dikonversi ke ${totalSubmitted} ${sysUnit}]`
+          : '';
+
+        const remarksText = (skuItem.selectedCategories && skuItem.selectedCategories.length > 0
           ? `[BAD STOCK] ${skuItem.selectedCategories.join(', ')}`
-          : (skuItem.badRemarks || '-');
+          : (skuItem.badRemarks || '-')) + conversionNote;
 
         skuItem.docIds.forEach((docId, i) => {
           const taskRef = doc(db, "master_tasks", docId);
@@ -901,6 +1144,10 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             QTY_BAD: i === 0 ? finalBadQty : 0,
             badRemarks: i === 0 ? remarksText : '',
             expDateActual: skuItem.expDateActual || '',
+            pcsPerCarton: pcsRatio,
+            countedInUom: inputUnit,
+            rawGoodInput: rawGood,
+            rawBadInput: rawBad,
             updatedAt: new Date().toISOString()
           }, { merge: true });
         });
@@ -924,6 +1171,11 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
           qtyGood: finalGoodQty,
           qtyBad: finalBadQty,
           totalFinalSubmitted: totalSubmitted,
+          uom: sysUnit,
+          countedInUom: inputUnit,
+          pcsPerCarton: pcsRatio,
+          rawGoodInput: rawGood,
+          rawBadInput: rawBad,
           edActual: skuItem.expDateActual || '-',
           remarks: remarksText
         }, { merge: true });
@@ -1193,6 +1445,19 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                         <span className="text-xs font-bold uppercase bg-cyan-50 text-cyan-800 border border-cyan-200 px-2 py-0.5 rounded-md">
                           {currentSku.uom}
                         </span>
+                        <button
+                          type="button"
+                          disabled={isSessionLocked}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openConversionModal(idx);
+                          }}
+                          className="text-[10px] font-mono font-bold bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 px-2 py-0.5 rounded-md flex items-center gap-1 cursor-pointer transition-colors shadow-2xs"
+                          title="Klik untuk setting rasio / isi per karton"
+                        >
+                          <span>📦 1 Ctn = {currentSku.pcsPerCarton || (currentSku.uom === 'CARTON' ? 24 : 1)} Pcs</span>
+                          <Edit2 className="w-2.5 h-2.5 text-amber-700" />
+                        </button>
                       </div>
                       <h3 className="font-headline-sm text-slate-900 font-bold text-xs sm:text-sm leading-snug line-clamp-2">
                         {currentSku.name}
@@ -1336,18 +1601,162 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                       )}
                     </div>
 
+                    {/* PILIH SATUAN HITUNG & SETTING RASIO */}
+                    <div className="bg-linear-to-r from-slate-50 to-cyan-50/40 border border-slate-200 p-2.5 rounded-xl space-y-2">
+                      <div className="flex items-center justify-between gap-1 flex-wrap">
+                        <span className="text-[10px] font-black uppercase text-slate-600 tracking-wider flex items-center gap-1">
+                          <Zap className="w-3 h-3 text-cyan-600" />
+                          <span>Satuan Input Hitung:</span>
+                        </span>
+
+                        <button
+                          type="button"
+                          disabled={isSessionLocked}
+                          onClick={() => openConversionModal(idx)}
+                          className="text-[10px] font-bold text-amber-900 bg-amber-100/80 hover:bg-amber-200/80 border border-amber-300 px-2 py-0.5 rounded-lg flex items-center gap-1 cursor-pointer transition-colors shadow-2xs"
+                          title="Ubah isi per karton"
+                        >
+                          <span>📦 1 Ctn = {currentSku.pcsPerCarton || (currentSku.uom === 'CARTON' ? 24 : 1)} Pcs</span>
+                          <Edit2 className="w-2.5 h-2.5 text-amber-700" />
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-200/70 rounded-xl">
+                        <button
+                          type="button"
+                          disabled={isSessionLocked}
+                          onClick={() => handleSwitchInputUom(idx, 'CARTON')}
+                          className={`py-2 px-3 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                            (currentSku.inputUom || currentSku.uom) === 'CARTON'
+                              ? 'bg-cyan-500 text-slate-950 shadow-sm scale-[1.01]'
+                              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/50'
+                          }`}
+                        >
+                          <span>📦</span>
+                          <span>KARTON</span>
+                          {currentSku.uom === 'CARTON' && (
+                            <span className="text-[9px] px-1 py-0.2 bg-cyan-900/10 rounded font-normal">(Sistem)</span>
+                          )}
+                        </button>
+
+                        <button
+                          type="button"
+                          disabled={isSessionLocked}
+                          onClick={() => handleSwitchInputUom(idx, 'PCS')}
+                          className={`py-2 px-3 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                            (currentSku.inputUom || currentSku.uom) === 'PCS'
+                              ? 'bg-cyan-500 text-slate-950 shadow-sm scale-[1.01]'
+                              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/50'
+                          }`}
+                        >
+                          <span>🛍️</span>
+                          <span>PCS</span>
+                          {currentSku.uom === 'PCS' && (
+                            <span className="text-[9px] px-1 py-0.2 bg-cyan-900/10 rounded font-normal">(Sistem)</span>
+                          )}
+                        </button>
+                      </div>
+
+                      {/* TOMBOL KALKULATOR CAMPURAN (DUS UTUH + ECERAN) */}
+                      <button
+                        type="button"
+                        disabled={isSessionLocked}
+                        onClick={() => toggleMixedCalc(currentSku.sku)}
+                        className="w-full py-1.5 px-2 bg-white hover:bg-cyan-50/70 border border-slate-300 hover:border-cyan-300 text-slate-700 hover:text-cyan-900 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors shadow-2xs"
+                      >
+                        <Calculator className="w-3.5 h-3.5 text-cyan-600" />
+                        <span>{mixedCalc[currentSku.sku]?.isOpen ? 'Tutup Kalkulator Dus + Pcs' : '🧮 Hitung Campuran: Dus Utuh + Eceran Pcs'}</span>
+                      </button>
+
+                      {/* PANEL KALKULATOR CAMPURAN JIKA DIAKTIFKAN */}
+                      {mixedCalc[currentSku.sku]?.isOpen && (
+                        <div className="bg-white border-2 border-cyan-400 p-2.5 rounded-xl space-y-2 animate-in fade-in shadow-xs">
+                          <div className="text-[11px] font-bold text-cyan-950 flex items-center justify-between">
+                            <span className="flex items-center gap-1">
+                              <Sparkles className="w-3 h-3 text-cyan-600" />
+                              <span>Kalkulator Dus + Eceran Pcs</span>
+                            </span>
+                            <span className="text-[10px] text-slate-500 font-mono">1 Ctn = {currentSku.pcsPerCarton || (currentSku.uom === 'CARTON' ? 24 : 1)} Pcs</span>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-600 block uppercase mb-0.5">Dus Utuh (Ctn)</label>
+                              <input
+                                type="number"
+                                min="0"
+                                step="1"
+                                placeholder="0"
+                                value={mixedCalc[currentSku.sku]?.cartons || ''}
+                                onChange={(e) => updateMixedCalcValue(currentSku.sku, 'cartons', e.target.value)}
+                                className="w-full p-1.5 border border-slate-300 rounded-lg text-center font-bold text-sm bg-white outline-none"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-600 block uppercase mb-0.5">Eceran (Pcs)</label>
+                              <input
+                                type="number"
+                                min="0"
+                                step="1"
+                                placeholder="0"
+                                value={mixedCalc[currentSku.sku]?.loosePcs || ''}
+                                onChange={(e) => updateMixedCalcValue(currentSku.sku, 'loosePcs', e.target.value)}
+                                className="w-full p-1.5 border border-slate-300 rounded-lg text-center font-bold text-sm bg-white outline-none"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-100">
+                            <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-600">
+                              <span>Target:</span>
+                              <button
+                                type="button"
+                                onClick={() => updateMixedCalcValue(currentSku.sku, 'targetField', 'good')}
+                                className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                  (mixedCalc[currentSku.sku]?.targetField || 'good') === 'good'
+                                    ? 'bg-cyan-500 text-slate-950'
+                                    : 'bg-slate-100 text-slate-600'
+                                }`}
+                              >
+                                Baik
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => updateMixedCalcValue(currentSku.sku, 'targetField', 'bad')}
+                                className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                  mixedCalc[currentSku.sku]?.targetField === 'bad'
+                                    ? 'bg-amber-500 text-slate-950'
+                                    : 'bg-slate-100 text-slate-600'
+                                }`}
+                              >
+                                Rusak
+                              </button>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => applyMixedCalc(idx)}
+                              className="px-3 py-1 bg-cyan-400 hover:bg-cyan-300 text-slate-950 rounded-lg font-black text-xs cursor-pointer shadow-xs active:scale-95 transition-all"
+                            >
+                              ✓ Terapkan
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
                     {/* INPUT KONDISI BAIK (QTY GOOD) */}
                     <div className="bg-slate-50 border border-slate-200 p-space-md rounded-xl space-y-space-sm">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-cyan-400"></span><span className="font-headline-sm text-slate-900 font-bold text-xs sm:text-sm">{t('goodConditionLabel')}</span></div>
-                        <span className="px-2 py-0.5 rounded-md bg-cyan-100 text-cyan-950 border border-cyan-300 font-black text-xs uppercase">{currentSku.uom}</span>
+                        <span className="px-2 py-0.5 rounded-md bg-cyan-100 text-cyan-950 border border-cyan-300 font-black text-xs uppercase">{currentSku.inputUom || currentSku.uom}</span>
                       </div>
                       <div className="flex items-center gap-space-sm">
                         <button type="button" disabled={isSessionLocked} onClick={() => adjustQty(idx, 'good', -1)} className={`w-14 h-14 bg-white border border-slate-300 text-slate-800 rounded-xl flex items-center justify-center text-xl shrink-0 cursor-pointer ${isSessionLocked ? 'opacity-50 cursor-not-allowed' : ''}`}><Minus className="w-5 h-5" /></button>
                         <div className="flex-1 h-14 border-2 border-cyan-400 rounded-xl flex items-center justify-center bg-white">
                           <input
                             type="text"
-                            inputMode="numeric"
+                            inputMode="decimal"
                             disabled={isSessionLocked}
                             value={currentSku.qtyGood}
                             onChange={(e) => handleInputText(idx, 'qtyGood', e.target.value)}
@@ -1370,11 +1779,11 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                           <div>
                             <label className="text-xs font-bold text-amber-900 flex items-center justify-between mb-1">
                               <span>{t('damagedQtyLabel')}</span>
-                              <span className="px-2 py-0.5 rounded-md bg-amber-200/80 text-amber-950 font-black text-[11px] uppercase">{currentSku.uom}</span>
+                              <span className="px-2 py-0.5 rounded-md bg-amber-200/80 text-amber-950 font-black text-[11px] uppercase">{currentSku.inputUom || currentSku.uom}</span>
                             </label>
                             <input
                               type="text"
-                              inputMode="numeric"
+                              inputMode="decimal"
                               disabled={isSessionLocked}
                               value={currentSku.qtyBad}
                               onChange={(e) => handleInputText(idx, 'qtyBad', e.target.value)}
@@ -1405,6 +1814,21 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                         </div>
                       )}
                     </div>
+
+                    {/* LIVE CONVERSION BANNER JIKA INPUT BEDA DENGAN SISTEM UOM */}
+                    {(currentSku.inputUom || currentSku.uom) !== currentSku.uom && (
+                      <div className="p-2.5 bg-cyan-50 border border-cyan-300 rounded-xl flex items-center justify-between text-xs text-cyan-950 shadow-2xs">
+                        <div className="flex items-center gap-1.5">
+                          <Zap className="w-4 h-4 text-cyan-600 shrink-0" />
+                          <div>
+                            <div className="font-extrabold text-[11px] text-cyan-900">Konversi Otomatis ke Sistem:</div>
+                            <div className="text-[11px] text-cyan-700">
+                              Input <b className="font-mono text-cyan-950">{(parseFloat(currentSku.qtyGood || '0') + parseFloat(currentSku.qtyBad || '0')) || 0} {currentSku.inputUom || currentSku.uom}</b> ➔ Disimpan sebagai <b className="font-mono text-cyan-950">{convertToSystemQty((parseFloat(currentSku.qtyGood || '0') + parseFloat(currentSku.qtyBad || '0')) || 0, currentSku.inputUom || currentSku.uom, currentSku.uom, currentSku.pcsPerCarton || 24).finalQty} {currentSku.uom}</b>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
                     {/* TOMBOL TUTUP CARD CEPAT */}
                     <div className="pt-1 flex justify-end">
@@ -1710,6 +2134,105 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
           </button>
         </div>
       </div>
+
+      {/* MODAL SETTING ISI PER KARTON (CONVERSION RATIO) */}
+      {conversionModal.isOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl w-full max-w-sm border border-slate-200 shadow-2xl p-5 space-y-4">
+            <div className="flex items-center justify-between border-b pb-3 border-slate-100">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-amber-100 text-amber-900 flex items-center justify-center font-bold">
+                  📦
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm text-slate-900">Setting Isi per Karton</h3>
+                  <p className="text-[10px] text-slate-500">Konversi UOM Karton ⇄ PCS</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setConversionModal(prev => ({ ...prev, isOpen: false }))}
+                className="w-7 h-7 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center text-xs font-bold cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-mono font-bold text-slate-800">{conversionModal.sku}</span>
+                  <span className="px-2 py-0.5 rounded bg-cyan-100 text-cyan-900 font-extrabold text-[10px] uppercase">
+                    Satuan Sistem: {conversionModal.systemUom}
+                  </span>
+                </div>
+                <div className="text-[11px] text-slate-600 font-medium line-clamp-1">{conversionModal.skuName}</div>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1">
+                  Jumlah Pcs dalam 1 Karton (Pack Size):
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    autoFocus
+                    value={conversionModal.tempValue}
+                    onChange={(e) => setConversionModal(prev => ({ ...prev, tempValue: e.target.value }))}
+                    placeholder="24"
+                    className="w-full p-3 border-2 border-amber-400 rounded-xl text-center font-black text-2xl text-slate-900 bg-white outline-none"
+                  />
+                  <span className="absolute right-3.5 top-4 text-xs font-extrabold text-slate-400 uppercase">Pcs / Dus</span>
+                </div>
+              </div>
+
+              {/* TOMBOL PRESET CEPAT */}
+              <div className="space-y-1">
+                <span className="text-[10px] font-bold text-slate-500 uppercase">Preset Populer:</span>
+                <div className="grid grid-cols-5 gap-1.5">
+                  {[6, 12, 24, 48, 100].map((presetVal) => (
+                    <button
+                      key={presetVal}
+                      type="button"
+                      onClick={() => setConversionModal(prev => ({ ...prev, tempValue: presetVal.toString() }))}
+                      className={`py-1.5 rounded-lg text-xs font-bold border transition-colors cursor-pointer ${
+                        conversionModal.tempValue === presetVal.toString()
+                          ? 'bg-amber-500 text-slate-950 border-amber-600 shadow-2xs font-black'
+                          : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
+                      }`}
+                    >
+                      {presetVal}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="p-2.5 bg-amber-50/80 border border-amber-200 rounded-xl text-[11px] text-amber-900 leading-relaxed">
+                💡 <b>Info:</b> Jika counter menghitung dalam Pcs namun satuan sistem adalah Karton (atau sebaliknya), angka akan otomatis dikonversikan sesuai rasio ini dan tetap disimpan sesuai satuan sistem diawal.
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setConversionModal(prev => ({ ...prev, isOpen: false }))}
+                className="flex-1 py-2.5 rounded-xl border border-slate-300 text-slate-700 font-bold text-xs hover:bg-slate-100 cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveConversionRatio}
+                className="flex-1 py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs cursor-pointer shadow-md active:scale-95 transition-all"
+              >
+                Simpan Rasio
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <footer className="text-center py-4 bg-slate-50 text-slate-400 text-[10px] font-medium border-t border-slate-200 pb-16">
         Noctus Count™ • Developed by <span className="font-bold text-cyan-600">Noctus</span>

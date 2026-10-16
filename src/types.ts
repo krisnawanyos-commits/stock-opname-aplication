@@ -39,6 +39,7 @@ export interface MasterSKUItem {
   Qty: number;
   countedQty?: number;
   satuanHitung: string;
+  pcsPerCarton?: number;
   SKUBrand: string;
   isCounted?: boolean;
 }
@@ -60,6 +61,7 @@ export interface UnmappedItem {
   name: string;
   qty: number;
   uom: 'PCS' | 'CARTON';
+  pcsPerCarton?: number;
   expDate?: string;
   batchNumber?: string;
   photoUrl?: string;
@@ -74,6 +76,7 @@ export interface SKUItem {
   name: string;
   category: string;
   uom: 'PCS' | 'CARTON';
+  pcsPerCarton?: number;
   qtyGood: number;
   qtyBad: number;
   expDate?: string;
