@@ -69,6 +69,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
   const [isScannerOpen, setIsScannerOpen] = useState<boolean>(false);
   const [isLoadingSave, setIsLoadingSave] = useState<boolean>(false);
   const [showCompletedSection, setShowCompletedSection] = useState<boolean>(false);
+  const [hasRemainingRacks, setHasRemainingRacks] = useState<boolean>(true);
 
   // MASTER KATEGORI BAD STOCK DARI OWNER
   const [availableCategories, setAvailableCategories] = useState<string[]>([]);
@@ -260,6 +261,39 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
 
     return () => { unsub(); unsubCat(); };
   }, [sessionData.sessionCode, sessionData.sessionId, sessionData.primaryCounter]);
+
+  // 2. MONITOR APAKAH MASIH ADA RAK LAIN DI PROJECT AKTIF YANG BELUM SELESAI
+  useEffect(() => {
+    const cleanCounter = (sessionData.primaryCounter || "Unassigned").toLowerCase().trim();
+    const targetLocation = rack.rackNumber || rack.id;
+
+    const qTasks = query(
+      collection(db, "master_tasks"),
+      where("counter", "==", cleanCounter)
+    );
+
+    const unsubRemaining = onSnapshot(qTasks, (snapshot) => {
+      let otherPendingRacksExist = false;
+
+      for (const d of snapshot.docs) {
+        const data = d.data();
+        if (sessionData.projectId && data.projectId && data.projectId !== sessionData.projectId) continue;
+        if (sessionData.projectId && !data.projectId) continue;
+        if (data.isLocked) continue;
+        if (!data.SKU || data.SKU === 'SKU_UNKNOWN') continue;
+        if (data.Location && data.Location === targetLocation) continue;
+
+        const isCounted = !!data.isCounted || (data.QTY_ACTUAL !== null && data.QTY_ACTUAL !== undefined);
+        if (!isCounted) {
+          otherPendingRacksExist = true;
+          break;
+        }
+      }
+      setHasRemainingRacks(otherPendingRacksExist);
+    });
+
+    return () => unsubRemaining();
+  }, [sessionData.primaryCounter, sessionData.projectId, rack.rackNumber, rack.id]);
 
   // 3. LISTEN MASTER TASKS LOKASI RAK AKTIF
   useEffect(() => {
@@ -906,8 +940,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
 
       const remainingTasksQuery = query(
         collection(db, "master_tasks"),
-        where("counter", "==", cleanCounter),
-        where("isCounted", "==", false)
+        where("counter", "==", cleanCounter)
       );
 
       const snap = await getDocs(remainingTasksQuery);
@@ -916,7 +949,15 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       if (!snap.empty) {
         const nextDoc = snap.docs.find(d => {
           const data = d.data();
-          return data.Location && data.Location !== rack.rackNumber;
+          // Filter ketat isolasi Project ID
+          if (sessionData.projectId && data.projectId && data.projectId !== sessionData.projectId) return false;
+          if (sessionData.projectId && !data.projectId) return false;
+          if (data.isLocked) return false;
+          if (!data.SKU || data.SKU === 'SKU_UNKNOWN') return false;
+          if (!data.Location || data.Location === rack.rackNumber) return false;
+
+          const isCounted = !!data.isCounted || (data.QTY_ACTUAL !== null && data.QTY_ACTUAL !== undefined);
+          return !isCounted;
         });
 
         if (nextDoc) {
@@ -941,21 +982,8 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
         return;
       }
 
-      if (goToNextRack && !nextRackItem) {
-        playScanSuccessBeep();
-        triggerHapticFeedback('success');
-        setModal({
-          isOpen: true,
-          type: 'success',
-          title: 'Semua Rak Selesai!',
-          message: `Luar biasa! Seluruh rak tugas untuk counter ${cleanCounter} telah selesai dihitung.`,
-          confirmText: 'Kembali ke Countsheet List',
-          onConfirm: () => triggerSafeBack()
-        });
-        return;
-      }
-
-      // Jika user memilih Simpan & Balik ke List
+      // Jika tidak ada rak lagi di project ini (rak terakhir) ATAU user klik "Simpan & List":
+      // Langsung arahkan kembali ke Countsheet List tanpa modal berbelit atau nyasar ke rak kosong!
       playScanSuccessBeep();
       triggerHapticFeedback('success');
       triggerSafeBack();
@@ -1454,6 +1482,29 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
           );
         })()}
 
+          {/* JIKA RAK TIDAK MEMILIKI SKU TERDAFTAR DI SESI INI */}
+          {skuList.length === 0 && (
+            <div className="bg-white border border-slate-200 rounded-2xl p-5 text-center space-y-3 my-1 shadow-xs animate-in fade-in">
+              <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-500 flex items-center justify-center mx-auto text-xl">
+                📋
+              </div>
+              <div className="space-y-1">
+                <h4 className="font-bold text-sm text-slate-900">Tidak Ada SKU Terdaftar di Rak Ini</h4>
+                <p className="text-xs text-slate-500 max-w-xs mx-auto leading-relaxed">
+                  Rak <b className="text-slate-800">{rack.rackNumber}</b> tidak memiliki daftar SKU sistem untuk sesi ini. Kamu dapat langsung kembali ke Countsheet List atau mencatat temuan barang fisik baru di bawah.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleSafeBackToList}
+                className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer inline-flex items-center gap-1.5"
+              >
+                <ChevronLeft className="w-4 h-4" />
+                <span>Kembali ke Countsheet List</span>
+              </button>
+            </div>
+          )}
+
           {/* FORM ITEM TAK TERDAFTAR / TEMUAN LAIN (ACCORDION COLLAPSIBLE) */}
           <div id="unmapped-card" className={`bg-white rounded-2xl shadow-xs border transition-all overflow-hidden ${unmappedDrawerOpen ? 'border-amber-400 ring-2 ring-amber-400/20' : 'border-dashed border-2 border-amber-300/80 bg-amber-50/30 hover:bg-amber-50/60'}`}>
             <div
@@ -1649,7 +1700,11 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             ) : (
               <>
                 <CheckCircle2 className="w-4 h-4 shrink-0 text-slate-950" />
-                <span>Simpan & Lanjut Rak ➔</span>
+                <span>
+                  {!hasRemainingRacks
+                    ? (t('saveAndFinishCountsheetBtn') || 'Simpan & Selesai (Ke Countsheet) ➔')
+                    : (t('saveAndNextBtn') || 'Simpan & Lanjut Rak ➔')}
+                </span>
               </>
             )}
           </button>

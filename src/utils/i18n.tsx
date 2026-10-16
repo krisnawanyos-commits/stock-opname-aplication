@@ -162,6 +162,7 @@ export const translations = {
 
     // Bottom Action Bar
     saveAndNextBtn: 'Simpan & Lanjut Rak Berikutnya',
+    saveAndFinishCountsheetBtn: 'Simpan & Selesai (Ke Countsheet) ➔',
     saveAndBackToList: 'Simpan & List',
     savingToCloud: 'Menyimpan ke Cloud...',
     sessionLockedByAdmin: 'Sesi Terkunci oleh Admin',
@@ -267,6 +268,7 @@ export const translations = {
 
     // Bottom Action Bar
     saveAndNextBtn: 'Save & Proceed to Next Rack',
+    saveAndFinishCountsheetBtn: 'Save & Finish (To Countsheet) ➔',
     saveAndBackToList: 'Save & List',
     savingToCloud: 'Saving to Cloud...',
     sessionLockedByAdmin: 'Session Locked by Admin',
