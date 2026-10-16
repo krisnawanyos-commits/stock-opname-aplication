@@ -2155,7 +2155,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
     };
 
     // FITUR EXPORT REKAP HASIL HITUNGAN RONDE 1, 2, 3 (UNTUK VENDOR & JAGAAN DATA REKAP)
-    const handleExportRoundsComparisonXLSX = (selectedCounter?: string) => {
+    const handleExportRoundsComparisonXLSX = (selectedCounter?: string, includeSystemAndStatus: boolean = exportIncludeSystemQty) => {
         if (!masterDataList || masterDataList.length === 0) {
             triggerNotification("Tidak ada data SKU untuk diexport!");
             return;
@@ -2209,7 +2209,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             const unitPrice = item.unitPrice || 0;
             const valDiff = typeof diff === 'number' ? diff * unitPrice : 0;
 
-            return {
+            const rowData: Record<string, any> = {
                 'NO': idx + 1,
                 'LOKASI / RAK': item.Location || '-',
                 'LEVEL': item.level || '-',
@@ -2220,22 +2220,31 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 'DESKRIPSI PRODUK': item.Description || '-',
                 'BRAND': item.SKUBrand || '-',
                 'SATUAN': item.satuanHitung || 'PCS',
-                'QTY SISTEM (WMS)': sysQty,
-                'RONDE 1 (PIC)': r1Counter || '-',
-                'RONDE 1 (FISIK)': r1Actual !== undefined ? r1Actual : '-',
-                'RONDE 2 (PIC)': r2Counter || '-',
-                'RONDE 2 (FISIK)': r2Actual !== undefined ? r2Actual : '-',
-                'RONDE 3 (PIC)': r3Counter || '-',
-                'RONDE 3 (FISIK)': r3Actual !== undefined ? r3Actual : '-',
-                'FINAL FISIK AKTUAL': effectiveActual,
-                'QTY GOOD (BAGUS)': item.qtyGood !== undefined ? item.qtyGood : (isCounted ? effectiveActual : '-'),
-                'QTY BAD (RUSAK)': item.qtyBad !== undefined ? item.qtyBad : 0,
-                'SELISIH (FISIK - SISTEM)': diff,
-                'STATUS REKONSILIASI': statusRecon,
-                'HARGA SATUAN (RP)': unitPrice,
-                'ESTIMASI NILAI SELISIH (RP)': valDiff,
-                'KONDISI / REMARKS': item.Remarks || '-'
             };
+
+            if (includeSystemAndStatus) {
+                rowData['QTY SISTEM (WMS)'] = sysQty;
+            }
+
+            rowData['RONDE 1 (PIC)'] = r1Counter || '-';
+            rowData['RONDE 1 (FISIK)'] = r1Actual !== undefined ? r1Actual : '-';
+            rowData['RONDE 2 (PIC)'] = r2Counter || '-';
+            rowData['RONDE 2 (FISIK)'] = r2Actual !== undefined ? r2Actual : '-';
+            rowData['RONDE 3 (PIC)'] = r3Counter || '-';
+            rowData['RONDE 3 (FISIK)'] = r3Actual !== undefined ? r3Actual : '-';
+            rowData['FINAL FISIK AKTUAL'] = effectiveActual;
+            rowData['QTY GOOD (BAGUS)'] = item.qtyGood !== undefined ? item.qtyGood : (isCounted ? effectiveActual : '-');
+            rowData['QTY BAD (RUSAK)'] = item.qtyBad !== undefined ? item.qtyBad : 0;
+
+            if (includeSystemAndStatus) {
+                rowData['SELISIH (FISIK - SISTEM)'] = diff;
+                rowData['STATUS REKONSILIASI'] = statusRecon;
+                rowData['HARGA SATUAN (RP)'] = unitPrice;
+                rowData['ESTIMASI NILAI SELISIH (RP)'] = valDiff;
+            }
+
+            rowData['KONDISI / REMARKS'] = item.Remarks || '-';
+            return rowData;
         });
 
         // Summary sheet
@@ -2245,7 +2254,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         const totalActQty = countedItems.reduce((acc, i) => acc + (i.countedQty ?? i.QTY_ACTUAL ?? 0), 0);
         const totalVariance = totalActQty - totalSysQty;
 
-        const summaryRows = [
+        const summaryRows: Array<{ PARAMETER: string; NILAI: any }> = [
             { "PARAMETER": "JUDUL LAPORAN", "NILAI": selectedCounter ? `REKAP RIWAYAT RONDE - ${selectedCounter.toUpperCase()}` : "MASTER REKAP KOMPARASI RONDE 1, 2, 3" },
             { "PARAMETER": "KODE PROJECT", "NILAI": project?.sessionCode || 'SO' },
             { "PARAMETER": "LOKASI WAREHOUSE", "NILAI": project?.locationName || '-' },
@@ -2256,10 +2265,19 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             { "PARAMETER": "TOTAL SKU TERDAFTAR", "NILAI": totalItems },
             { "PARAMETER": "TOTAL SKU SELESAI HITUNG", "NILAI": countedItems.length },
             { "PARAMETER": "PERSENTASE PROGRESS", "NILAI": `${((countedItems.length / (totalItems || 1)) * 100).toFixed(1)}%` },
-            { "PARAMETER": "TOTAL QTY SISTEM (WMS)", "NILAI": totalSysQty },
-            { "PARAMETER": "TOTAL QTY FISIK AKTUAL", "NILAI": totalActQty },
-            { "PARAMETER": "NET VARIANCE (FISIK - WMS)", "NILAI": totalVariance }
         ];
+
+        if (includeSystemAndStatus) {
+            summaryRows.push(
+                { "PARAMETER": "TOTAL QTY SISTEM (WMS)", "NILAI": totalSysQty },
+                { "PARAMETER": "TOTAL QTY FISIK AKTUAL", "NILAI": totalActQty },
+                { "PARAMETER": "NET VARIANCE (FISIK - WMS)", "NILAI": totalVariance }
+            );
+        } else {
+            summaryRows.push(
+                { "PARAMETER": "TOTAL QTY FISIK AKTUAL", "NILAI": totalActQty }
+            );
+        }
 
         const wb = XLSX.utils.book_new();
 
@@ -2274,7 +2292,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             const sysQty = item.Qty || 0;
             const r1Actual = item.round1Actual !== undefined ? item.round1Actual : (item.currentRound === 1 && item.isCounted ? (item.countedQty ?? item.QTY_ACTUAL) : '-');
             const diffR1 = typeof r1Actual === 'number' ? r1Actual - sysQty : '-';
-            return {
+            const row: Record<string, any> = {
                 'NO': idx + 1,
                 'LOKASI / RAK': item.Location || '-',
                 'LEVEL': item.level || '-',
@@ -2282,21 +2300,27 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 'BARCODE / SKU': item.SKU,
                 'DESKRIPSI': item.Description || '-',
                 'SATUAN': item.satuanHitung || 'PCS',
-                'QTY SISTEM': sysQty,
-                'PIC RONDE 1': item.round1Counter || (item.currentRound === 1 ? item.counter : '-'),
-                'HASIL FISIK R1': r1Actual,
-                'SELISIH R1': diffR1,
-                'STATUS': typeof diffR1 === 'number' ? (diffR1 === 0 ? 'MATCH' : (diffR1 > 0 ? 'SURPLUS' : 'SHORTAGE')) : 'BELUM HITUNG'
             };
+            if (includeSystemAndStatus) {
+                row['QTY SISTEM'] = sysQty;
+            }
+            row['PIC RONDE 1'] = item.round1Counter || (item.currentRound === 1 ? item.counter : '-');
+            row['HASIL FISIK R1'] = r1Actual;
+            if (includeSystemAndStatus) {
+                row['SELISIH R1'] = diffR1;
+                row['STATUS'] = typeof diffR1 === 'number' ? (diffR1 === 0 ? 'MATCH' : (diffR1 > 0 ? 'SURPLUS' : 'SHORTAGE')) : 'BELUM HITUNG';
+            }
+            return row;
         });
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(r1Rows), "Hasil_Ronde_1");
+        const wsR1 = XLSX.utils.json_to_sheet(r1Rows);
+        XLSX.utils.book_append_sheet(wb, wsR1, "Hasil_Ronde_1");
 
         // SHEET HASIL RONDE 2
         const r2Rows = sortedList.map((item, idx) => {
             const sysQty = item.Qty || 0;
             const r2Actual = item.round2Actual !== undefined ? item.round2Actual : (item.currentRound === 2 && item.isCounted ? (item.countedQty ?? item.QTY_ACTUAL) : '-');
             const diffR2 = typeof r2Actual === 'number' ? r2Actual - sysQty : '-';
-            return {
+            const row: Record<string, any> = {
                 'NO': idx + 1,
                 'LOKASI / RAK': item.Location || '-',
                 'LEVEL': item.level || '-',
@@ -2304,21 +2328,27 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 'BARCODE / SKU': item.SKU,
                 'DESKRIPSI': item.Description || '-',
                 'SATUAN': item.satuanHitung || 'PCS',
-                'QTY SISTEM': sysQty,
-                'PIC RONDE 2': item.round2Counter || (item.currentRound === 2 ? item.counter : '-'),
-                'HASIL FISIK R2': r2Actual,
-                'SELISIH R2': diffR2,
-                'STATUS': typeof diffR2 === 'number' ? (diffR2 === 0 ? 'MATCH' : (diffR2 > 0 ? 'SURPLUS' : 'SHORTAGE')) : (item.currentRound >= 2 ? 'PENDING' : 'TIDAK MASUK R2 (SUDAH MATCH R1)')
             };
+            if (includeSystemAndStatus) {
+                row['QTY SISTEM'] = sysQty;
+            }
+            row['PIC RONDE 2'] = item.round2Counter || (item.currentRound === 2 ? item.counter : '-');
+            row['HASIL FISIK R2'] = r2Actual;
+            if (includeSystemAndStatus) {
+                row['SELISIH R2'] = diffR2;
+                row['STATUS'] = typeof diffR2 === 'number' ? (diffR2 === 0 ? 'MATCH' : (diffR2 > 0 ? 'SURPLUS' : 'SHORTAGE')) : (item.currentRound >= 2 ? 'PENDING' : 'TIDAK MASUK R2 (SUDAH MATCH R1)');
+            }
+            return row;
         });
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(r2Rows), "Hasil_Ronde_2");
+        const wsR2 = XLSX.utils.json_to_sheet(r2Rows);
+        XLSX.utils.book_append_sheet(wb, wsR2, "Hasil_Ronde_2");
 
         // SHEET HASIL RONDE 3
         const r3Rows = sortedList.map((item, idx) => {
             const sysQty = item.Qty || 0;
             const r3Actual = item.round3Actual !== undefined ? item.round3Actual : (item.currentRound >= 3 && item.isCounted ? (item.countedQty ?? item.QTY_ACTUAL) : '-');
             const diffR3 = typeof r3Actual === 'number' ? r3Actual - sysQty : '-';
-            return {
+            const row: Record<string, any> = {
                 'NO': idx + 1,
                 'LOKASI / RAK': item.Location || '-',
                 'LEVEL': item.level || '-',
@@ -2326,23 +2356,44 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 'BARCODE / SKU': item.SKU,
                 'DESKRIPSI': item.Description || '-',
                 'SATUAN': item.satuanHitung || 'PCS',
-                'QTY SISTEM': sysQty,
-                'PIC RONDE 3': item.round3Counter || (item.currentRound >= 3 ? item.counter : '-'),
-                'HASIL FISIK R3': r3Actual,
-                'SELISIH R3': diffR3,
-                'STATUS': typeof diffR3 === 'number' ? (diffR3 === 0 ? 'MATCH' : (diffR3 > 0 ? 'SURPLUS' : 'SHORTAGE')) : (item.currentRound >= 3 ? 'PENDING' : 'TIDAK MASUK R3')
             };
+            if (includeSystemAndStatus) {
+                row['QTY SISTEM'] = sysQty;
+            }
+            row['PIC RONDE 3'] = item.round3Counter || (item.currentRound >= 3 ? item.counter : '-');
+            row['HASIL FISIK R3'] = r3Actual;
+            if (includeSystemAndStatus) {
+                row['SELISIH R3'] = diffR3;
+                row['STATUS'] = typeof diffR3 === 'number' ? (diffR3 === 0 ? 'MATCH' : (diffR3 > 0 ? 'SURPLUS' : 'SHORTAGE')) : (item.currentRound >= 3 ? 'PENDING' : 'TIDAK MASUK R3');
+            }
+            return row;
         });
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(r3Rows), "Hasil_Ronde_3");
+        const wsR3 = XLSX.utils.json_to_sheet(r3Rows);
+        XLSX.utils.book_append_sheet(wb, wsR3, "Hasil_Ronde_3");
+
+        // Auto-width column sizes agar rapi saat dibuka
+        [wsSummary, wsDetail, wsR1, wsR2, wsR3].forEach(sheet => {
+            const data = XLSX.utils.sheet_to_json(sheet);
+            if (data.length > 0) {
+                sheet['!cols'] = Object.keys(data[0] as any).map(key => ({
+                    wch: Math.max(key.length + 3, 12)
+                }));
+            }
+        });
 
         const cleanDateStr = new Date().toISOString().slice(0, 10);
         const cleanProjCode = (project?.sessionCode || 'SO').replace(/[^a-zA-Z0-9-]/g, '_');
+        const vendorTag = includeSystemAndStatus ? '_INTERNAL' : '_VENDOR';
         const filename = selectedCounter 
-            ? `Rekap_Ronde_${selectedCounter.toUpperCase()}_${cleanProjCode}_${cleanDateStr}.xlsx`
-            : `Master_Rekap_Komparasi_Ronde_1_2_3_${cleanProjCode}_${cleanDateStr}.xlsx`;
+            ? `Rekap_Ronde_${selectedCounter.toUpperCase()}${vendorTag}_${cleanProjCode}_${cleanDateStr}.xlsx`
+            : `Master_Rekap_Komparasi_Ronde_1_2_3${vendorTag}_${cleanProjCode}_${cleanDateStr}.xlsx`;
 
         XLSX.writeFile(wb, filename);
-        triggerNotification(`📊 File Excel Rekap Ronde berhasil diunduh: ${filename}`);
+        triggerNotification(
+            includeSystemAndStatus
+                ? `📊 File Excel Rekap Ronde (Internal) berhasil diunduh: ${filename}`
+                : `🔒 File Excel Rekap Ronde (Format Vendor - Tanpa Qty Sistem & Status) berhasil diunduh: ${filename}`
+        );
     };
 
     // FITUR EXPORT HASIL HITUNGAN AKTUAL FISIK PER RONDE (R1 / R2 / R3)
@@ -2456,9 +2507,10 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
         const cleanDateStr = new Date().toISOString().slice(0, 10);
         const cleanProjCode = (project?.sessionCode || 'SO').replace(/[^a-zA-Z0-9-]/g, '_');
+        const vendorTag = includeSystemAndStatus ? '_INTERNAL' : '_VENDOR';
         const filename = selectedCounter
-            ? `Hasil_Hitung_R${roundNumber}_${selectedCounter.toUpperCase()}_${cleanProjCode}_${cleanDateStr}.xlsx`
-            : `Hasil_Hitung_R${roundNumber}_SEMUA_COUNTER_${cleanProjCode}_${cleanDateStr}.xlsx`;
+            ? `Hasil_Hitung_R${roundNumber}_${selectedCounter.toUpperCase()}${vendorTag}_${cleanProjCode}_${cleanDateStr}.xlsx`
+            : `Hasil_Hitung_R${roundNumber}_SEMUA_COUNTER${vendorTag}_${cleanProjCode}_${cleanDateStr}.xlsx`;
 
         XLSX.writeFile(wb, filename);
         triggerNotification(
@@ -6892,14 +6944,63 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                                                             </div>
 
                                                                                             {/* EXCEL HASIL HITUNGAN AKTUAL FISIK PER RONDE (R1, R2, R3) */}
-                                                                                            <div className="p-2.5 bg-emerald-50/60 border border-emerald-200/80 rounded-2xl space-y-1.5">
+                                                                                            {/* EXCEL HASIL HITUNGAN AKTUAL FISIK PER RONDE (R1, R2, R3) */}
+                                                                                            <div className="p-2.5 bg-emerald-50/60 border border-emerald-200/80 rounded-2xl space-y-2">
                                                                                                 <div className="flex items-center justify-between px-1">
                                                                                                     <span className="text-[10px] font-black text-emerald-800 uppercase tracking-wider flex items-center gap-1.5">
                                                                                                         <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
                                                                                                         <span>Excel Hasil Hitung</span>
                                                                                                     </span>
-                                                                                                    <span className="text-[9px] font-mono font-bold text-emerald-700 bg-emerald-100/60 px-1 rounded border border-emerald-300/80">.xlsx</span>
+                                                                                                    
+                                                                                                    {/* Segmented Switch: 3rd Party vs Internal */}
+                                                                                                    <div className="inline-flex rounded-lg p-0.5 bg-white border border-emerald-200 shadow-2xs">
+                                                                                                        <button
+                                                                                                            type="button"
+                                                                                                            onClick={(e) => {
+                                                                                                                e.stopPropagation();
+                                                                                                                setExportIncludeSystemQty(false);
+                                                                                                            }}
+                                                                                                            className={`px-2 py-0.5 text-[9px] font-black rounded-md transition-all cursor-pointer ${
+                                                                                                                !exportIncludeSystemQty
+                                                                                                                    ? 'bg-emerald-600 text-white shadow-2xs'
+                                                                                                                    : 'text-slate-600 hover:text-emerald-700 hover:bg-slate-50'
+                                                                                                            }`}
+                                                                                                            title="Format 3rd Party Vendor: Qty Sistem, Selisih, dan Status DIHAPUS (Blind Count)"
+                                                                                                        >
+                                                                                                            🔒 3rd Party
+                                                                                                        </button>
+                                                                                                        <button
+                                                                                                            type="button"
+                                                                                                            onClick={(e) => {
+                                                                                                                e.stopPropagation();
+                                                                                                                setExportIncludeSystemQty(true);
+                                                                                                            }}
+                                                                                                            className={`px-2 py-0.5 text-[9px] font-black rounded-md transition-all cursor-pointer ${
+                                                                                                                exportIncludeSystemQty
+                                                                                                                    ? 'bg-amber-600 text-white shadow-2xs'
+                                                                                                                    : 'text-slate-600 hover:text-amber-700 hover:bg-slate-50'
+                                                                                                            }`}
+                                                                                                            title="Mode Internal: Lengkap dengan Qty Sistem (WMS), Selisih, dan Status"
+                                                                                                        >
+                                                                                                            📊 Internal
+                                                                                                        </button>
+                                                                                                    </div>
                                                                                                 </div>
+
+                                                                                                <div className="px-1 text-[9.5px] leading-tight">
+                                                                                                    {!exportIncludeSystemQty ? (
+                                                                                                        <span className="text-emerald-700 font-bold flex items-center gap-1">
+                                                                                                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></span>
+                                                                                                            <span>Format 3rd Party: Qty Sistem & Status disembunyikan (Aman untuk Vendor)</span>
+                                                                                                        </span>
+                                                                                                    ) : (
+                                                                                                        <span className="text-amber-800 font-bold flex items-center gap-1">
+                                                                                                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0"></span>
+                                                                                                            <span>Mode Internal: Qty Sistem & Selisih disertakan</span>
+                                                                                                        </span>
+                                                                                                    )}
+                                                                                                </div>
+
                                                                                                 <div className="grid grid-cols-3 gap-1">
                                                                                                     {[1, 2, 3].map(rnd => (
                                                                                                         <button
@@ -6908,14 +7009,14 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                                                                             onClick={(e) => {
                                                                                                                 e.stopPropagation();
                                                                                                                 setMenuAnchor(null);
-                                                                                                                handleExportSingleRoundResultsXLSX(cName, rnd);
+                                                                                                                handleExportSingleRoundResultsXLSX(cName, rnd, exportIncludeSystemQty);
                                                                                                             }}
                                                                                                             className={`py-1.5 px-1.5 rounded-lg text-xs font-black flex items-center justify-center gap-1 transition-all cursor-pointer ${
                                                                                                                 rnd === cMaxRound 
                                                                                                                     ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-2xs font-black' 
                                                                                                                     : 'bg-white hover:bg-slate-200 text-slate-700 border border-slate-200 font-bold'
                                                                                                             }`}
-                                                                                                            title={`Download File Excel Hasil Hitungan Fisik Ronde ${rnd} (${cName})`}
+                                                                                                            title={`Download File Excel Hasil Hitungan Fisik Ronde ${rnd} (${cName}) - ${exportIncludeSystemQty ? 'Mode Internal' : 'Format 3rd Party Vendor'}`}
                                                                                                         >
                                                                                                             <span>Hasil R{rnd}</span>
                                                                                                             {rnd === cMaxRound && <span className="w-1.5 h-1.5 rounded-full bg-slate-950"></span>}
@@ -6929,7 +7030,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                                                                 onClick={(e) => {
                                                                                                     e.stopPropagation();
                                                                                                     setMenuAnchor(null);
-                                                                                                    handleExportRoundsComparisonXLSX(cName);
+                                                                                                    handleExportRoundsComparisonXLSX(cName, exportIncludeSystemQty);
                                                                                                 }}
                                                                                                 className="w-full text-left px-3 py-2 rounded-xl text-xs font-bold flex items-center space-x-2.5 hover:bg-emerald-50 text-slate-700 hover:text-emerald-800 transition-all cursor-pointer"
                                                                                             >
@@ -6938,7 +7039,9 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                                                                 </div>
                                                                                                 <div className="flex-1 min-w-0">
                                                                                                     <div className="text-xs font-bold leading-tight">Rekap Komparasi R1-R3 ({cName})</div>
-                                                                                                    <div className="text-[10px] text-slate-400 font-normal">Hasil hitung R1, R2, R3 lengkap .xlsx</div>
+                                                                                                    <div className="text-[10px] text-slate-400 font-normal">
+                                                                                                        {!exportIncludeSystemQty ? 'Format 3rd Party Vendor (Blind) .xlsx' : 'Hasil hitung R1, R2, R3 internal lengkap .xlsx'}
+                                                                                                    </div>
                                                                                                 </div>
                                                                                             </button>
 
