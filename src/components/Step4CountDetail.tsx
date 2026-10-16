@@ -10,8 +10,8 @@ import { compressImage } from '../utils/imageCompressor';
 import { playScanSuccessBeep, playErrorBuzzer, triggerHapticFeedback } from '../utils/soundAndHaptics';
 import { 
   ChevronLeft, LogOut, Users, MapPin, Calendar, Minus, Plus, ChevronDown, 
-  ChevronUp, Camera, Scan, PlusCircle, Trash2, Loader2, CheckCircle2, Lock,
-  Edit2, Calculator, Zap, Sparkles 
+  Camera, Scan, PlusCircle, Trash2, Loader2, CheckCircle2, Lock,
+  Calculator, Zap, Sparkles 
 } from 'lucide-react';
 
 interface Step4CountDetailProps {
@@ -80,6 +80,17 @@ export const formatBadRemarks = (
   return `[BAD STOCK] ${parts.join(', ')}`;
 };
 
+// HELPER SNAP ANGKA UNTUK MENCEGAH FLOATING POINT ARTIFACT (misal 4.992 / 4.99 -> 5)
+export const snapQty = (val: number): number => {
+  if (isNaN(val) || !isFinite(val)) return 0;
+  const nearestInt = Math.round(val);
+  // Toleransi 0.02 untuk auto-snap rounding error (misal 4.99 / 5.01) ke integer bulat
+  if (Math.abs(val - nearestInt) < 0.02) {
+    return nearestInt;
+  }
+  return Math.round((val + Number.EPSILON) * 1000) / 1000;
+};
+
 // HELPER KONVERSI DARI INPUT COUNTER KE SATUAN SISTEM
 export const convertToSystemQty = (
   inputQty: number,
@@ -93,15 +104,15 @@ export const convertToSystemQty = (
   const sysU = (systemUom || 'PCS').toUpperCase();
 
   if (inU === sysU) {
-    return { finalQty: inputQty };
+    return { finalQty: snapQty(inputQty) };
   }
 
   // Jika sistem KARTON, counter input PCS (eceran)
   if (sysU === 'CARTON' && inU === 'PCS') {
     const rawVal = inputQty / ratio;
-    const rounded = Math.round(rawVal * 100) / 100;
+    const rounded = snapQty(rawVal);
     const intact = Math.floor(inputQty / ratio);
-    const leftover = Math.round((inputQty % ratio) * 100) / 100;
+    const leftover = snapQty(inputQty % ratio);
     const formula = leftover > 0 ? `${intact} Ctn + ${leftover} Pcs` : `${intact} Ctn`;
     return { finalQty: rounded, displayFormula: formula };
   }
@@ -109,11 +120,11 @@ export const convertToSystemQty = (
   // Jika sistem PCS, counter input KARTON
   if (sysU === 'PCS' && inU === 'CARTON') {
     const rawVal = inputQty * ratio;
-    const rounded = Math.round(rawVal * 100) / 100;
+    const rounded = snapQty(rawVal);
     return { finalQty: rounded, displayFormula: `${inputQty} Ctn × ${ratio} Pcs` };
   }
 
-  return { finalQty: inputQty };
+  return { finalQty: snapQty(inputQty) };
 };
 
 // HELPER SANITASI FORMAT TANGGAL DISPLAY (DD/MM/YYYY)
@@ -159,6 +170,9 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     systemUom: string;
     selectedUom: 'PCS' | 'CARTON';
     tempValue: string;
+    actionType: 'KEEP_NUMBER' | 'CONVERT_VALUE';
+    currentValGood: string;
+    currentValBad: string;
   }>({
     isOpen: false,
     skuIndex: null,
@@ -166,7 +180,10 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     skuName: '',
     systemUom: 'PCS',
     selectedUom: 'CARTON',
-    tempValue: '24'
+    tempValue: '24',
+    actionType: 'KEEP_NUMBER',
+    currentValGood: '',
+    currentValBad: ''
   });
 
   // STATE KALKULATOR CAMPURAN (KARTON + PCS) PER SKU
@@ -498,8 +515,8 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
               pcsPerCarton: itemPcsRatio,
               inputUom: itemInputUom,
               totalSystemQty: sysQty,
-              qtyGood: existingLocal ? existingLocal.qtyGood : (!isNaN(numGoodQty) ? numGoodQty.toString() : (hasActQty ? numActQty.toString() : "")),
-              qtyBad: existingLocal ? existingLocal.qtyBad : (!isNaN(numBadQty) && numBadQty > 0 ? numBadQty.toString() : ""),
+              qtyGood: existingLocal ? (existingLocal.qtyGood ? snapQty(parseFloat(existingLocal.qtyGood) || 0).toString() : "") : (!isNaN(numGoodQty) ? snapQty(numGoodQty).toString() : (hasActQty ? snapQty(numActQty).toString() : "")),
+              qtyBad: existingLocal ? (existingLocal.qtyBad ? snapQty(parseFloat(existingLocal.qtyBad) || 0).toString() : "") : (!isNaN(numBadQty) && numBadQty > 0 ? snapQty(numBadQty).toString() : ""),
               expDateSystem: edSys,
               expDateActual: existingLocal ? existingLocal.expDateActual : (data.expDateActual || data.expiredDateActual || edSys || ''),
               isBadStock: existingLocal ? existingLocal.isBadStock : ((!isNaN(numBadQty) && numBadQty > 0) || !!data.badRemarks),
@@ -691,12 +708,12 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
         if (idx === index) {
           if (type === 'good') {
             const current = parseFloat(item.qtyGood || "0");
-            const nextVal = Math.max(0, Math.round((current + delta) * 1000) / 1000);
+            const nextVal = Math.max(0, snapQty(current + delta));
             return { ...item, qtyGood: nextVal === 0 ? "" : nextVal.toString() };
           }
           if (type === 'bad') {
             const current = parseFloat(item.qtyBad || "0");
-            const nextVal = Math.max(0, Math.round((current + delta) * 1000) / 1000);
+            const nextVal = Math.max(0, snapQty(current + delta));
             return { ...item, qtyBad: nextVal === 0 ? "" : nextVal.toString() };
           }
         }
@@ -980,13 +997,13 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       const num = parseFloat(valStr);
       if (isNaN(num)) return valStr;
       if (sysUom === 'PCS' && oldUom === 'CARTON') {
-        const res = Math.round(num * pcsRatio * 100) / 100;
+        const res = snapQty(num * pcsRatio);
         return res.toString();
       } else if (sysUom === 'CARTON' && oldUom === 'PCS') {
-        const res = Math.round((num / pcsRatio) * 1000) / 1000;
+        const res = snapQty(num / pcsRatio);
         return res.toString();
       }
-      return valStr;
+      return snapQty(num).toString();
     };
 
     setIsDirty(true);
@@ -1014,7 +1031,10 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       skuName: item.name,
       systemUom: item.uom,
       selectedUom: initialTargetUom,
-      tempValue: defaultRatio > 1 ? defaultRatio.toString() : '24'
+      tempValue: defaultRatio > 1 ? defaultRatio.toString() : '24',
+      actionType: 'KEEP_NUMBER',
+      currentValGood: item.qtyGood,
+      currentValBad: item.qtyBad
     });
   };
 
@@ -1039,19 +1059,27 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       const oldUom = item.inputUom || item.uom;
 
       const convertValue = (valStr: string) => {
-        if (!valStr || valStr === '0') return valStr;
+        if (!valStr || valStr === '0' || valStr === '') return valStr;
         const num = parseFloat(valStr);
         if (isNaN(num)) return valStr;
+
+        // Default 'KEEP_NUMBER': angka yang diketik dipertahankan sebagai satuan fisik baru
+        // Misal user ketik 5, sekarang menjadi 5 KARTON (otomatis tersimpan sebagai 120 PCS di sistem)
+        if (conversionModal.actionType === 'KEEP_NUMBER' || oldUom === newTargetUom) {
+          return snapQty(num).toString();
+        }
+
+        // Mode 'CONVERT_VALUE': konversi matematis
         if (newTargetUom === 'PCS' && oldUom === 'CARTON') {
           // Karton -> PCS
-          const res = Math.round(num * appliedRatio * 100) / 100;
+          const res = snapQty(num * appliedRatio);
           return res.toString();
         } else if (newTargetUom === 'CARTON' && oldUom === 'PCS') {
           // PCS -> Karton
-          const res = Math.round((num / appliedRatio) * 1000) / 1000;
+          const res = snapQty(num / appliedRatio);
           return res.toString();
         }
-        return valStr;
+        return snapQty(num).toString();
       };
 
       return {
@@ -1646,9 +1674,9 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
               .map((sku, originalIndex) => ({ sku, originalIndex }))
               .filter(({ sku }) => {
                 if (expandedSku === sku.sku) return true;
-                const numGood = parseInt(sku.qtyGood || "0", 10);
-                const numBad = parseInt(sku.qtyBad || "0", 10);
-                const totalCounted = numGood + numBad;
+                const numGood = parseFloat(sku.qtyGood || "0") || 0;
+                const numBad = parseFloat(sku.qtyBad || "0") || 0;
+                const totalCounted = snapQty(numGood + numBad);
                 const hasInputValue = sku.qtyGood !== "" || sku.qtyBad !== "";
                 const isCounted = sku.isCounted || (hasInputValue && totalCounted > 0);
                 return !isCounted;
@@ -1658,34 +1686,38 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
               .map((sku, originalIndex) => ({ sku, originalIndex }))
               .filter(({ sku }) => {
                 if (expandedSku === sku.sku) return false;
-                const numGood = parseInt(sku.qtyGood || "0", 10);
-                const numBad = parseInt(sku.qtyBad || "0", 10);
-                const totalCounted = numGood + numBad;
+                const numGood = parseFloat(sku.qtyGood || "0") || 0;
+                const numBad = parseFloat(sku.qtyBad || "0") || 0;
+                const totalCounted = snapQty(numGood + numBad);
                 const hasInputValue = sku.qtyGood !== "" || sku.qtyBad !== "";
                 const isCounted = sku.isCounted || (hasInputValue && totalCounted > 0);
                 return isCounted;
               });
 
-            const renderCard = (currentSku: GroupedSKUItem, idx: number) => {
-              const isExpanded = expandedSku === currentSku.sku;
-              const numGood = parseInt(currentSku.qtyGood || "0", 10);
-              const numBad = parseInt(currentSku.qtyBad || "0", 10);
-              const totalCounted = numGood + numBad;
+            const renderCard = (currentSku: GroupedSKUItem) => {
+              const numGood = parseFloat(currentSku.qtyGood || "0") || 0;
+              const numBad = parseFloat(currentSku.qtyBad || "0") || 0;
+              const totalRawCounted = snapQty(numGood + numBad);
               const hasInputValue = currentSku.qtyGood !== "" || currentSku.qtyBad !== "";
-              const isCounted = currentSku.isCounted || (hasInputValue && totalCounted > 0);
+              const isCounted = currentSku.isCounted || (hasInputValue && totalRawCounted > 0);
+
+              const inputUnit = currentSku.inputUom || currentSku.uom;
+              const sysUnit = currentSku.uom;
+              const pcsRatio = currentSku.pcsPerCarton || (sysUnit === 'CARTON' ? 24 : 1);
+              const converted = convertToSystemQty(totalRawCounted, inputUnit, sysUnit, pcsRatio);
+              const systemConvertedQty = snapQty(converted.finalQty);
 
               return (
               <div
                 key={currentSku.sku}
                 id={`sku-card-${currentSku.sku}`}
-                className={`bg-white rounded-2xl shadow-xs border transition-all overflow-hidden ${
-                  isExpanded
-                    ? 'border-cyan-400 ring-2 ring-cyan-400/20 shadow-md'
-                    : isCounted
-                      ? 'border-emerald-300 bg-emerald-50/15'
-                      : currentSku.isUnmappedFound
-                        ? 'border-amber-300 bg-amber-50/15'
-                        : 'border-slate-200 hover:border-slate-300'
+                onClick={() => setExpandedSku(currentSku.sku)}
+                className={`bg-white rounded-2xl shadow-xs border transition-all overflow-hidden cursor-pointer select-none active:scale-[0.99] ${
+                  isCounted
+                    ? 'border-emerald-300 bg-emerald-50/15 hover:border-emerald-400'
+                    : currentSku.isUnmappedFound
+                      ? 'border-amber-300 bg-amber-50/15 hover:border-amber-400'
+                      : 'border-slate-200 hover:border-cyan-300 hover:shadow-sm'
                 }`}
               >
                 {/* ACCENT LINE TOP */}
@@ -1694,16 +1726,11 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                     ? 'bg-amber-500'
                     : isCounted
                       ? 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.4)]'
-                      : isExpanded
-                        ? 'bg-cyan-400'
-                        : 'bg-slate-200'
+                      : 'bg-slate-200'
                 }`} />
 
-                {/* ACCORDION HEADER (SELALU KELIHATAN & RINGKAS) */}
-                <div
-                  onClick={() => setExpandedSku(isExpanded ? null : currentSku.sku)}
-                  className="p-3.5 cursor-pointer flex items-center justify-between gap-3 select-none hover:bg-slate-50/80 transition-colors"
-                >
+                {/* COMPACT & CLEAN CARD ROW */}
+                <div className="p-3.5 flex items-center justify-between gap-3 select-none hover:bg-slate-50/80 transition-colors">
                   <div className="flex items-start gap-2.5 min-w-0 flex-1">
                     <div className={`mt-0.5 w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${
                       isCounted
@@ -1731,21 +1758,11 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                         <span className="text-xs font-bold uppercase bg-cyan-50 text-cyan-800 border border-cyan-200 px-2 py-0.5 rounded-md">
                           {currentSku.uom}
                         </span>
-                        {/* HANYA MUNCULKAN BADGE KONVERSI JIKA AKTIF / BERBEDA DARI SISTEM ATAU SISTEMNYA KARTON */}
+                        {/* BADGE KONVERSI JIKA AKTIF / BERBEDA DARI SISTEM ATAU SISTEMNYA KARTON */}
                         {((currentSku.inputUom && currentSku.inputUom !== currentSku.uom) || (currentSku.uom === 'CARTON' && currentSku.pcsPerCarton > 1)) && (
-                          <button
-                            type="button"
-                            disabled={isSessionLocked}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              openConversionModal(idx);
-                            }}
-                            className="text-[10px] font-mono font-bold bg-amber-100 hover:bg-amber-200 text-amber-950 border border-amber-300 px-2 py-0.5 rounded-md flex items-center gap-1 cursor-pointer transition-colors shadow-2xs"
-                            title="Klik untuk setting rasio / isi per karton"
-                          >
-                            <span>📦 1 Ctn = {currentSku.pcsPerCarton || 24} Pcs</span>
-                            <Edit2 className="w-2.5 h-2.5 text-amber-700" />
-                          </button>
+                          <span className="text-[10px] font-mono font-bold bg-amber-100 text-amber-950 border border-amber-300 px-2 py-0.5 rounded-md">
+                            📦 1 Ctn = {currentSku.pcsPerCarton || 24} Pcs
+                          </span>
                         )}
                       </div>
                       <h3 className="font-headline-sm text-slate-900 font-bold text-xs sm:text-sm leading-snug line-clamp-2">
@@ -1754,488 +1771,35 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                       <p className="text-[11px] text-slate-500 font-medium truncate">
                         {currentSku.category}
                       </p>
-
-                      {/* BADGE UPC 1 & UPC 2 JELAS (TIDAK TERPOTONG) */}
-                      <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
-                        {currentSku.upc && currentSku.upc !== 'N/A' && currentSku.upc !== '-' && (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-100 text-slate-800 font-mono text-[10px] sm:text-[11px] font-bold border border-slate-200 shadow-2xs">
-                            <span className="text-[9px] text-slate-500 font-semibold uppercase">UPC:</span>
-                            <span className="select-all tracking-wide">{currentSku.upc}</span>
-                          </span>
-                        )}
-                        {currentSku.upc2 && currentSku.upc2 !== '-' && (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-purple-50 text-purple-900 font-mono text-[10px] sm:text-[11px] font-bold border border-purple-200 shadow-2xs">
-                            <span className="text-[9px] text-purple-600 font-semibold uppercase">UPC 2 (Kardus):</span>
-                            <span className="select-all tracking-wide">{currentSku.upc2}</span>
-                          </span>
-                        )}
-                      </div>
                     </div>
                   </div>
 
                   <div className="flex items-center gap-2 shrink-0">
                     {isCounted ? (
                       <div className="text-right">
-                        <span className="px-2.5 py-1 bg-emerald-100 border border-emerald-300 text-emerald-900 text-xs font-black rounded-lg inline-flex items-center gap-1">
-                          <span>✓ {totalCounted}</span>
-                          <span className="text-[11px] font-extrabold uppercase">{currentSku.uom}</span>
+                        <span className="px-2.5 py-1 bg-emerald-100 border border-emerald-300 text-emerald-900 text-xs font-black rounded-lg inline-flex items-center gap-1 shadow-2xs">
+                          <span>✓ {systemConvertedQty}</span>
+                          <span className="text-[11px] font-extrabold uppercase">{sysUnit}</span>
                         </span>
+                        {inputUnit !== sysUnit && (
+                          <span className="block text-[10px] font-bold text-cyan-800 mt-0.5 font-mono">
+                            (Fisik: {totalRawCounted} {inputUnit})
+                          </span>
+                        )}
                         {numBad > 0 && (
                           <span className="block text-[9px] font-bold text-amber-700 mt-0.5">
-                            ⚠️ {numBad} {t('damagedSummary')}
+                            ⚠️ {snapQty(numBad)} {t('damagedSummary')}
                           </span>
                         )}
                       </div>
                     ) : (
-                      <span className="px-2 py-1 bg-slate-100 text-slate-500 text-[10px] font-bold rounded-lg border border-slate-200">
-                        {t('notCountedYet')}
+                      <span className="px-2.5 py-1.5 bg-cyan-50 hover:bg-cyan-100 border border-cyan-200 text-cyan-800 text-[11px] font-black rounded-xl flex items-center gap-1 transition-colors">
+                        <span>Hitung</span>
+                        <span>➔</span>
                       </span>
                     )}
-
-                    <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${isExpanded ? 'rotate-180 text-cyan-600' : ''}`} />
                   </div>
                 </div>
-
-                {/* EXPANDED CONTENT: FORM HITUNG HANYA MUNCUL SAAT DI-KLIK */}
-                {isExpanded && (
-                  <div className="px-3.5 pb-3.5 pt-1 space-y-3.5 border-t border-slate-100 animate-in fade-in duration-150">
-                    {/* DETAIL KODE BARCODE & UPC */}
-                    <div className="bg-slate-50/90 border border-slate-200 p-2.5 rounded-xl flex flex-wrap items-center gap-2 text-xs">
-                      <div className="flex-1 min-w-36 bg-white p-2 rounded-lg border border-slate-200 shadow-2xs">
-                        <div className="text-[9px] text-slate-500 font-extrabold uppercase tracking-wider mb-0.5 flex items-center justify-between">
-                          <span>{t('upc1Label')}</span>
-                          <span className="text-[8px] bg-slate-100 px-1 py-0.2 rounded text-slate-500 font-medium">{t('barcodeScanHelper')}</span>
-                        </div>
-                        <div className="font-mono text-xs font-black text-slate-900 select-all break-all">
-                          {currentSku.upc && currentSku.upc !== 'N/A' && currentSku.upc !== '-' ? currentSku.upc : '-'}
-                        </div>
-                      </div>
-
-                      {currentSku.upc2 && currentSku.upc2 !== '-' && (
-                        <div className="flex-1 min-w-36 bg-purple-50/50 p-2 rounded-lg border border-purple-200 shadow-2xs">
-                          <div className="text-[9px] text-purple-700 font-extrabold uppercase tracking-wider mb-0.5 flex items-center justify-between">
-                            <span>{t('upc2Label')}</span>
-                            <span className="text-[8px] bg-purple-100 px-1 py-0.2 rounded text-purple-700 font-medium">{t('barcodeScanHelper')}</span>
-                          </div>
-                          <div className="font-mono text-xs font-black text-purple-950 select-all break-all">
-                            {currentSku.upc2}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* EXPIRED DATE FEFO DENGAN FORMAT DD/MM/YYYY */}
-                    <div className="bg-cyan-50/60 border border-cyan-200 p-space-sm rounded-xl space-y-2">
-                      <div className="flex justify-between items-center gap-2 flex-wrap">
-                        <span className="font-label-sm text-cyan-950 font-bold flex items-center gap-1.5">
-                          <Calendar className="w-3.5 h-3.5 text-cyan-700" />
-                          <span>{t('expDateSystemLabel')}</span>
-                        </span>
-
-                        <div className="flex items-center gap-1.5">
-                          {currentSku.expDateActual && currentSku.expDateSystem && currentSku.expDateActual === currentSku.expDateSystem ? (
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
-                              ✓ Sesuai Sistem
-                            </span>
-                          ) : currentSku.expDateActual && currentSku.expDateSystem && currentSku.expDateActual !== currentSku.expDateSystem ? (
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
-                              ⚠️ Beda Batch
-                            </span>
-                          ) : null}
-
-                          {currentSku.expDateSystem && currentSku.expDateActual !== currentSku.expDateSystem && (
-                            <button
-                              type="button"
-                              disabled={isSessionLocked}
-                              onClick={() => handleSetSameExpAsSystem(idx)}
-                              className={`px-2 py-0.5 text-white rounded-lg text-[10px] font-bold cursor-pointer ${isSessionLocked ? 'bg-slate-400 opacity-50 cursor-not-allowed' : 'bg-cyan-600 hover:bg-cyan-500 active:scale-95'}`}
-                              title="Reset sama dengan sistem"
-                            >
-                              Reset
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2 text-xs">
-                        <div>
-                          <label className="text-[10px] text-slate-500 font-bold block uppercase mb-0.5">{t('nearestSystemEd')}</label>
-                          <input type="text" readOnly value={formatDateDisplay(currentSku.expDateSystem)} className="w-full p-2 bg-white/80 border border-slate-200 rounded-lg text-slate-600 font-mono text-xs font-bold outline-none" />
-                        </div>
-                        <div>
-                          <label className="text-[10px] text-cyan-800 font-bold block uppercase mb-0.5">{t('actualEdLabel')}</label>
-                          <input
-                            type="date"
-                            disabled={isSessionLocked}
-                            value={currentSku.expDateActual || ''}
-                            onChange={(e) => updateItemField(idx, 'expDateActual', e.target.value)}
-                            className={`w-full p-1.5 border-2 rounded-lg text-slate-900 font-mono text-xs font-bold outline-none shadow-xs ${isSessionLocked ? 'bg-slate-100 border-slate-300 opacity-60' : 'bg-white border-cyan-400'}`}
-                          />
-                        </div>
-                      </div>
-
-                      {currentSku.allSystemEds.length > 0 && (
-                        <div className="pt-2 border-t border-cyan-200/60 space-y-1">
-                          <span className="text-[10px] font-bold text-slate-600 block">
-                            Variasi ED System di Rak Ini ({currentSku.batchCount} Batch):
-                          </span>
-                          <div className="flex flex-wrap gap-1.5">
-                            {currentSku.allSystemEds.map((edDate, edIdx) => (
-                              <span key={edIdx} className="px-2 py-0.5 bg-white border border-cyan-300 text-cyan-900 font-mono text-[10px] font-bold rounded-md shadow-xs flex items-center gap-1">
-                                <span>📅</span>
-                                <span>{formatDateDisplay(edDate)}</span>
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* TRIGGER / STATUS: APAKAH BARANG FISIK SESUAI SATUAN HITUNG SISTEM */}
-                    {(currentSku.inputUom || currentSku.uom) === currentSku.uom ? (
-                      <div className="pt-0.5">
-                        <button
-                          type="button"
-                          disabled={isSessionLocked}
-                          onClick={() => openConversionModal(idx)}
-                          className="w-full py-2 px-3 bg-slate-50 hover:bg-amber-50/80 text-slate-600 hover:text-amber-900 border border-dashed border-slate-300 hover:border-amber-300 rounded-xl text-xs font-semibold flex items-center justify-between transition-all cursor-pointer shadow-2xs group"
-                        >
-                          <span className="flex items-center gap-1.5">
-                            <span className="text-amber-600 font-bold">⚠️</span>
-                            <span className="text-slate-700 group-hover:text-amber-950 font-bold">Barang fisik tidak sesuai satuan hitung?</span>
-                          </span>
-                          <span className="text-[11px] text-cyan-700 font-bold group-hover:underline flex items-center gap-1">
-                            <span>Atur Dus / Satuan</span>
-                            <span>→</span>
-                          </span>
-                        </button>
-                      </div>
-                    ) : (
-                      /* KONDISI AKTIF: JIKA COUNTER SUDAH MEMILIH SATUAN LAIN / DUS */
-                      <div className="bg-amber-50/90 border border-amber-300 p-2.5 rounded-xl space-y-2 shadow-xs">
-                        <div className="flex items-center justify-between gap-1 flex-wrap">
-                          <div className="flex items-center gap-2">
-                            <span className="text-lg">📦</span>
-                            <div>
-                              <div className="font-extrabold text-xs text-amber-950 flex items-center gap-1.5">
-                                <span>Fisik Dihitung: {currentSku.inputUom || currentSku.uom}</span>
-                                <span className="px-1.5 py-0.2 bg-amber-200 text-amber-900 rounded font-mono text-[10px]">
-                                  1 Ctn = {currentSku.pcsPerCarton || 24} Pcs
-                                </span>
-                              </div>
-                              <div className="text-[10px] text-amber-800">
-                                Otomatis dikonversi ke sistem ({currentSku.uom})
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-1">
-                            <button
-                              type="button"
-                              disabled={isSessionLocked}
-                              onClick={() => openConversionModal(idx)}
-                              className="px-2.5 py-1 bg-amber-200 hover:bg-amber-300 text-amber-950 font-bold rounded-lg text-xs cursor-pointer shadow-2xs"
-                            >
-                              Ubah
-                            </button>
-                            <button
-                              type="button"
-                              disabled={isSessionLocked}
-                              onClick={() => handleResetToSystemUom(idx)}
-                              className="px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-700 font-bold rounded-lg text-xs border border-slate-300 cursor-pointer shadow-2xs"
-                              title="Kembalikan ke satuan default sistem"
-                            >
-                              Reset
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* TOMBOL KALKULATOR CAMPURAN (DUS UTUH + ECERAN) */}
-                        <button
-                          type="button"
-                          disabled={isSessionLocked}
-                          onClick={() => toggleMixedCalc(currentSku.sku)}
-                          className="w-full py-1.5 px-2 bg-white hover:bg-amber-100/50 border border-amber-300 text-amber-900 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors shadow-2xs"
-                        >
-                          <Calculator className="w-3.5 h-3.5 text-amber-700" />
-                          <span>{mixedCalc[currentSku.sku]?.isOpen ? 'Tutup Kalkulator Dus + Pcs' : '🧮 Hitung Campuran: Dus Utuh + Eceran Pcs'}</span>
-                        </button>
-
-                        {/* PANEL KALKULATOR CAMPURAN JIKA DIAKTIFKAN */}
-                        {mixedCalc[currentSku.sku]?.isOpen && (
-                          <div className="bg-white border-2 border-amber-400 p-2.5 rounded-xl space-y-2 animate-in fade-in shadow-xs">
-                            <div className="text-[11px] font-bold text-amber-950 flex items-center justify-between">
-                              <span className="flex items-center gap-1">
-                                <Sparkles className="w-3 h-3 text-amber-600" />
-                                <span>Kalkulator Dus + Eceran Pcs</span>
-                              </span>
-                              <span className="text-[10px] text-slate-500 font-mono">1 Ctn = {currentSku.pcsPerCarton || (currentSku.uom === 'CARTON' ? 24 : 1)} Pcs</span>
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-2">
-                              <div>
-                                <label className="text-[10px] font-bold text-slate-600 block uppercase mb-0.5">Dus Utuh (Ctn)</label>
-                                <input
-                                  type="number"
-                                  min="0"
-                                  step="1"
-                                  placeholder="0"
-                                  value={mixedCalc[currentSku.sku]?.cartons || ''}
-                                  onChange={(e) => updateMixedCalcValue(currentSku.sku, 'cartons', e.target.value)}
-                                  className="w-full p-1.5 border border-slate-300 rounded-lg text-center font-bold text-sm bg-white outline-none"
-                                />
-                              </div>
-                              <div>
-                                <label className="text-[10px] font-bold text-slate-600 block uppercase mb-0.5">Eceran (Pcs)</label>
-                                <input
-                                  type="number"
-                                  min="0"
-                                  step="1"
-                                  placeholder="0"
-                                  value={mixedCalc[currentSku.sku]?.loosePcs || ''}
-                                  onChange={(e) => updateMixedCalcValue(currentSku.sku, 'loosePcs', e.target.value)}
-                                  className="w-full p-1.5 border border-slate-300 rounded-lg text-center font-bold text-sm bg-white outline-none"
-                                />
-                              </div>
-                            </div>
-
-                            <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-100">
-                              <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-600">
-                                <span>Target:</span>
-                                <button
-                                  type="button"
-                                  onClick={() => updateMixedCalcValue(currentSku.sku, 'targetField', 'good')}
-                                  className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                    (mixedCalc[currentSku.sku]?.targetField || 'good') === 'good'
-                                      ? 'bg-cyan-500 text-slate-950'
-                                      : 'bg-slate-100 text-slate-600'
-                                  }`}
-                                >
-                                  Baik
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => updateMixedCalcValue(currentSku.sku, 'targetField', 'bad')}
-                                  className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                    mixedCalc[currentSku.sku]?.targetField === 'bad'
-                                      ? 'bg-amber-500 text-slate-950'
-                                      : 'bg-slate-100 text-slate-600'
-                                  }`}
-                                >
-                                  Rusak
-                                </button>
-                              </div>
-
-                              <button
-                                type="button"
-                                onClick={() => applyMixedCalc(idx)}
-                                className="px-3 py-1 bg-cyan-400 hover:bg-cyan-300 text-slate-950 rounded-lg font-black text-xs cursor-pointer shadow-xs active:scale-95 transition-all"
-                              >
-                                ✓ Terapkan
-                              </button>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {/* INPUT KONDISI BAIK (QTY GOOD) */}
-                    <div className="bg-slate-50 border border-slate-200 p-space-md rounded-xl space-y-space-sm">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-cyan-400"></span><span className="font-headline-sm text-slate-900 font-bold text-xs sm:text-sm">{t('goodConditionLabel')}</span></div>
-                        <span className="px-2 py-0.5 rounded-md bg-cyan-100 text-cyan-950 border border-cyan-300 font-black text-xs uppercase">{currentSku.inputUom || currentSku.uom}</span>
-                      </div>
-                      <div className="flex items-center gap-space-sm">
-                        <button type="button" disabled={isSessionLocked} onClick={() => adjustQty(idx, 'good', -1)} className={`w-14 h-14 bg-white border border-slate-300 text-slate-800 rounded-xl flex items-center justify-center text-xl shrink-0 cursor-pointer ${isSessionLocked ? 'opacity-50 cursor-not-allowed' : ''}`}><Minus className="w-5 h-5" /></button>
-                        <div className="flex-1 h-14 border-2 border-cyan-400 rounded-xl flex items-center justify-center bg-white">
-                          <input
-                            type="text"
-                            inputMode="decimal"
-                            disabled={isSessionLocked}
-                            value={currentSku.qtyGood}
-                            onChange={(e) => handleInputText(idx, 'qtyGood', e.target.value)}
-                            placeholder="0"
-                            className={`w-full text-center font-bold text-2xl outline-none ${isSessionLocked ? 'bg-slate-100 opacity-60' : 'bg-white'}`}
-                          />
-                        </div>
-                        <button type="button" disabled={isSessionLocked} onClick={() => adjustQty(idx, 'good', 1)} className={`w-14 h-14 rounded-xl flex items-center justify-center text-xl shrink-0 cursor-pointer transition-all ${isSessionLocked ? 'bg-slate-400 opacity-50 cursor-not-allowed text-white' : 'bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-black shadow-md active:scale-95'}`}><Plus className="w-5 h-5" /></button>
-                      </div>
-                    </div>
-
-                    {/* BAD STOCK DETECTED DENGAN RINCIAN QTY PER KATEGORI */}
-                    <div className="bg-amber-50/70 border border-amber-200 p-space-md rounded-xl space-y-space-sm">
-                      <div className="flex items-center justify-between">
-                        <span className="font-body-lg text-amber-900 font-bold">{t('badStockQuestion')}</span>
-                        <button
-                          type="button"
-                          disabled={isSessionLocked}
-                          onClick={() => toggleBadStock(idx)}
-                          className={`min-h-11 min-w-11 px-3 py-1 rounded-full text-xs font-bold cursor-pointer ${
-                            isSessionLocked ? 'opacity-50 cursor-not-allowed' : ''
-                          } ${currentSku.isBadStock ? 'bg-amber-500 text-slate-950 shadow-xs' : 'bg-slate-200 text-slate-600'}`}
-                        >
-                          {currentSku.isBadStock ? 'ON' : 'OFF'}
-                        </button>
-                      </div>
-
-                      {currentSku.isBadStock && (
-                        <div className="pt-2 space-y-3 border-t border-amber-200">
-                          {/* RINGKASAN TOTAL BAD QTY */}
-                          <div className="p-2.5 bg-amber-100/70 border border-amber-300 rounded-xl flex items-center justify-between">
-                            <div>
-                              <span className="text-[10px] font-bold uppercase text-amber-800 tracking-wider block">
-                                Total Qty Rusak / Bad Stock:
-                              </span>
-                              <span className="text-xl font-black text-amber-950 font-mono">
-                                {currentSku.qtyBad || '0'}{' '}
-                                <span className="text-xs font-bold uppercase">{currentSku.inputUom || currentSku.uom}</span>
-                              </span>
-                            </div>
-                            <span className="text-xs font-bold text-amber-900 bg-white/80 px-2 py-1 rounded-lg border border-amber-200">
-                              {Object.keys(currentSku.badBreakdown || {}).length} Kategori Dipilih
-                            </span>
-                          </div>
-
-                          {/* CHIP PILIH KATEGORI KERUSAKAN */}
-                          <div>
-                            <label className="text-xs font-bold text-amber-900 block mb-1.5">
-                              Pilih Kategori Kerusakan (Bisa lebih dari 1):
-                            </label>
-                            <div className="flex flex-wrap gap-1.5">
-                              {availableCategories.map((cat, cIdx) => {
-                                const isSelected = !!(currentSku.badBreakdown && currentSku.badBreakdown[cat] !== undefined);
-                                return (
-                                  <button
-                                    key={cIdx}
-                                    type="button"
-                                    disabled={isSessionLocked}
-                                    onClick={() => toggleBadCategory(idx, cat)}
-                                    className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer flex items-center gap-1.5 ${
-                                      isSelected
-                                        ? 'bg-amber-500 text-slate-950 border-amber-600 shadow-xs'
-                                        : 'bg-white text-slate-700 border-amber-200 hover:bg-amber-100/50'
-                                    }`}
-                                  >
-                                    <span>{isSelected ? '✓' : '+'}</span>
-                                    <span>{translateDamageCat(cat)}</span>
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          </div>
-
-                          {/* RINCIAN INPUT QTY PER KATEGORI YANG AKTIF */}
-                          {Object.keys(currentSku.badBreakdown || {}).length > 0 ? (
-                            <div className="space-y-2 pt-1">
-                              <span className="text-[11px] font-black text-amber-950 uppercase tracking-wider block">
-                                Rincian Qty Kerusakan per Kategori:
-                              </span>
-                              <div className="space-y-1.5">
-                                {Object.entries(currentSku.badBreakdown || {}).map(([catName, catQty]) => (
-                                  <div
-                                    key={catName}
-                                    className="p-2 bg-white border border-amber-300 rounded-xl flex items-center justify-between gap-2 shadow-2xs"
-                                  >
-                                    <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                                      <span className="text-amber-600 font-bold text-xs shrink-0">⚠️</span>
-                                      <span className="text-xs font-bold text-slate-800 truncate" title={catName}>
-                                        {catName}
-                                      </span>
-                                    </div>
-
-                                    <div className="flex items-center gap-1 shrink-0">
-                                      <button
-                                        type="button"
-                                        disabled={isSessionLocked}
-                                        onClick={() => adjustCategoryQty(idx, catName, -1)}
-                                        className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-black flex items-center justify-center text-sm cursor-pointer active:scale-95"
-                                      >
-                                        -
-                                      </button>
-                                      <input
-                                        type="text"
-                                        inputMode="decimal"
-                                        disabled={isSessionLocked}
-                                        value={catQty}
-                                        onChange={(e) => handleCategoryQtyChange(idx, catName, e.target.value)}
-                                        placeholder="0"
-                                        className="w-14 h-8 border border-amber-300 rounded-lg text-center font-black text-sm text-slate-900 bg-amber-50/40 outline-none"
-                                      />
-                                      <button
-                                        type="button"
-                                        disabled={isSessionLocked}
-                                        onClick={() => adjustCategoryQty(idx, catName, 1)}
-                                        className="w-8 h-8 rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 font-black flex items-center justify-center text-sm cursor-pointer active:scale-95"
-                                      >
-                                        +
-                                      </button>
-                                      <span className="text-[10px] font-bold text-slate-500 uppercase ml-0.5">
-                                        {currentSku.inputUom || currentSku.uom}
-                                      </span>
-                                      <button
-                                        type="button"
-                                        disabled={isSessionLocked}
-                                        onClick={() => removeBadCategory(idx, catName)}
-                                        className="ml-1 p-1 hover:bg-red-50 text-slate-400 hover:text-red-600 rounded-lg cursor-pointer transition-colors"
-                                        title="Hapus rincian kategori ini"
-                                      >
-                                        ✕
-                                      </button>
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          ) : (
-                            /* JIKA BELUM MEMILIH KATEGORI, COUNTER BISA INPUT TOTAL SECARA LANGSUNG */
-                            <div>
-                              <label className="text-[11px] font-bold text-amber-900 block mb-1">
-                                Atau Input Qty Rusak Langsung:
-                              </label>
-                              <input
-                                type="text"
-                                inputMode="decimal"
-                                disabled={isSessionLocked}
-                                value={currentSku.qtyBad}
-                                onChange={(e) => handleInputText(idx, 'qtyBad', e.target.value)}
-                                placeholder="0"
-                                className={`w-full p-2 border border-amber-300 rounded-lg text-center font-bold text-lg ${
-                                  isSessionLocked ? 'bg-slate-100 opacity-60' : 'bg-white'
-                                }`}
-                              />
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* LIVE CONVERSION BANNER JIKA INPUT BEDA DENGAN SISTEM UOM */}
-                    {(currentSku.inputUom || currentSku.uom) !== currentSku.uom && (
-                      <div className="p-2.5 bg-cyan-50 border border-cyan-300 rounded-xl flex items-center justify-between text-xs text-cyan-950 shadow-2xs">
-                        <div className="flex items-center gap-1.5">
-                          <Zap className="w-4 h-4 text-cyan-600 shrink-0" />
-                          <div>
-                            <div className="font-extrabold text-[11px] text-cyan-900">Konversi Otomatis ke Sistem:</div>
-                            <div className="text-[11px] text-cyan-700">
-                              Input <b className="font-mono text-cyan-950">{(parseFloat(currentSku.qtyGood || '0') + parseFloat(currentSku.qtyBad || '0')) || 0} {currentSku.inputUom || currentSku.uom}</b> ➔ Disimpan sebagai <b className="font-mono text-cyan-950">{convertToSystemQty((parseFloat(currentSku.qtyGood || '0') + parseFloat(currentSku.qtyBad || '0')) || 0, currentSku.inputUom || currentSku.uom, currentSku.uom, currentSku.pcsPerCarton || 24).finalQty} {currentSku.uom}</b>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* TOMBOL TUTUP CARD CEPAT */}
-                    <div className="pt-1 flex justify-end">
-                      <button
-                        type="button"
-                        onClick={() => setExpandedSku(null)}
-                        className="text-xs font-bold text-cyan-700 hover:text-cyan-800 flex items-center gap-1 cursor-pointer py-1.5 px-3 rounded-xl bg-cyan-50 hover:bg-cyan-100 transition-colors"
-                      >
-                        <span>{t('doneEditingThisItem')}</span>
-                        <ChevronUp className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-                )}
               </div>
             );
           };
@@ -2243,7 +1807,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
           return (
             <>
               {/* 1. KELOMPOK UTAMA: SKU BELUM DIHITUNG */}
-              {pendingItems.map(({ sku, originalIndex }) => renderCard(sku, originalIndex))}
+              {pendingItems.map(({ sku }) => renderCard(sku))}
 
               {/* NOTIFIKASI JIKA SEMUA SKU DI RAK SUDAH SELESAI */}
               {pendingItems.length === 0 && completedItems.length > 0 && (
@@ -2290,11 +1854,504 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
 
                   {showCompletedSection && (
                     <div className="p-3 bg-slate-50/60 space-y-3 border-t border-emerald-100 animate-in fade-in duration-200">
-                      {completedItems.map(({ sku, originalIndex }) => renderCard(sku, originalIndex))}
+                      {completedItems.map(({ sku }) => renderCard(sku))}
                     </div>
                   )}
                 </div>
               )}
+
+              {/* BOTTOM SHEET MODAL: HITUNG SKU FOKUS (RINGAN, CEPAT, NYAMAN) */}
+              {expandedSku && (() => {
+                const activeIdx = skuList.findIndex(s => s.sku === expandedSku);
+                if (activeIdx === -1) return null;
+                const currentSku = skuList[activeIdx];
+                const idx = activeIdx;
+
+                const hasValidUpc1 = currentSku.upc && currentSku.upc !== 'N/A' && currentSku.upc !== '-' && currentSku.upc !== '0' && currentSku.upc !== currentSku.sku;
+                const hasValidUpc2 = currentSku.upc2 && currentSku.upc2 !== 'N/A' && currentSku.upc2 !== '-' && currentSku.upc2 !== '0';
+
+                return (
+                  <div
+                    className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex flex-col justify-end sm:justify-center sm:items-center p-0 sm:p-4 animate-in fade-in duration-150"
+                    onClick={() => setExpandedSku(null)}
+                  >
+                    <div
+                      className="bg-white w-full sm:max-w-md max-h-[92vh] rounded-t-3xl sm:rounded-3xl border border-slate-200 shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom duration-200"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {/* HANDLE PILL MOBILE */}
+                      <div className="w-12 h-1.5 bg-slate-300 rounded-full mx-auto mt-2.5 mb-1 sm:hidden shrink-0" />
+
+                      {/* POP-UP HEADER */}
+                      <div className="p-4 border-b border-slate-100 bg-slate-50/70 flex items-start justify-between gap-3 shrink-0">
+                        <div className="min-w-0 flex-1 space-y-1">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className={`text-xs font-mono font-bold uppercase px-2 py-0.5 rounded-md tracking-wide ${
+                              currentSku.isUnmappedFound
+                                ? 'bg-amber-100 text-amber-950 border border-amber-300'
+                                : 'bg-cyan-100 text-cyan-900 border border-cyan-300'
+                            }`}>
+                              {currentSku.isUnmappedFound ? '📦 TEMUAN' : currentSku.sku}
+                            </span>
+                            <span className="text-xs font-bold uppercase bg-slate-200 text-slate-800 px-2 py-0.5 rounded-md">
+                              Satuan Sistem: {currentSku.uom}
+                            </span>
+                          </div>
+                          <h3 className="font-bold text-sm sm:text-base text-slate-900 leading-snug line-clamp-2">
+                            {currentSku.name}
+                          </h3>
+                          <p className="text-[11px] text-slate-500 font-medium truncate">
+                            {currentSku.category}
+                          </p>
+
+                          {/* BARCODE / UPC HANYA MUNCUL DI POPUP JIKA BENAR-BENAR VALID */}
+                          {(hasValidUpc1 || hasValidUpc2) && (
+                            <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                              {hasValidUpc1 && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white text-slate-800 font-mono text-[10px] font-bold border border-slate-200 shadow-2xs">
+                                  <span className="text-[9px] text-slate-500 font-semibold uppercase">UPC:</span>
+                                  <span className="select-all tracking-wide">{currentSku.upc}</span>
+                                </span>
+                              )}
+                              {hasValidUpc2 && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-purple-50 text-purple-900 font-mono text-[10px] font-bold border border-purple-200 shadow-2xs">
+                                  <span className="text-[9px] text-purple-600 font-semibold uppercase">UPC 2 (Kardus):</span>
+                                  <span className="select-all tracking-wide">{currentSku.upc2}</span>
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => setExpandedSku(null)}
+                          className="w-8 h-8 rounded-full bg-slate-200 hover:bg-slate-300 text-slate-700 flex items-center justify-center font-bold text-sm cursor-pointer shrink-0 transition-colors"
+                        >
+                          ✕
+                        </button>
+                      </div>
+
+                      {/* POP-UP BODY (SCROLLABLE) */}
+                      <div className="p-4 overflow-y-auto space-y-3.5 flex-1">
+                        {/* EXPIRED DATE FEFO DENGAN FORMAT DD/MM/YYYY */}
+                        <div className="bg-cyan-50/60 border border-cyan-200 p-space-sm rounded-xl space-y-2">
+                          <div className="flex justify-between items-center gap-2 flex-wrap">
+                            <span className="font-label-sm text-cyan-950 font-bold flex items-center gap-1.5">
+                              <Calendar className="w-3.5 h-3.5 text-cyan-700" />
+                              <span>{t('expDateSystemLabel')}</span>
+                            </span>
+
+                            <div className="flex items-center gap-1.5">
+                              {currentSku.expDateActual && currentSku.expDateSystem && currentSku.expDateActual === currentSku.expDateSystem ? (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                  ✓ Sesuai Sistem
+                                </span>
+                              ) : currentSku.expDateActual && currentSku.expDateSystem && currentSku.expDateActual !== currentSku.expDateSystem ? (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                                  ⚠️ Beda Batch
+                                </span>
+                              ) : null}
+
+                              {currentSku.expDateSystem && currentSku.expDateActual !== currentSku.expDateSystem && (
+                                <button
+                                  type="button"
+                                  disabled={isSessionLocked}
+                                  onClick={() => handleSetSameExpAsSystem(idx)}
+                                  className={`px-2 py-0.5 text-white rounded-lg text-[10px] font-bold cursor-pointer ${isSessionLocked ? 'bg-slate-400 opacity-50 cursor-not-allowed' : 'bg-cyan-600 hover:bg-cyan-500 active:scale-95'}`}
+                                  title="Reset sama dengan sistem"
+                                >
+                                  Reset
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2 text-xs">
+                            <div>
+                              <label className="text-[10px] text-slate-500 font-bold block uppercase mb-0.5">{t('nearestSystemEd')}</label>
+                              <input type="text" readOnly value={formatDateDisplay(currentSku.expDateSystem)} className="w-full p-2 bg-white/80 border border-slate-200 rounded-lg text-slate-600 font-mono text-xs font-bold outline-none" />
+                            </div>
+                            <div>
+                              <label className="text-[10px] text-cyan-800 font-bold block uppercase mb-0.5">{t('actualEdLabel')}</label>
+                              <input
+                                type="date"
+                                disabled={isSessionLocked}
+                                value={currentSku.expDateActual || ''}
+                                onChange={(e) => updateItemField(idx, 'expDateActual', e.target.value)}
+                                className={`w-full p-1.5 border-2 rounded-lg text-slate-900 font-mono text-xs font-bold outline-none shadow-xs ${isSessionLocked ? 'bg-slate-100 border-slate-300 opacity-60' : 'bg-white border-cyan-400'}`}
+                              />
+                            </div>
+                          </div>
+
+                          {currentSku.allSystemEds.length > 0 && (
+                            <div className="pt-2 border-t border-cyan-200/60 space-y-1">
+                              <span className="text-[10px] font-bold text-slate-600 block">
+                                Variasi ED System di Rak Ini ({currentSku.batchCount} Batch):
+                              </span>
+                              <div className="flex flex-wrap gap-1.5">
+                                {currentSku.allSystemEds.map((edDate, edIdx) => (
+                                  <span key={edIdx} className="px-2 py-0.5 bg-white border border-cyan-300 text-cyan-900 font-mono text-[10px] font-bold rounded-md shadow-xs flex items-center gap-1">
+                                    <span>📅</span>
+                                    <span>{formatDateDisplay(edDate)}</span>
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* TRIGGER / STATUS: APAKAH BARANG FISIK SESUAI SATUAN HITUNG SISTEM */}
+                        {(currentSku.inputUom || currentSku.uom) === currentSku.uom ? (
+                          <div className="pt-0.5">
+                            <button
+                              type="button"
+                              disabled={isSessionLocked}
+                              onClick={() => openConversionModal(idx)}
+                              className="w-full py-2 px-3 bg-slate-50 hover:bg-amber-50/80 text-slate-600 hover:text-amber-900 border border-dashed border-slate-300 hover:border-amber-300 rounded-xl text-xs font-semibold flex items-center justify-between transition-all cursor-pointer shadow-2xs group"
+                            >
+                              <span className="flex items-center gap-1.5">
+                                <span className="text-amber-600 font-bold">⚠️</span>
+                                <span className="text-slate-700 group-hover:text-amber-950 font-bold">Barang fisik tidak sesuai satuan hitung?</span>
+                              </span>
+                              <span className="text-[11px] text-cyan-700 font-bold group-hover:underline flex items-center gap-1">
+                                <span>Atur Dus / Satuan</span>
+                                <span>→</span>
+                              </span>
+                            </button>
+                          </div>
+                        ) : (
+                          /* KONDISI AKTIF: JIKA COUNTER SUDAH MEMILIH SATUAN LAIN / DUS */
+                          <div className="bg-amber-50/90 border border-amber-300 p-2.5 rounded-xl space-y-2 shadow-xs">
+                            <div className="flex items-center justify-between gap-1 flex-wrap">
+                              <div className="flex items-center gap-2">
+                                <span className="text-lg">📦</span>
+                                <div>
+                                  <div className="font-extrabold text-xs text-amber-950 flex items-center gap-1.5">
+                                    <span>Fisik Dihitung: {currentSku.inputUom || currentSku.uom}</span>
+                                    <span className="px-1.5 py-0.2 bg-amber-200 text-amber-900 rounded font-mono text-[10px]">
+                                      1 Ctn = {currentSku.pcsPerCarton || 24} Pcs
+                                    </span>
+                                  </div>
+                                  <div className="text-[10px] text-amber-800">
+                                    Otomatis dikonversi ke sistem ({currentSku.uom})
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  disabled={isSessionLocked}
+                                  onClick={() => openConversionModal(idx)}
+                                  className="px-2.5 py-1 bg-amber-200 hover:bg-amber-300 text-amber-950 font-bold rounded-lg text-xs cursor-pointer shadow-2xs"
+                                >
+                                  Ubah
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={isSessionLocked}
+                                  onClick={() => handleResetToSystemUom(idx)}
+                                  className="px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-700 font-bold rounded-lg text-xs border border-slate-300 cursor-pointer shadow-2xs"
+                                  title="Kembalikan ke satuan default sistem"
+                                >
+                                  Reset
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* TOMBOL KALKULATOR CAMPURAN (DUS UTUH + ECERAN) */}
+                            <button
+                              type="button"
+                              disabled={isSessionLocked}
+                              onClick={() => toggleMixedCalc(currentSku.sku)}
+                              className="w-full py-1.5 px-2 bg-white hover:bg-amber-100/50 border border-amber-300 text-amber-900 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors shadow-2xs"
+                            >
+                              <Calculator className="w-3.5 h-3.5 text-amber-700" />
+                              <span>{mixedCalc[currentSku.sku]?.isOpen ? 'Tutup Kalkulator Dus + Pcs' : '🧮 Hitung Campuran: Dus Utuh + Eceran Pcs'}</span>
+                            </button>
+
+                            {/* PANEL KALKULATOR CAMPURAN JIKA DIAKTIFKAN */}
+                            {mixedCalc[currentSku.sku]?.isOpen && (
+                              <div className="bg-white border-2 border-amber-400 p-2.5 rounded-xl space-y-2 animate-in fade-in shadow-xs">
+                                <div className="text-[11px] font-bold text-amber-950 flex items-center justify-between">
+                                  <span className="flex items-center gap-1">
+                                    <Sparkles className="w-3 h-3 text-amber-600" />
+                                    <span>Kalkulator Dus + Eceran Pcs</span>
+                                  </span>
+                                  <span className="text-[10px] text-slate-500 font-mono">1 Ctn = {currentSku.pcsPerCarton || (currentSku.uom === 'CARTON' ? 24 : 1)} Pcs</span>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-2">
+                                  <div>
+                                    <label className="text-[10px] font-bold text-slate-600 block uppercase mb-0.5">Dus Utuh (Ctn)</label>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="1"
+                                      placeholder="0"
+                                      value={mixedCalc[currentSku.sku]?.cartons || ''}
+                                      onChange={(e) => updateMixedCalcValue(currentSku.sku, 'cartons', e.target.value)}
+                                      className="w-full p-1.5 border border-slate-300 rounded-lg text-center font-bold text-sm bg-white outline-none"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="text-[10px] font-bold text-slate-600 block uppercase mb-0.5">Eceran (Pcs)</label>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="1"
+                                      placeholder="0"
+                                      value={mixedCalc[currentSku.sku]?.loosePcs || ''}
+                                      onChange={(e) => updateMixedCalcValue(currentSku.sku, 'loosePcs', e.target.value)}
+                                      className="w-full p-1.5 border border-slate-300 rounded-lg text-center font-bold text-sm bg-white outline-none"
+                                    />
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-100">
+                                  <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-600">
+                                    <span>Target:</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => updateMixedCalcValue(currentSku.sku, 'targetField', 'good')}
+                                      className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                        (mixedCalc[currentSku.sku]?.targetField || 'good') === 'good'
+                                          ? 'bg-cyan-500 text-slate-950'
+                                          : 'bg-slate-100 text-slate-600'
+                                      }`}
+                                    >
+                                      Baik
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => updateMixedCalcValue(currentSku.sku, 'targetField', 'bad')}
+                                      className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                        mixedCalc[currentSku.sku]?.targetField === 'bad'
+                                          ? 'bg-amber-500 text-slate-950'
+                                          : 'bg-slate-100 text-slate-600'
+                                      }`}
+                                    >
+                                      Rusak
+                                    </button>
+                                  </div>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => applyMixedCalc(idx)}
+                                    className="px-3 py-1 bg-cyan-400 hover:bg-cyan-300 text-slate-950 rounded-lg font-black text-xs cursor-pointer shadow-xs active:scale-95 transition-all"
+                                  >
+                                    ✓ Terapkan
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* INPUT KONDISI BAIK (QTY GOOD) */}
+                        <div className="bg-slate-50 border border-slate-200 p-space-md rounded-xl space-y-space-sm">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-cyan-400"></span><span className="font-headline-sm text-slate-900 font-bold text-xs sm:text-sm">{t('goodConditionLabel')}</span></div>
+                            <span className="px-2 py-0.5 rounded-md bg-cyan-100 text-cyan-950 border border-cyan-300 font-black text-xs uppercase">{currentSku.inputUom || currentSku.uom}</span>
+                          </div>
+                          <div className="flex items-center gap-space-sm">
+                            <button type="button" disabled={isSessionLocked} onClick={() => adjustQty(idx, 'good', -1)} className={`w-14 h-14 bg-white border border-slate-300 text-slate-800 rounded-xl flex items-center justify-center text-xl shrink-0 cursor-pointer ${isSessionLocked ? 'opacity-50 cursor-not-allowed' : ''}`}><Minus className="w-5 h-5" /></button>
+                            <div className="flex-1 h-14 border-2 border-cyan-400 rounded-xl flex items-center justify-center bg-white">
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                disabled={isSessionLocked}
+                                value={currentSku.qtyGood}
+                                onChange={(e) => handleInputText(idx, 'qtyGood', e.target.value)}
+                                placeholder="0"
+                                className={`w-full text-center font-bold text-2xl outline-none ${isSessionLocked ? 'bg-slate-100 opacity-60' : 'bg-white'}`}
+                              />
+                            </div>
+                            <button type="button" disabled={isSessionLocked} onClick={() => adjustQty(idx, 'good', 1)} className={`w-14 h-14 rounded-xl flex items-center justify-center text-xl shrink-0 cursor-pointer transition-all ${isSessionLocked ? 'bg-slate-400 opacity-50 cursor-not-allowed text-white' : 'bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-black shadow-md active:scale-95'}`}><Plus className="w-5 h-5" /></button>
+                          </div>
+                        </div>
+
+                        {/* BAD STOCK DETECTED DENGAN RINCIAN QTY PER KATEGORI */}
+                        <div className="bg-amber-50/70 border border-amber-200 p-space-md rounded-xl space-y-space-sm">
+                          <div className="flex items-center justify-between">
+                            <span className="font-body-lg text-amber-900 font-bold">{t('badStockQuestion')}</span>
+                            <button
+                              type="button"
+                              disabled={isSessionLocked}
+                              onClick={() => toggleBadStock(idx)}
+                              className={`min-h-11 min-w-11 px-3 py-1 rounded-full text-xs font-bold cursor-pointer ${
+                                isSessionLocked ? 'opacity-50 cursor-not-allowed' : ''
+                              } ${currentSku.isBadStock ? 'bg-amber-500 text-slate-950 shadow-xs' : 'bg-slate-200 text-slate-600'}`}
+                            >
+                              {currentSku.isBadStock ? 'ON' : 'OFF'}
+                            </button>
+                          </div>
+
+                          {currentSku.isBadStock && (
+                            <div className="pt-2 space-y-3 border-t border-amber-200">
+                              {/* RINGKASAN TOTAL BAD QTY */}
+                              <div className="p-2.5 bg-amber-100/70 border border-amber-300 rounded-xl flex items-center justify-between">
+                                <div>
+                                  <span className="text-[10px] font-bold uppercase text-amber-800 tracking-wider block">
+                                    Total Qty Rusak / Bad Stock:
+                                  </span>
+                                  <span className="text-xl font-black text-amber-950 font-mono">
+                                    {currentSku.qtyBad || '0'}{' '}
+                                    <span className="text-xs font-bold uppercase">{currentSku.inputUom || currentSku.uom}</span>
+                                  </span>
+                                </div>
+                                <span className="text-xs font-bold text-amber-900 bg-white/80 px-2 py-1 rounded-lg border border-amber-200">
+                                  {Object.keys(currentSku.badBreakdown || {}).length} Kategori Dipilih
+                                </span>
+                              </div>
+
+                              {/* CHIP PILIH KATEGORI KERUSAKAN */}
+                              <div>
+                                <label className="text-xs font-bold text-amber-900 block mb-1.5">
+                                  Pilih Kategori Kerusakan (Bisa lebih dari 1):
+                                </label>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {availableCategories.map((cat, cIdx) => {
+                                    const isSelected = !!(currentSku.badBreakdown && currentSku.badBreakdown[cat] !== undefined);
+                                    return (
+                                      <button
+                                        key={cIdx}
+                                        type="button"
+                                        disabled={isSessionLocked}
+                                        onClick={() => toggleBadCategory(idx, cat)}
+                                        className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer flex items-center gap-1.5 ${
+                                          isSelected
+                                            ? 'bg-amber-500 text-slate-950 border-amber-600 shadow-xs'
+                                            : 'bg-white text-slate-700 border-amber-200 hover:bg-amber-100/50'
+                                        }`}
+                                      >
+                                        <span>{isSelected ? '✓' : '+'}</span>
+                                        <span>{translateDamageCat(cat)}</span>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+
+                              {/* RINCIAN INPUT QTY PER KATEGORI YANG AKTIF */}
+                              {Object.keys(currentSku.badBreakdown || {}).length > 0 ? (
+                                <div className="space-y-2 pt-1">
+                                  <span className="text-[11px] font-black text-amber-950 uppercase tracking-wider block">
+                                    Rincian Qty Kerusakan per Kategori:
+                                  </span>
+                                  <div className="space-y-1.5">
+                                    {Object.entries(currentSku.badBreakdown || {}).map(([catName, catQty]) => (
+                                      <div
+                                        key={catName}
+                                        className="p-2 bg-white border border-amber-300 rounded-xl flex items-center justify-between gap-2 shadow-2xs"
+                                      >
+                                        <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                                          <span className="text-amber-600 font-bold text-xs shrink-0">⚠️</span>
+                                          <span className="text-xs font-bold text-slate-800 truncate" title={catName}>
+                                            {catName}
+                                          </span>
+                                        </div>
+
+                                        <div className="flex items-center gap-1 shrink-0">
+                                          <button
+                                            type="button"
+                                            disabled={isSessionLocked}
+                                            onClick={() => adjustCategoryQty(idx, catName, -1)}
+                                            className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-black flex items-center justify-center text-sm cursor-pointer active:scale-95"
+                                          >
+                                            -
+                                          </button>
+                                          <input
+                                            type="text"
+                                            inputMode="decimal"
+                                            disabled={isSessionLocked}
+                                            value={catQty}
+                                            onChange={(e) => handleCategoryQtyChange(idx, catName, e.target.value)}
+                                            placeholder="0"
+                                            className="w-14 h-8 border border-amber-300 rounded-lg text-center font-black text-sm text-slate-900 bg-amber-50/40 outline-none"
+                                          />
+                                          <button
+                                            type="button"
+                                            disabled={isSessionLocked}
+                                            onClick={() => adjustCategoryQty(idx, catName, 1)}
+                                            className="w-8 h-8 rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 font-black flex items-center justify-center text-sm cursor-pointer active:scale-95"
+                                          >
+                                            +
+                                          </button>
+                                          <span className="text-[10px] font-bold text-slate-500 uppercase ml-0.5">
+                                            {currentSku.inputUom || currentSku.uom}
+                                          </span>
+                                          <button
+                                            type="button"
+                                            disabled={isSessionLocked}
+                                            onClick={() => removeBadCategory(idx, catName)}
+                                            className="ml-1 p-1 hover:bg-red-50 text-slate-400 hover:text-red-600 rounded-lg cursor-pointer transition-colors"
+                                            title="Hapus rincian kategori ini"
+                                          >
+                                            ✕
+                                          </button>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              ) : (
+                                /* JIKA BELUM MEMILIH KATEGORI, COUNTER BISA INPUT TOTAL SECARA LANGSUNG */
+                                <div>
+                                  <label className="text-[11px] font-bold text-amber-900 block mb-1">
+                                    Atau Input Qty Rusak Langsung:
+                                  </label>
+                                  <input
+                                    type="text"
+                                    inputMode="decimal"
+                                    disabled={isSessionLocked}
+                                    value={currentSku.qtyBad}
+                                    onChange={(e) => handleInputText(idx, 'qtyBad', e.target.value)}
+                                    placeholder="0"
+                                    className={`w-full p-2 border border-amber-300 rounded-lg text-center font-bold text-lg ${
+                                      isSessionLocked ? 'bg-slate-100 opacity-60' : 'bg-white'
+                                    }`}
+                                  />
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* LIVE CONVERSION BANNER JIKA INPUT BEDA DENGAN SISTEM UOM */}
+                        {(currentSku.inputUom || currentSku.uom) !== currentSku.uom && (
+                          <div className="p-2.5 bg-cyan-50 border border-cyan-300 rounded-xl flex items-center justify-between text-xs text-cyan-950 shadow-2xs">
+                            <div className="flex items-center gap-1.5">
+                              <Zap className="w-4 h-4 text-cyan-600 shrink-0" />
+                              <div>
+                                <div className="font-extrabold text-[11px] text-cyan-900">Konversi Otomatis ke Sistem:</div>
+                                <div className="text-[11px] text-cyan-700">
+                                  Input <b className="font-mono text-cyan-950">{(parseFloat(currentSku.qtyGood || '0') + parseFloat(currentSku.qtyBad || '0')) || 0} {currentSku.inputUom || currentSku.uom}</b> ➔ Disimpan sebagai <b className="font-mono text-cyan-950">{convertToSystemQty((parseFloat(currentSku.qtyGood || '0') + parseFloat(currentSku.qtyBad || '0')) || 0, currentSku.inputUom || currentSku.uom, currentSku.uom, currentSku.pcsPerCarton || 24).finalQty} {currentSku.uom}</b>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* POP-UP FOOTER (STICKY) */}
+                      <div className="p-3.5 bg-white border-t border-slate-200 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setExpandedSku(null);
+                            triggerHapticFeedback('success');
+                          }}
+                          className="w-full py-3.5 px-4 bg-linear-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 active:scale-98 text-white rounded-xl font-black text-sm flex items-center justify-center gap-2 shadow-md shadow-emerald-500/20 cursor-pointer transition-all"
+                        >
+                          <CheckCircle2 className="w-5 h-5" />
+                          <span>Selesai & Simpan Item</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
             </>
           );
         })()}
@@ -2716,8 +2773,91 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                 </div>
               )}
 
+              {/* PILIHAN PERLAKUAN ANGKA JIKA SUDAH ADA INPUT SEBELUMNYA */}
+              {(() => {
+                const rawInputTotal = snapQty((parseFloat(conversionModal.currentValGood || '0') || 0) + (parseFloat(conversionModal.currentValBad || '0') || 0));
+                const ratioVal = parseInt(conversionModal.tempValue, 10) || 24;
+                if (rawInputTotal <= 0) return null;
+
+                let previewInput = rawInputTotal;
+                let previewSystem = rawInputTotal;
+
+                if (conversionModal.selectedUom === 'CARTON' && conversionModal.systemUom === 'PCS') {
+                  if (conversionModal.actionType === 'KEEP_NUMBER') {
+                    previewInput = rawInputTotal;
+                    previewSystem = snapQty(rawInputTotal * ratioVal);
+                  } else {
+                    previewInput = snapQty(rawInputTotal / ratioVal);
+                    previewSystem = rawInputTotal;
+                  }
+                } else if (conversionModal.selectedUom === 'PCS' && conversionModal.systemUom === 'CARTON') {
+                  if (conversionModal.actionType === 'KEEP_NUMBER') {
+                    previewInput = rawInputTotal;
+                    previewSystem = snapQty(rawInputTotal / ratioVal);
+                  } else {
+                    previewInput = snapQty(rawInputTotal * ratioVal);
+                    previewSystem = rawInputTotal;
+                  }
+                }
+
+                return (
+                  <div className="space-y-2 pt-1 animate-in fade-in">
+                    <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5">
+                      <label className="text-[11px] font-bold text-slate-700 block">
+                        Perlakuan angka hitungan saat ini ({rawInputTotal}):
+                      </label>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setConversionModal(prev => ({ ...prev, actionType: 'KEEP_NUMBER' }))}
+                          className={`p-2 rounded-xl border text-left cursor-pointer transition-all ${
+                            conversionModal.actionType === 'KEEP_NUMBER'
+                              ? 'bg-cyan-500 text-slate-950 border-cyan-600 shadow-2xs font-black'
+                              : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100 font-semibold text-xs'
+                          }`}
+                        >
+                          <div className="text-[11px] leading-tight font-bold">Tetap {rawInputTotal} {conversionModal.selectedUom}</div>
+                          <div className="text-[9px] opacity-80 font-normal mt-0.5">Fisik dihitung dalam {conversionModal.selectedUom}</div>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setConversionModal(prev => ({ ...prev, actionType: 'CONVERT_VALUE' }))}
+                          className={`p-2 rounded-xl border text-left cursor-pointer transition-all ${
+                            conversionModal.actionType === 'CONVERT_VALUE'
+                              ? 'bg-amber-400 text-slate-950 border-amber-500 shadow-2xs font-black'
+                              : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100 font-semibold text-xs'
+                          }`}
+                        >
+                          <div className="text-[11px] leading-tight font-bold">Konversi Nilai</div>
+                          <div className="text-[9px] opacity-80 font-normal mt-0.5">Bagi/kali matematika</div>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* LIVE PREVIEW KOTAK */}
+                    <div className="p-3 bg-linear-to-r from-cyan-50 to-emerald-50 border border-cyan-200 rounded-xl text-xs space-y-1 shadow-2xs">
+                      <div className="text-[10px] uppercase tracking-wider font-extrabold text-cyan-800 flex items-center justify-between">
+                        <span>Pratinjau Hasil Hitung:</span>
+                        <span className="font-mono text-emerald-700">✓ Akurat</span>
+                      </div>
+                      <div className="flex items-center justify-between font-bold text-slate-900 pt-1">
+                        <div>
+                          <span className="text-[9px] text-slate-500 block uppercase font-bold">Fisik di Rak:</span>
+                          <span className="text-sm font-mono text-cyan-950 font-black">{previewInput} {conversionModal.selectedUom}</span>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-[9px] text-slate-500 block uppercase font-bold">Tersimpan ke Sistem:</span>
+                          <span className="text-sm font-mono text-emerald-700 font-black">{previewSystem} {conversionModal.systemUom}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
               <div className="p-2.5 bg-amber-50/80 border border-amber-200 rounded-xl text-[11px] text-amber-900 leading-relaxed">
-                💡 <b>Info:</b> Angka hitungan akan otomatis dikonversikan dan disimpan ke sistem dalam satuan asli (<b>{conversionModal.systemUom}</b>).
+                💡 <b>Info:</b> Angka hitungan fisik akan otomatis dikonversikan dan disimpan ke sistem dalam satuan asli (<b>{conversionModal.systemUom}</b>).
               </div>
             </div>
 
