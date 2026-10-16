@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import type { SessionData } from '../types';
-import { Users, LogOut, Info, ArrowRight, ShieldCheck, UserCheck } from 'lucide-react';
+import { Users, LogOut, Info, ArrowRight, ShieldCheck, UserCheck, ChevronLeft } from 'lucide-react';
 import NetworkStatusBadge from './NetworkStatusBadge';
 import { useLanguage, LanguageToggle } from '../utils/i18n';
 
@@ -8,11 +8,20 @@ interface Step2TeamSetupProps {
   sessionData: SessionData;
   onSaveTeam: (updatedSession: SessionData) => void;
   onLogout: () => void;
+  onCancel?: () => void;
 }
 
-export default function Step2TeamSetup({ sessionData, onSaveTeam, onLogout }: Step2TeamSetupProps) {
+export default function Step2TeamSetup({ sessionData, onSaveTeam, onLogout, onCancel }: Step2TeamSetupProps) {
   const { t } = useLanguage();
-  const [partnerName, setPartnerName] = useState<string>(sessionData.partners?.[0] || 'Budi Prasetyo');
+  const [partnerName, setPartnerName] = useState<string>(() => {
+    if (sessionData.partners?.[0]) return sessionData.partners[0];
+    const cleanUser = (sessionData.primaryCounter || '').toLowerCase().trim();
+    if (cleanUser) {
+      const saved = localStorage.getItem(`counter_partner_${cleanUser}`);
+      if (saved) return saved;
+    }
+    return '';
+  });
 
   // GUARD: REDIRECT SPV OTOMATIS KE DASHBOARD ADMIN
   useEffect(() => {
@@ -42,10 +51,22 @@ export default function Step2TeamSetup({ sessionData, onSaveTeam, onLogout }: St
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-140 h-140 bg-cyan-400/10 rounded-full blur-[140px] pointer-events-none" />
 
       <div className="relative z-10 w-full max-w-sm bg-white rounded-3xl p-6 sm:p-7 shadow-[0_20px_60px_rgba(15,23,42,0.08)] border border-slate-200/90 space-y-5">
-        {/* TOP UTILITY BAR (NETWORK STATUS, LANGUAGE TOGGLE, LOGOUT) */}
+        {/* TOP UTILITY BAR (NETWORK STATUS, LANGUAGE TOGGLE, LOGOUT / BATAL) */}
         <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-          <NetworkStatusBadge />
+          {onCancel ? (
+            <button
+              type="button"
+              onClick={onCancel}
+              className="flex items-center gap-1 text-slate-600 hover:text-slate-900 text-xs font-bold transition-colors cursor-pointer"
+            >
+              <ChevronLeft className="w-4 h-4" />
+              <span>{t('cancel') || 'Batal'}</span>
+            </button>
+          ) : (
+            <NetworkStatusBadge />
+          )}
           <div className="flex items-center gap-2 shrink-0">
+            {onCancel && <NetworkStatusBadge />}
             <LanguageToggle />
             <button
               type="button"
@@ -108,13 +129,24 @@ export default function Step2TeamSetup({ sessionData, onSaveTeam, onLogout }: St
             />
           </div>
 
-          <button
-            type="submit"
-            className="w-full h-12 bg-cyan-400 hover:bg-cyan-300 active:scale-[0.98] text-slate-950 rounded-xl text-sm font-extrabold shadow-lg shadow-cyan-400/25 transition-all cursor-pointer flex items-center justify-center space-x-2 mt-2"
-          >
-            <span>{t('startOpnameBtn')}</span>
-            <ArrowRight className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-2 pt-2">
+            {onCancel && (
+              <button
+                type="button"
+                onClick={onCancel}
+                className="h-12 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs border border-slate-300 transition-all cursor-pointer"
+              >
+                {t('cancel') || 'Batal'}
+              </button>
+            )}
+            <button
+              type="submit"
+              className="flex-1 h-12 bg-cyan-400 hover:bg-cyan-300 active:scale-[0.98] text-slate-950 rounded-xl text-sm font-extrabold shadow-lg shadow-cyan-400/25 transition-all cursor-pointer flex items-center justify-center space-x-2"
+            >
+              <span>{onCancel ? (t('saveTeamChangesBtn') || 'Simpan Perubahan') : t('startOpnameBtn')}</span>
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          </div>
         </form>
 
         <div className="pt-3 border-t border-slate-100 text-center space-y-0.5">

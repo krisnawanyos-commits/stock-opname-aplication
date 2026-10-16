@@ -89,11 +89,12 @@ export const translations = {
     // Step 2: Team Setup
     teamSetupTitle: 'Setup Tim Opname',
     teamSetupSubtitle: 'Keterangan Tim Pendamping',
-    teamSetupDesc: 'Sebelum memulai perhitungan rak, mohon lengkapi nama petugas pendamping dari tim warehouse (WH).',
+    teamSetupDesc: 'Nama pendamping WH ini akan disimpan otomatis sehingga kamu tidak perlu mengisinya lagi setiap kali login. Kamu tetap bisa mengubahnya kapan saja melalui tombol Edit Tim.',
     primaryCounterLabel: 'Counter Utama (SO)',
     partnerLabel: 'Tim Pendamping (Warehouse / WH)',
     partnerPlaceholder: 'Masukkan nama petugas WH...',
     startOpnameBtn: 'Mulai Stock Opname',
+    saveTeamChangesBtn: 'Simpan Perubahan',
 
     // Step 3: Countsheet List
     countsheetListTitle: 'Countsheet List',
@@ -195,11 +196,12 @@ export const translations = {
     // Step 2: Team Setup
     teamSetupTitle: 'Opname Team Setup',
     teamSetupSubtitle: 'Warehouse Assistant Info',
-    teamSetupDesc: 'Before counting, please enter the name of the warehouse (WH) assistant accompanying you in this aisle.',
+    teamSetupDesc: 'Your WH companion will be saved automatically so you do not need to re-enter it on every login. You can change it anytime via the Edit Team button.',
     primaryCounterLabel: 'Primary Counter (SO)',
     partnerLabel: 'Warehouse Assistant (WH)',
     partnerPlaceholder: 'Enter WH assistant name...',
     startOpnameBtn: 'Start Stock Opname',
+    saveTeamChangesBtn: 'Save Changes',
 
     // Step 3: Countsheet List
     countsheetListTitle: 'Countsheet List',

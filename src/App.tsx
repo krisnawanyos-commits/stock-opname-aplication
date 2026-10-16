@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { db } from './firebase';
-import { doc, onSnapshot, collection, query, where, setDoc } from 'firebase/firestore';
+import { doc, onSnapshot, collection, query, where, setDoc, getDoc } from 'firebase/firestore';
 import type { SessionData, RackItem, UserRole } from './types';
 import { AlertTriangle, LogOut, Loader2 } from 'lucide-react';
 
@@ -176,14 +176,18 @@ export default function App() {
   // EXECUTE LOGOUT BERSIH
   const confirmLogout = () => {
     setShowLogoutModal(false);
-    localStorage.clear();
+    // Hapus sesi aktif, tetapi pertahankan counter_partner_${username} agar preferensi pendamping tetap tersimpan
+    localStorage.removeItem(STORAGE_KEYS.STEP);
+    localStorage.removeItem(STORAGE_KEYS.SESSION);
+    localStorage.removeItem(STORAGE_KEYS.USER);
+    localStorage.removeItem(STORAGE_KEYS.RACK);
     setCurrentUser(null);
     setSessionData({
       sessionId: 'SO-2026-KOSAMBI',
       sessionCode: 'SO-WRG-2026-09',
       sessionName: 'Kosambi WH — SO Sesi Utama 2026',
       primaryCounter: 'bambang',
-      partners: ['Budi Prasetyo'],
+      partners: [],
       mode: 'list-to-floor',
       role: 'counter',
     });
@@ -245,18 +249,48 @@ export default function App() {
         {/* STEP 1: LOGIN */}
         {currentStep === 1 && (
           <Step1Login
-            onSuccessLogin={(username: string, role: UserRole, name?: string) => {
+            onSuccessLogin={async (username: string, role: UserRole, name?: string) => {
               const userObj = { username, role, name: name || username };
+              const cleanUser = username.toLowerCase().trim();
               setCurrentUser(userObj);
+
+              if (role === 'owner' || role === 'spv' || username === 'owner') {
+                setSessionData(prev => ({
+                  ...prev,
+                  primaryCounter: username,
+                  role: 'admin'
+                }));
+                setCurrentStep('admin');
+                return;
+              }
+
+              // Cek pendamping warehouse yang pernah di-setting (cek localStorage HP dulu, lalu fallback ke Firestore)
+              let savedPartner = localStorage.getItem(`counter_partner_${cleanUser}`) || '';
+              if (!savedPartner) {
+                try {
+                  const partnerDoc = await getDoc(doc(db, "counter_partners", cleanUser));
+                  if (partnerDoc.exists() && partnerDoc.data().partner) {
+                    savedPartner = (partnerDoc.data().partner || '').trim();
+                    if (savedPartner) {
+                      localStorage.setItem(`counter_partner_${cleanUser}`, savedPartner);
+                    }
+                  }
+                } catch (err) {
+                  console.warn("Gagal membaca counter_partners dari Firestore:", err);
+                }
+              }
 
               setSessionData(prev => ({
                 ...prev,
                 primaryCounter: username,
-                role: (role === 'owner' || role === 'spv' || username === 'owner') ? 'admin' : 'counter'
+                partners: savedPartner ? [savedPartner] : [],
+                role: 'counter'
               }));
 
-              if (role === 'owner' || role === 'spv' || username === 'owner') {
-                setCurrentStep('admin');
+              // Jika pendamping sudah pernah disetting sebelumnya, LANGSUNG masuk ke Step 3 (Countsheet List)
+              // Jika belum pernah setting sama sekali, baru arahkan ke Step 2
+              if (savedPartner) {
+                setCurrentStep(3);
               } else {
                 setCurrentStep(2);
               }
@@ -285,20 +319,23 @@ export default function App() {
           <Step2TeamSetup
             sessionData={sessionData}
             onLogout={handleRequestLogout}
+            onCancel={sessionData.partners?.[0] ? () => setCurrentStep(3) : undefined}
             onSaveTeam={async (updatedData) => {
               setSessionData(updatedData);
-              try {
-                if (updatedData.primaryCounter) {
-                  const cleanUser = updatedData.primaryCounter.toLowerCase().trim();
-                  const partnerVal = updatedData.partners?.[0] || '';
+              const cleanUser = (updatedData.primaryCounter || '').toLowerCase().trim();
+              const partnerVal = updatedData.partners?.[0] || '';
+
+              if (cleanUser && partnerVal) {
+                try {
+                  localStorage.setItem(`counter_partner_${cleanUser}`, partnerVal);
                   await setDoc(doc(db, "counter_partners", cleanUser), {
                     counter: cleanUser,
                     partner: partnerVal,
                     updatedAt: new Date().toISOString()
                   }, { merge: true });
+                } catch (err) {
+                  console.error("Error saving counter partner to db:", err);
                 }
-              } catch (err) {
-                console.error("Error saving counter partner to db:", err);
               }
               setCurrentStep(3);
             }}
