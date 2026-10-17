@@ -8535,7 +8535,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                         </div>
 
                         {/* Photo Body */}
-                        <div className="p-4 bg-slate-950 flex items-center justify-center overflow-auto flex-1 min-h-[300px]">
+                        <div className="p-4 bg-slate-950 flex items-center justify-center overflow-auto flex-1 min-h-75">
                             <img
                                 src={photoPreviewModal.photoUrl}
                                 alt={`Foto temuan ${photoPreviewModal.sku}`}
