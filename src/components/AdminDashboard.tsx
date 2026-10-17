@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { db } from '../firebase';
 import {
@@ -717,6 +717,78 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         };
     }, [activeProject]);
 
+    // AGGREGATE DISCREPANCY EVALUATION PER (LOCATION + SKU)
+    // Menyatukan multi-baris beda ED pada SKU & Rak yang sama agar tidak terjadi false dispute jika nett fisik == nett sistem
+    const aggregateDisputeMap = useMemo(() => {
+        const map = new Map<string, { totalSys: number; totalAct: number; totalR1: number; hasR1: boolean; isCountedAll: boolean }>();
+        
+        // Pass 1: Akumulasi total sistem, fisik, dan R1
+        for (let i = 0; i < masterDataList.length; i++) {
+            const t = masterDataList[i];
+            if (!t.SKU || !t.Location) continue;
+            const loc = t.Location.trim().toUpperCase();
+            const sku = t.SKU.trim().toUpperCase();
+            const cleanC = (t.counter || '').trim().toLowerCase();
+            const round = t.currentRound || 1;
+            const key = `${loc}__${sku}__${cleanC}__${round}`;
+
+            const act = t.countedQty ?? (t.isCounted ? (t.QTY_ACTUAL ?? 0) : 0);
+            const sys = t.Qty || 0;
+            const r1 = t.round1Actual;
+
+            const entry = map.get(key);
+            if (!entry) {
+                map.set(key, {
+                    totalSys: sys,
+                    totalAct: t.isCounted ? act : 0,
+                    totalR1: r1 !== undefined ? r1 : sys,
+                    hasR1: r1 !== undefined,
+                    isCountedAll: !!t.isCounted
+                });
+            } else {
+                entry.totalSys += sys;
+                if (t.isCounted) entry.totalAct += act;
+                if (r1 !== undefined) {
+                    entry.totalR1 += r1;
+                    entry.hasR1 = true;
+                } else {
+                    entry.totalR1 += sys;
+                }
+                if (!t.isCounted) entry.isCountedAll = false;
+            }
+        }
+
+        // Pass 2: Tentukan status dispute agregat per (Rak + SKU)
+        const disputeStatusMap = new Map<string, boolean>();
+        map.forEach((val, key) => {
+            if (!val.isCountedAll) {
+                disputeStatusMap.set(key, false);
+                return;
+            }
+            // Khusus Ronde 2: jika total hitung R2 cocok dengan total hitung R1, maka match!
+            const isR2 = key.endsWith('__2');
+            if (isR2 && val.hasR1 && Math.round((val.totalAct - val.totalR1) * 1000) === 0) {
+                disputeStatusMap.set(key, false);
+                return;
+            }
+            // Selisih fisik total vs sistem total
+            const hasDiff = Math.round((val.totalAct - val.totalSys) * 1000) !== 0;
+            disputeStatusMap.set(key, hasDiff);
+        });
+
+        return disputeStatusMap;
+    }, [masterDataList]);
+
+    const isItemInDispute = useCallback((item: MasterSKUItem) => {
+        if (!item.isCounted || !item.SKU || !item.Location) return false;
+        const loc = item.Location.trim().toUpperCase();
+        const sku = item.SKU.trim().toUpperCase();
+        const cleanC = (item.counter || '').trim().toLowerCase();
+        const round = item.currentRound || 1;
+        const key = `${loc}__${sku}__${cleanC}__${round}`;
+        return !!aggregateDisputeMap.get(key);
+    }, [aggregateDisputeMap]);
+
     const handleOpenDeployModal = (targetCounter: string) => {
         if (effectiveRole === 'spv') {
             triggerNotification('Hanya Super Admin/Owner yang memiliki hak deploy ronde.');
@@ -746,13 +818,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             return;
         }
 
-        const disputeTasks = counterTasks.filter(item => {
-            const act = item.countedQty ?? item.Qty;
-            if (currentCounterRound === 2 && item.round1Actual !== undefined && act === item.round1Actual) {
-                return false;
-            }
-            return item.isCounted && act !== item.Qty;
-        });
+        const disputeTasks = counterTasks.filter(isItemInDispute);
 
         if (disputeTasks.length === 0) {
             triggerNotification(`Tidak ada SKU selisih ditemukan pada counter ${cleanCounter}. Semua match!`);
@@ -790,9 +856,8 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     if (!item.id) return;
                     const ref = doc(db, "master_tasks", item.id);
                     const act = item.countedQty ?? item.Qty;
-                    const isR2MatchR1 = (sourceRound === 2 && item.round1Actual !== undefined && act === item.round1Actual);
-
-                    if (item.isCounted && act !== item.Qty && !isR2MatchR1) {
+                    
+                    if (isItemInDispute(item)) {
                         updates.push({
                             ref,
                             data: {
@@ -840,9 +905,8 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     if (!item.id) return;
                     const ref = doc(db, "master_tasks", item.id);
                     const act = item.countedQty ?? item.Qty;
-                    const isR2MatchR1 = (sourceRound === 2 && item.round1Actual !== undefined && act === item.round1Actual);
-
-                    if (item.isCounted && act !== item.Qty && !isR2MatchR1) {
+                    
+                    if (isItemInDispute(item)) {
                         updates.push({
                             ref,
                             data: {
@@ -894,9 +958,8 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     if (!item.id) return;
                     const ref = doc(db, "master_tasks", item.id);
                     const act = item.countedQty ?? item.Qty;
-                    const isR2MatchR1 = (sourceRound === 2 && item.round1Actual !== undefined && act === item.round1Actual);
-
-                    if (item.isCounted && act !== item.Qty && !isR2MatchR1) {
+                    
+                    if (isItemInDispute(item)) {
                         updates.push({
                             ref,
                             data: {
@@ -946,11 +1009,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 const cleanTarget = targetCounter.toLowerCase().trim();
                 const targetTasks = masterDataList.filter(m => (m.counter || '').toLowerCase().trim() === cleanTarget);
                 const targetDisputeInNextRound = targetTasks.filter(item => item.currentRound === nextRound && !item.isCounted);
-                const targetDisputeInSourceRound = targetTasks.filter(item => {
-                    const act = item.countedQty ?? item.Qty;
-                    const isR2MatchR1 = (sourceRound === 2 && item.round1Actual !== undefined && act === item.round1Actual);
-                    return item.isCounted && act !== item.Qty && !isR2MatchR1;
-                });
+                const targetDisputeInSourceRound = targetTasks.filter(isItemInDispute);
 
                 if (targetDisputeInNextRound.length > 0) {
                     // Partner sudah di nextRound: tukar task dispute nextRound miliknya ke sourceCounter
@@ -973,9 +1032,8 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                         if (!item.id) return;
                         const ref = doc(db, "master_tasks", item.id);
                         const act = item.countedQty ?? item.Qty;
-                        const isR2MatchR1 = (sourceRound === 2 && item.round1Actual !== undefined && act === item.round1Actual);
-
-                        if (item.isCounted && act !== item.Qty && !isR2MatchR1) {
+                        
+                        if (isItemInDispute(item)) {
                             updates.push({
                                 ref,
                                 data: {
@@ -1661,9 +1719,8 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     if (!item.id) return;
                     const ref = doc(db, "master_tasks", item.id);
                     const act = item.countedQty ?? item.Qty;
-                    const isR2MatchR1 = (roundA === 2 && item.round1Actual !== undefined && act === item.round1Actual);
-
-                    if (item.isCounted && act !== item.Qty && !isR2MatchR1) {
+                    
+                    if (isItemInDispute(item)) {
                         updates.push({
                             ref,
                             data: {
@@ -1714,9 +1771,8 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     if (!item.id) return;
                     const ref = doc(db, "master_tasks", item.id);
                     const act = item.countedQty ?? item.Qty;
-                    const isR2MatchR1 = (roundB === 2 && item.round1Actual !== undefined && act === item.round1Actual);
-
-                    if (item.isCounted && act !== item.Qty && !isR2MatchR1) {
+                    
+                    if (isItemInDispute(item)) {
                         updates.push({
                             ref,
                             data: {
@@ -4004,7 +4060,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 groups[cName].total++;
                 if (item.isCounted) {
                     groups[cName].counted++;
-                    if ((item.countedQty ?? item.Qty) !== item.Qty) groups[cName].errorCount++;
+                    if (isItemInDispute(item)) groups[cName].errorCount++;
                 }
             }
         }
@@ -4126,7 +4182,40 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
     const counterDiscrepancies = useMemo(() => {
         if (!selectedCounterForDetail) return [];
-        return masterDataList.filter(m => m.counter === selectedCounterForDetail && m.isCounted && (m.countedQty ?? m.Qty) !== m.Qty);
+        const cleanCounter = selectedCounterForDetail.toLowerCase().trim();
+        const tasks = masterDataList.filter(m => (m.counter || '').toLowerCase().trim() === cleanCounter);
+        
+        // Group by Location + SKU to show clean aggregate row
+        const map = new Map<string, { item: MasterSKUItem; totalSys: number; totalAct: number }>();
+        tasks.forEach(m => {
+            if (!m.SKU || !m.Location || !m.isCounted) return;
+            const key = `${m.Location.trim().toUpperCase()}__${m.SKU.trim().toUpperCase()}__${m.currentRound || 1}`;
+            const act = m.countedQty ?? (m.QTY_ACTUAL ?? 0);
+            const sys = m.Qty || 0;
+            
+            const existing = map.get(key);
+            if (!existing) {
+                map.set(key, { item: m, totalSys: sys, totalAct: act });
+            } else {
+                existing.totalSys += sys;
+                existing.totalAct += act;
+            }
+        });
+
+        const list: Array<MasterSKUItem & { totalSysQty: number; totalActQty: number; netDiff: number }> = [];
+        map.forEach(({ item, totalSys, totalAct }) => {
+            const netDiff = Math.round((totalAct - totalSys) * 1000) / 1000;
+            if (netDiff !== 0) {
+                list.push({
+                    ...item,
+                    totalSysQty: totalSys,
+                    totalActQty: totalAct,
+                    netDiff
+                });
+            }
+        });
+
+        return list;
     }, [masterDataList, selectedCounterForDetail]);
 
     // 1b. PENDING RACKS FOR SOURCE COUNTER (HANYA RAK 100% PENDING BELUM DIHITUNG)
@@ -4840,9 +4929,9 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                 <td className="p-3 font-mono font-bold text-indigo-600 flex items-center"><MapPin className="w-3.5 h-3.5 text-indigo-400 mr-1" />{item.Location}</td>
                                                 <td className="p-3 font-mono font-bold text-slate-900">{item.SKU}</td>
                                                 <td className="p-3 truncate max-w-xs">{item.Description}</td>
-                                                <td className="p-3 text-center text-slate-500">{item.Qty}</td>
-                                                <td className="p-3 text-center font-black">{item.countedQty}</td>
-                                                <td className="p-3 text-center font-black text-red-600">{diff > 0 ? `+${diff}` : diff}</td>
+                                                <td className="p-3 text-center text-slate-500">{(item as any).totalSysQty ?? item.Qty}</td>
+                                                <td className="p-3 text-center font-black">{(item as any).totalActQty ?? item.countedQty}</td>
+                                                <td className="p-3 text-center font-black text-red-600">{((item as any).netDiff ?? diff) > 0 ? `+${(item as any).netDiff ?? diff}` : ((item as any).netDiff ?? diff)}</td>
                                             </tr>
                                         );
                                     })}
