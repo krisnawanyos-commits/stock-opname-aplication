@@ -1800,12 +1800,17 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
 
                     <div className="min-w-0 flex-1 space-y-1">
                       <div className="flex items-center gap-1.5 flex-wrap">
+                        {currentSku.isUnmappedFound && (
+                          <span className="text-[10px] font-black uppercase px-1.5 py-0.5 rounded bg-amber-500 text-white shadow-2xs">
+                            📦 TEMUAN
+                          </span>
+                        )}
                         <span className={`text-xs font-mono font-bold uppercase px-2 py-0.5 rounded-md tracking-wide ${
                           currentSku.isUnmappedFound
                             ? 'bg-amber-100 text-amber-950 border border-amber-300'
                             : 'bg-cyan-50 text-cyan-800 border border-cyan-200'
                         }`}>
-                          {currentSku.isUnmappedFound ? '📦 TEMUAN' : currentSku.sku}
+                          {currentSku.sku}
                         </span>
                       </div>
                       <h3 className="font-headline-sm text-slate-900 font-bold text-xs sm:text-sm leading-snug line-clamp-2">
@@ -1929,12 +1934,17 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                       <div className="p-4 border-b border-slate-100 bg-slate-50/70 flex items-start justify-between gap-3 shrink-0">
                         <div className="min-w-0 flex-1 space-y-1">
                           <div className="flex items-center gap-1.5 flex-wrap">
+                            {currentSku.isUnmappedFound && (
+                              <span className="text-[10px] font-black uppercase px-1.5 py-0.5 rounded bg-amber-500 text-white shadow-2xs">
+                                📦 TEMUAN
+                              </span>
+                            )}
                             <span className={`text-xs font-mono font-bold uppercase px-2 py-0.5 rounded-md tracking-wide ${
                               currentSku.isUnmappedFound
                                 ? 'bg-amber-100 text-amber-950 border border-amber-300'
                                 : 'bg-cyan-100 text-cyan-900 border border-cyan-300'
                             }`}>
-                              {currentSku.isUnmappedFound ? '📦 TEMUAN' : currentSku.sku}
+                              {currentSku.sku}
                             </span>
                             <span className="text-xs font-bold uppercase bg-slate-200 text-slate-800 px-2 py-0.5 rounded-md">
                               Satuan Sistem: {currentSku.uom}
