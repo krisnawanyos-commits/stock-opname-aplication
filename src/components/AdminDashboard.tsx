@@ -2938,7 +2938,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 return;
             }
 
-            // Batch update Firestore untuk master_tasks
+            // Batch update Firestore untuk master_tasks yang dipindahkan
             const CHUNK = 400;
             for (let i = 0; i < targetTasksToMove.length; i += CHUNK) {
                 const chunk = targetTasksToMove.slice(i, i + CHUNK);
@@ -2954,6 +2954,30 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     }
                 });
                 await batch.commit();
+            }
+
+            // Jika counter penerima (target) sudah menyelesaikan tugasnya sebelumnya (misal sudah selesai R3),
+            // kunci (lock) task lama tersebut agar tidak tampil di HP dan hitungan baru murni mulai dari 0
+            const targetPrevCompletedTasks = masterDataList.filter(m => 
+                (m.counter || '').toLowerCase().trim() === cleanTarget &&
+                !m.isLocked && m.isCounted
+            );
+
+            if (targetPrevCompletedTasks.length > 0) {
+                for (let i = 0; i < targetPrevCompletedTasks.length; i += CHUNK) {
+                    const chunk = targetPrevCompletedTasks.slice(i, i + CHUNK);
+                    const batch = writeBatch(db);
+                    chunk.forEach(task => {
+                        if (task.id) {
+                            const ref = doc(db, "master_tasks", task.id);
+                            batch.update(ref, {
+                                isLocked: true,
+                                updatedAt: timestampNow
+                            });
+                        }
+                    });
+                    await batch.commit();
+                }
             }
 
             // Catat Audit Trail per Rak terpilih
@@ -2985,8 +3009,12 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
             // Update local state masterDataList
             setMasterDataList(prev => prev.map(m => {
-                if ((m.counter || '').toLowerCase().trim() === cleanSource && selectedRacks.includes(m.Location)) {
+                const c = (m.counter || '').toLowerCase().trim();
+                if (c === cleanSource && selectedRacks.includes(m.Location)) {
                     return { ...m, counter: cleanTarget, previousCounter: cleanSource };
+                }
+                if (c === cleanTarget && !m.isLocked && m.isCounted) {
+                    return { ...m, isLocked: true };
                 }
                 return m;
             }));
@@ -4046,13 +4074,24 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
     // 1. OPTIMIZED COUNTER GROUPS (Single-pass O(N))
     const counterGroups = useMemo(() => {
+        // Tentukan ronde aktif untuk masing-masing counter:
+        // Jika counter memiliki task yang belum di-lock (!isLocked), prioritaskan ronde dari task aktif tersebut
+        const counterActiveRoundMap = new Map<string, number>();
         const counterMaxRoundMap = new Map<string, number>();
+
         for (let i = 0; i < masterDataList.length; i++) {
             const item = masterDataList[i];
             const cName = item.counter || 'Unassigned';
             const round = item.currentRound || 1;
             const curMax = counterMaxRoundMap.get(cName) || 1;
             if (round > curMax) counterMaxRoundMap.set(cName, round);
+
+            if (!item.isLocked) {
+                const curActive = counterActiveRoundMap.get(cName);
+                if (curActive === undefined || round > curActive) {
+                    counterActiveRoundMap.set(cName, round);
+                }
+            }
         }
 
         const groups: Record<string, { total: number; counted: number; errorCount: number }> = {};
@@ -4061,8 +4100,14 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             const cName = item.counter || 'Unassigned';
             if (!groups[cName]) groups[cName] = { total: 0, counted: 0, errorCount: 0 };
 
-            const activeRound = counterMaxRoundMap.get(cName) || 1;
-            if (item.currentRound === activeRound) {
+            const hasUnlocked = counterActiveRoundMap.has(cName);
+            const activeRound = counterActiveRoundMap.get(cName) ?? (counterMaxRoundMap.get(cName) || 1);
+
+            const isTargetItem = hasUnlocked 
+                ? (!item.isLocked && item.currentRound === activeRound)
+                : (item.currentRound === activeRound);
+
+            if (isTargetItem) {
                 groups[cName].total++;
                 if (item.isCounted) {
                     groups[cName].counted++;
@@ -7117,7 +7162,10 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                             const cleanCounterKey = cName.toLowerCase().trim();
                                                             const isLocked = !!lockedCounters[cleanCounterKey];
                                                             const cTasks = masterDataList.filter(m => m.counter === cleanCounterKey);
-                                                            const cMaxRound = cTasks.length > 0 ? Math.max(...cTasks.map(t => t.currentRound || 1)) : 1;
+                                                            const cActiveTasks = cTasks.filter(t => !t.isLocked);
+                                                            const cMaxRound = cActiveTasks.length > 0 
+                                                                ? (cActiveTasks[0].currentRound || 1) 
+                                                                : (cTasks.length > 0 ? Math.max(...cTasks.map(t => t.currentRound || 1)) : 1);
 
                                                             return (
                                                                 <div key={idx} className="p-3.5 bg-slate-50/80 hover:bg-slate-50 border border-slate-200/80 rounded-2xl transition-all space-y-2.5">
