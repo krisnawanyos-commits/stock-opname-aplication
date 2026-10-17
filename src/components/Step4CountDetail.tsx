@@ -1199,6 +1199,64 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     triggerSafeBack();
   };
 
+  const [isDeletingRack, setIsDeletingRack] = useState(false);
+
+  const handleDeleteEmptyRack = () => {
+    setModal({
+      isOpen: true,
+      type: 'warning',
+      title: 'Hapus Rak (Salah Buat)?',
+      message: `Rak "${rack.rackNumber}" tidak memiliki SKU sistem. Apakah kamu ingin menghapus rak ini dari daftar tugas kamu?`,
+      showCancel: true,
+      cancelText: 'Batal',
+      confirmText: 'Ya, Hapus Rak Ini',
+      onConfirm: async () => {
+        setIsDeletingRack(true);
+        try {
+          const cleanCounter = (sessionData.primaryCounter || '').toLowerCase().trim();
+          const qSnap = await getDocs(
+            query(
+              collection(db, "master_tasks"),
+              where("Location", "==", rack.rackNumber),
+              where("counter", "==", cleanCounter)
+            )
+          );
+
+          const batch = writeBatch(db);
+          let count = 0;
+          qSnap.forEach(d => {
+            const data = d.data();
+            if (!data.SKU || data.isRackPlaceholder || data.SKU === 'SKU_UNKNOWN') {
+              batch.delete(d.ref);
+              count++;
+            }
+          });
+
+          if (count > 0) {
+            await batch.commit();
+          }
+
+          playScanSuccessBeep();
+          triggerHapticFeedback('success');
+          triggerSafeBack();
+        } catch (err) {
+          console.error("Gagal menghapus rak:", err);
+          playErrorBuzzer();
+          setModal({
+            isOpen: true,
+            type: 'error',
+            title: 'Gagal Menghapus Rak',
+            message: 'Terjadi kesalahan saat menghapus rak: ' + (err as any)?.message,
+            showCancel: false,
+            confirmText: 'Tutup'
+          });
+        } finally {
+          setIsDeletingRack(false);
+        }
+      }
+    });
+  };
+
   const handleSafeLogout = () => {
     if (isDirty) {
       setModal({
@@ -2389,14 +2447,25 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                   Rak <b className="text-slate-800">{rack.rackNumber}</b> tidak memiliki daftar SKU sistem untuk sesi ini. Kamu dapat langsung kembali ke Countsheet List atau mencatat temuan barang fisik baru di bawah.
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={handleSafeBackToList}
-                className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer inline-flex items-center gap-1.5"
-              >
-                <ChevronLeft className="w-4 h-4" />
-                <span>Kembali ke Countsheet List</span>
-              </button>
+              <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={handleSafeBackToList}
+                  className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer inline-flex items-center gap-1.5"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                  <span>Kembali ke Countsheet List</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={isDeletingRack}
+                  onClick={handleDeleteEmptyRack}
+                  className="px-4 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer inline-flex items-center gap-1.5 active:scale-95"
+                >
+                  {isDeletingRack ? <Loader2 className="w-4 h-4 animate-spin text-rose-700" /> : <Trash2 className="w-4 h-4 text-rose-600" />}
+                  <span>{isDeletingRack ? 'Menghapus...' : 'Hapus Rak (Salah Klik)'}</span>
+                </button>
+              </div>
             </div>
           )}
 

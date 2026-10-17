@@ -241,16 +241,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
     const [isDeploySubmitting, setIsDeploySubmitting] = useState<boolean>(false);
     const vendorFileInputRef = useRef<HTMLInputElement>(null);
     const [isVendorImporting, setIsVendorImporting] = useState<boolean>(false);
-    const [lastSwapEvent, setLastSwapEvent] = useState<{
-        swapId: string;
-        sourceCounter: string;
-        targetCounter: string;
-        round: number;
-        sourceItemIds: string[];
-        targetItemIds: string[];
-        timestamp: string;
-    } | null>(null);
-
+    
     // EXPORT CONFIG: Default false agar aman dibagikan ke 3rd party vendor (Blind Count - Tanpa Qty Sistem & Status)
     const [exportIncludeSystemQty, setExportIncludeSystemQty] = useState<boolean>(false);
 
@@ -790,12 +781,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         try {
             const cleanSource = sourceCounter.toLowerCase().trim();
             const sourceTasks = masterDataList.filter(m => (m.counter || '').toLowerCase().trim() === cleanSource);
-            const sourceDispute = sourceTasks.filter(item => {
-                const act = item.countedQty ?? item.Qty;
-                const isR2MatchR1 = (sourceRound === 2 && item.round1Actual !== undefined && act === item.round1Actual);
-                return item.isCounted && act !== item.Qty && !isR2MatchR1;
-            });
-
+            
             const updates: { ref: any; data: any }[] = [];
             const auditEntries: { ref: any; data: any }[] = [];
 
@@ -1015,16 +1001,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     });
                 }
 
-                setLastSwapEvent({
-                    swapId: swapBatchId,
-                    sourceCounter,
-                    targetCounter,
-                    round: nextRound,
-                    sourceItemIds: sourceDispute.map(d => d.id!),
-                    targetItemIds: (targetDisputeInNextRound.length > 0 ? targetDisputeInNextRound : targetDisputeInSourceRound).map(d => d.id!),
-                    timestamp: timestampNow
-                });
-            }
+                            }
 
             // Commit in safe chunks of 400
             const allOps = [...updates, ...auditEntries];
@@ -2554,53 +2531,75 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         );
     };
 
-    const handleRevertLastSwap = async () => {
-        if (!lastSwapEvent || isDeploySubmitting) return;
-        const { sourceCounter, targetCounter, round, sourceItemIds, targetItemIds } = lastSwapEvent;
+    const handleRevertCounterSwap = async (counterName: string) => {
+        if (isDeploySubmitting) return;
+        const cleanCounter = counterName.toLowerCase().trim();
+        const swappedItems = masterDataList.filter(m => 
+            m.id && m.lastSwapBatchId && 
+            ((m.counter || '').toLowerCase().trim() === cleanCounter || (m.previousCounter || '').toLowerCase().trim() === cleanCounter)
+        );
 
-        const affectedItems = masterDataList.filter(m => m.id && (sourceItemIds.includes(m.id) || targetItemIds.includes(m.id)));
-        const alreadyCountedInNewRound = affectedItems.some(m => m.isCounted && m.currentRound === round);
+        if (swappedItems.length === 0) {
+            triggerNotification(`Tidak ditemukan data swap aktif untuk counter "${counterName}".`);
+            return;
+        }
 
-        if (alreadyCountedInNewRound) {
+        const batchId = swappedItems[0].lastSwapBatchId;
+        const batchItems = masterDataList.filter(m => m.id && m.lastSwapBatchId === batchId);
+        const round = batchItems[0].currentRound || 2;
+        const prevRound = round - 1;
+
+        const alreadyCounted = batchItems.some(m => m.isCounted && m.currentRound === round);
+        if (alreadyCounted) {
             triggerNotification(`⚠️ Tidak dapat membatalkan: Salah satu counter sudah mulai menginput hitungan fisik di Ronde ${round}!`);
+            return;
+        }
+
+        const countersInvolved = Array.from(new Set(batchItems.map(m => (m.counter || '').toLowerCase().trim()))).filter(Boolean);
+        const prevCountersInvolved = Array.from(new Set(batchItems.map(m => (m.previousCounter || '').toLowerCase().trim()))).filter(Boolean);
+        const allCounters = Array.from(new Set([...countersInvolved, ...prevCountersInvolved]));
+
+        if (!window.confirm(`Batalkan Swap Ronde ${round} untuk ${allCounters.join(' ⇄ ')}? Seluruh task dispute akan dikembalikan ke counter asal di Ronde ${prevRound}.`)) {
             return;
         }
 
         setIsDeploySubmitting(true);
         try {
-            const prevRound = round - 1;
             const timestampNow = new Date().toISOString();
             const revertOps: { ref: any; data: any }[] = [];
 
-            sourceItemIds.forEach(id => {
-                const m = masterDataList.find(item => item.id === id);
-                if (!m) return;
-                const ref = doc(db, "master_tasks", id);
+            batchItems.forEach(item => {
+                if (!item.id) return;
+                const ref = doc(db, "master_tasks", item.id);
+                const originalCounter = item.previousCounter || (item as any)[`round${prevRound}Counter`] || item.counter;
+                const origActual = (item as any)[`round${prevRound}Actual`] ?? item.countedQty ?? item.Qty;
+
                 revertOps.push({
                     ref,
                     data: {
-                        counter: sourceCounter,
+                        counter: originalCounter,
                         currentRound: prevRound,
                         isCounted: true,
-                        QTY_ACTUAL: m[`round${prevRound}Actual` as keyof MasterSKUItem] ?? m.countedQty ?? m.Qty,
+                        QTY_ACTUAL: origActual,
+                        previousCounter: null,
                         lastSwapBatchId: null,
                         updatedAt: timestampNow
                     }
                 });
             });
 
-            targetItemIds.forEach(id => {
-                const m = masterDataList.find(item => item.id === id);
-                if (!m) return;
-                const ref = doc(db, "master_tasks", id);
+            const lockedItemsToUnlock = masterDataList.filter(m => 
+                m.id && m.isLocked && 
+                allCounters.includes((m.counter || '').toLowerCase().trim()) &&
+                (m.currentRound || 1) <= prevRound
+            );
+            lockedItemsToUnlock.forEach(item => {
+                if (!item.id) return;
+                const ref = doc(db, "master_tasks", item.id);
                 revertOps.push({
                     ref,
                     data: {
-                        counter: targetCounter,
-                        currentRound: prevRound,
-                        isCounted: true,
-                        QTY_ACTUAL: m[`round${prevRound}Actual` as keyof MasterSKUItem] ?? m.countedQty ?? m.Qty,
-                        lastSwapBatchId: null,
+                        isLocked: false,
                         updatedAt: timestampNow
                     }
                 });
@@ -2614,8 +2613,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 await b.commit();
             }
 
-            setLastSwapEvent(null);
-            triggerNotification(`↩️ SUKSES! Pertukaran ${sourceCounter} ⇄ ${targetCounter} berhasil dibatalkan. Seluruh task dikembalikan.`);
+                        triggerNotification(`↩️ SUKSES! Pertukaran ${allCounters.join(' ⇄ ')} berhasil dibatalkan. Seluruh tugas dikembalikan ke Ronde ${prevRound}.`);
         } catch (err: any) {
             console.error("Revert Swap Error:", err);
             triggerNotification(`Gagal membatalkan swap: ${err.message || 'Error'}`);
@@ -2623,6 +2621,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             setIsDeploySubmitting(false);
         }
     };
+
 
     const handleExportReconXLSX = () => {
         if (masterDataList.length === 0) {
@@ -4104,6 +4103,26 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
         return list;
     }, [counterGroups, counterSearch, counterProgressFilter, counterSortBy]);
+
+    const activeUncountedSwaps = useMemo(() => {
+        const batches: Record<string, { id: string; counters: string[]; round: number; count: number }> = {};
+        masterDataList.forEach(m => {
+            if (m.lastSwapBatchId && (m.currentRound || 1) > 1) {
+                const bId = m.lastSwapBatchId;
+                if (!batches[bId]) {
+                    batches[bId] = { id: bId, counters: [], round: m.currentRound || 2, count: 0 };
+                }
+                const c = (m.counter || '').toLowerCase().trim();
+                const p = (m.previousCounter || '').toLowerCase().trim();
+                if (c && !batches[bId].counters.includes(c)) batches[bId].counters.push(c);
+                if (p && !batches[bId].counters.includes(p)) batches[bId].counters.push(p);
+                batches[bId].count++;
+            }
+        });
+        return Object.values(batches).filter(b => {
+            return !masterDataList.some(m => m.lastSwapBatchId === b.id && m.isCounted && (m.currentRound || 1) === b.round);
+        });
+    }, [masterDataList]);
 
     const counterDiscrepancies = useMemo(() => {
         if (!selectedCounterForDetail) return [];
@@ -6969,22 +6988,22 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                         </div>
                                                     </div>
 
-                                                    {/* ACTIVE SWAP REVERT BANNER */}
-                                                    {lastSwapEvent && (
-                                                        <div className="p-3 bg-amber-50 border border-amber-300 rounded-2xl flex items-center justify-between gap-3 shadow-xs animate-in fade-in">
+                                                    {/* ACTIVE SWAP REVERT BANNERS */}
+                                                    {activeUncountedSwaps.map(swap => (
+                                                        <div key={swap.id} className="p-3 bg-amber-50 border border-amber-300 rounded-2xl flex items-center justify-between gap-3 shadow-xs animate-in fade-in">
                                                             <div className="flex items-center space-x-2 text-xs">
                                                                 <span className="material-symbols-outlined text-amber-600 text-lg">swap_horiz</span>
                                                                 <div>
                                                                     <span className="font-black text-amber-950 block text-xs">
-                                                                        Swap Ronde {lastSwapEvent.round} Aktif:
+                                                                        Swap Ronde {swap.round} Aktif:
                                                                     </span>
                                                                     <span className="text-[11px] text-amber-800">
-                                                                        <b className="capitalize">{lastSwapEvent.sourceCounter}</b> ⇄ <b className="capitalize">{lastSwapEvent.targetCounter}</b>
+                                                                        <b className="capitalize">{swap.counters[0]}</b> ⇄ <b className="capitalize">{swap.counters[1] || 'Partner'}</b> ({swap.count} Task Belum Dihitung)
                                                                     </span>
                                                                 </div>
                                                             </div>
                                                             <button
-                                                                onClick={handleRevertLastSwap}
+                                                                onClick={() => handleRevertCounterSwap(swap.counters[0])}
                                                                 disabled={isDeploySubmitting}
                                                                 className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
                                                                 title="Kembalikan penugasan ke counter asal sebelum hitungan fisik dimulai"
@@ -6993,7 +7012,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                                 <span>Batalkan Swap</span>
                                                             </button>
                                                         </div>
-                                                    )}
+                                                    ))}
 
                                                     {/* COUNTER PIC LIST */}
                                                     <div className="space-y-3 max-h-110 overflow-y-auto pr-1 scrollbar-thin">
@@ -7139,6 +7158,42 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                                                                         <div className="text-[10px] text-slate-400 font-normal">Pindahkan rak belum beres</div>
                                                                                                     </div>
                                                                                                 </button>
+
+                                                                                                {effectiveRole === 'owner' && (() => {
+                                                                                                    const activeSwapForCounter = masterDataList.find(m => 
+                                                                                                        m.lastSwapBatchId && (m.currentRound || 1) > 1 &&
+                                                                                                        ((m.counter || '').toLowerCase().trim() === cleanCounterKey || (m.previousCounter || '').toLowerCase().trim() === cleanCounterKey)
+                                                                                                    );
+                                                                                                    if (!activeSwapForCounter) return null;
+                                                                                                    const isSwapCounted = masterDataList.some(m => 
+                                                                                                        m.lastSwapBatchId === activeSwapForCounter.lastSwapBatchId && m.isCounted && (m.currentRound || 1) > 1
+                                                                                                    );
+                                                                                                    return (
+                                                                                                        <button
+                                                                                                            onClick={(e) => {
+                                                                                                                e.stopPropagation();
+                                                                                                                setMenuAnchor(null);
+                                                                                                                handleRevertCounterSwap(cName);
+                                                                                                            }}
+                                                                                                            disabled={isSwapCounted || isDeploySubmitting}
+                                                                                                            className={`w-full text-left px-3 py-2 rounded-xl text-xs font-bold flex items-center space-x-2.5 transition-all cursor-pointer ${
+                                                                                                                isSwapCounted 
+                                                                                                                    ? 'bg-slate-50 text-slate-400 cursor-not-allowed' 
+                                                                                                                    : 'hover:bg-amber-50 text-slate-700 hover:text-amber-800'
+                                                                                                            }`}
+                                                                                                        >
+                                                                                                            <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${isSwapCounted ? 'bg-slate-200 text-slate-400' : 'bg-amber-100 text-amber-700'}`}>
+                                                                                                                <RefreshCw className="w-3.5 h-3.5" />
+                                                                                                            </div>
+                                                                                                            <div className="flex-1 min-w-0">
+                                                                                                                <div className="text-xs font-bold leading-tight">Batalkan Swap / Rollback</div>
+                                                                                                                <div className="text-[10px] text-slate-400 font-normal">
+                                                                                                                    {isSwapCounted ? 'Sudah ada fisik terhitung di R2' : 'Kembalikan tugas ke ronde sebelumnya'}
+                                                                                                                </div>
+                                                                                                            </div>
+                                                                                                        </button>
+                                                                                                    );
+                                                                                                })()}
                                                                                             </div>
 
                                                                                             {/* CETAK COUNTSHEET PDF / A4 BLIND */}

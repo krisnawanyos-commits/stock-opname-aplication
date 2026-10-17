@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { db } from '../firebase';
-import { collection, onSnapshot, query, where, doc, setDoc } from 'firebase/firestore';
+import { collection, onSnapshot, query, where, doc, setDoc, getDocs, writeBatch } from 'firebase/firestore';
 import type { SessionData, RackItem, CustomModalState } from '../types';
 import CustomModal from './CustomModal';
 import NetworkStatusBadge from './NetworkStatusBadge';
@@ -8,7 +8,7 @@ import { useLanguage, LanguageToggle } from '../utils/i18n';
 import { playScanSuccessBeep, triggerHapticFeedback } from '../utils/soundAndHaptics';
 import { 
   ChevronLeft, LogOut, Info, Lock, Warehouse, Edit2, Search, Plus, 
-  Layers, Check, CheckCircle2, Loader2 
+  Layers, Check, CheckCircle2, Loader2, Trash2 
 } from 'lucide-react';
 
 interface Step3CountsheetListProps {
@@ -520,9 +520,49 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
                         </div>
                         <p className="font-body-sm text-body-sm text-on-surface-variant mt-0.5">{rack.countedSKU} / {rack.totalSKU} SKU {lang === 'en' ? 'Counted' : 'Dihitung'} • Zone: {rack.zone}</p>
                       </div>
-                      {rack.status === 'completed' && <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-800 font-label-sm text-label-sm px-2.5 py-1 rounded-full shrink-0 border border-emerald-200"><Check className="w-3 h-3 text-emerald-700 stroke-3" /> {t('rackStatusCompleted')}</span>}
-                      {rack.status === 'in-progress' && <span className="inline-flex items-center gap-1.5 bg-amber-50 text-amber-900 font-label-sm text-label-sm px-2.5 py-1 rounded-full shrink-0 border border-amber-200"><span className="w-1.5 h-1.5 rounded-full bg-amber-600 animate-pulse"></span> {t('rackStatusInProgress')}</span>}
-                      {rack.status === 'pending' && <span className="inline-flex items-center gap-1 bg-surface-container-high text-on-surface-variant font-label-sm text-label-sm px-2.5 py-1 rounded-full shrink-0"><span className="w-1.5 h-1.5 rounded-full bg-outline"></span> {t('rackStatusPending')}</span>}
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {rack.totalSKU === 0 && (
+                          <button
+                            type="button"
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              if (!window.confirm(`Hapus rak "${rack.rackNumber}"? Rak ini kosong dan tidak memiliki SKU terdaftar.`)) return;
+                              try {
+                                const cleanCounter = (sessionData.primaryCounter || '').toLowerCase().trim();
+                                const qSnap = await getDocs(
+                                  query(
+                                    collection(db, "master_tasks"),
+                                    where("Location", "==", rack.rackNumber),
+                                    where("counter", "==", cleanCounter)
+                                  )
+                                );
+                                const batch = writeBatch(db);
+                                let count = 0;
+                                qSnap.forEach(d => {
+                                  const data = d.data();
+                                  if (!data.SKU || data.isRackPlaceholder || data.SKU === 'SKU_UNKNOWN') {
+                                    batch.delete(d.ref);
+                                    count++;
+                                  }
+                                });
+                                if (count > 0) {
+                                  await batch.commit();
+                                }
+                              } catch (err) {
+                                console.error("Gagal menghapus rak kosong:", err);
+                              }
+                            }}
+                            className="p-1 px-2 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-[11px] font-bold flex items-center gap-1 cursor-pointer transition-all active:scale-95"
+                            title="Hapus Rak Kosong (Salah Buat)"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>Hapus</span>
+                          </button>
+                        )}
+                        {rack.status === 'completed' && <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-800 font-label-sm text-label-sm px-2.5 py-1 rounded-full shrink-0 border border-emerald-200"><Check className="w-3 h-3 text-emerald-700 stroke-3" /> {t('rackStatusCompleted')}</span>}
+                        {rack.status === 'in-progress' && <span className="inline-flex items-center gap-1.5 bg-amber-50 text-amber-900 font-label-sm text-label-sm px-2.5 py-1 rounded-full shrink-0 border border-amber-200"><span className="w-1.5 h-1.5 rounded-full bg-amber-600 animate-pulse"></span> {t('rackStatusInProgress')}</span>}
+                        {rack.status === 'pending' && <span className="inline-flex items-center gap-1 bg-surface-container-high text-on-surface-variant font-label-sm text-label-sm px-2.5 py-1 rounded-full shrink-0"><span className="w-1.5 h-1.5 rounded-full bg-outline"></span> {t('rackStatusPending')}</span>}
+                      </div>
                     </div>
                   </div>
                 ))}
