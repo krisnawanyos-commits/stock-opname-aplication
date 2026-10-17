@@ -2784,45 +2784,80 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
     };
 
     const handleExportAuditTrailXLSX = async () => {
+        // Helper: parse timestamp dari berbagai format (ISO string, number, Firestore Timestamp)
+        const formatTs = (ts: any): string => {
+            if (!ts) return '-';
+            try {
+                let d: Date;
+                if (typeof ts?.toDate === 'function') d = ts.toDate();
+                else if (typeof ts === 'object' && typeof ts.seconds === 'number') d = new Date(ts.seconds * 1000);
+                else d = new Date(ts);
+                return isNaN(d.getTime()) ? String(ts) : d.toLocaleString('id-ID');
+            } catch {
+                return String(ts);
+            }
+        };
+        // Helper: pastikan nilai sel aman untuk Excel (bukan object, max 32767 karakter)
+        const cell = (v: any, fallback: any = '-') => {
+            if (v === undefined || v === null || v === '') return fallback;
+            if (typeof v === 'number' || typeof v === 'boolean') return v;
+            const s = typeof v === 'object' ? JSON.stringify(v) : String(v);
+            return s.length > 32000 ? s.slice(0, 32000) + '…' : s;
+        };
+
+        let rawLogs: any[] = [];
+        let usedFallback = false;
         try {
             triggerNotification("Memuat Audit Trail dari Cloud...");
             const qAuditFull = query(collection(db, "audit_logs"), orderBy("timestamp", "desc"), limit(20000));
             const snap = await getDocs(qAuditFull);
-
-            if (snap.empty) {
-                triggerNotification("Belum ada data Audit Trail!");
+            rawLogs = snap.docs.map(d => d.data());
+        } catch (err: any) {
+            console.error("Export Audit Error (fetch):", err);
+            if (auditLogs.length > 0) {
+                // Fallback ke cache realtime (100 log terbaru) agar tetap bisa diunduh
+                rawLogs = auditLogs;
+                usedFallback = true;
+            } else {
+                triggerNotification(`Gagal memuat Audit Log: ${err?.code || ''} ${err?.message || 'Error'}`.trim());
                 return;
             }
+        }
 
-            const exportLogs = snap.docs.map((docSnap, idx) => {
-                const log = docSnap.data();
-                return {
-                    'NO': idx + 1,
-                    'TIMESTAMP (JAM SUBMIT)': log.timestamp ? new Date(log.timestamp).toLocaleString('id-ID') : '-',
-                    'LOKASI RAK': log.rackLocation || log.Location || '-',
-                    'OWNER SKU': log.ownerSku || log.Owner || 'DDI',
-                    'SKU': log.sku || log.SKU || '-',
-                    'DESKRIPSI PRODUK': log.description || log.Description || '-',
-                    'UPC 1': log.upc1 || log.UPC1 || '-',
-                    'UPC 2': log.upc2 || log.UPC2 || '-',
-                    'COUNTER PIC': log.counterPic || log.counter || '-',
-                    'RONDE': `Round ${log.round || log.currentRound || 1}`,
-                    'QTY GOOD': log.qtyGood ?? 0,
-                    'QTY BAD': log.qtyBad ?? 0,
-                    'TOTAL FINAL SUBMITTED': log.totalFinalSubmitted ?? log.qtyActual ?? 0,
-                    'ED ACTUAL': log.edActual || log.expiredDateActual || '-',
-                    'CATATAN (REMARKS)': log.remarks || log.Remarks || '-'
-                };
-            });
+        if (rawLogs.length === 0) {
+            triggerNotification("Belum ada data Audit Trail!");
+            return;
+        }
+
+        try {
+            const exportLogs = rawLogs.map((log: any, idx: number) => ({
+                'NO': idx + 1,
+                'TIMESTAMP (JAM SUBMIT)': formatTs(log.timestamp),
+                'LOKASI RAK': cell(log.rackLocation || log.Location),
+                'OWNER SKU': cell(log.ownerSku || log.Owner, 'DDI'),
+                'SKU': cell(log.sku || log.SKU),
+                'DESKRIPSI PRODUK': cell(log.description || log.Description),
+                'UPC 1': cell(log.upc1 || log.UPC1),
+                'UPC 2': cell(log.upc2 || log.UPC2),
+                'COUNTER PIC': cell(log.counterPic || log.counter),
+                'RONDE': `Round ${log.round || log.currentRound || 1}`,
+                'QTY GOOD': cell(log.qtyGood, 0),
+                'QTY BAD': cell(log.qtyBad, 0),
+                'TOTAL FINAL SUBMITTED': cell(log.totalFinalSubmitted ?? log.qtyActual, 0),
+                'ED ACTUAL': cell(log.edActual || log.expiredDateActual),
+                'CATATAN (REMARKS)': cell(log.remarks || log.Remarks)
+            }));
 
             const ws = XLSX.utils.json_to_sheet(exportLogs);
             const wb = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(wb, ws, "Audit_Trail_Log");
             XLSX.writeFile(wb, `Audit_Trail_Snapshot_${activeProject?.sessionCode || '360'}_${Date.now()}.xlsx`);
-            triggerNotification("Audit Trail Log (.xlsx) berhasil diunduh!");
+            triggerNotification(usedFallback
+                ? "Cloud gagal diakses — diunduh 100 log terbaru dari cache."
+                : "Audit Trail Log (.xlsx) berhasil diunduh!");
         } catch (err: any) {
-            console.error("Export Audit Error:", err);
-            triggerNotification("Gagal mengunduh Audit Log.");
+            console.error("Export Audit Error (xlsx):", err);
+            triggerNotification(`Gagal membuat file Audit Log: ${err?.message || 'Error'}`);
         }
     };
 
