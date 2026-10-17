@@ -2590,24 +2590,31 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
     const handleRevertCounterSwap = async (counterName: string) => {
         if (isDeploySubmitting) return;
         const cleanCounter = counterName.toLowerCase().trim();
-        const swappedItems = masterDataList.filter(m => 
-            m.id && m.lastSwapBatchId && 
-            ((m.counter || '').toLowerCase().trim() === cleanCounter || (m.previousCounter || '').toLowerCase().trim() === cleanCounter)
-        );
+        
+        // Cari ronde tertinggi counter ini
+        const currentCounterTasks = masterDataList.filter(m => (m.counter || '').toLowerCase().trim() === cleanCounter);
+        const maxRound = currentCounterTasks.length > 0 ? Math.max(...currentCounterTasks.map(t => t.currentRound || 1)) : 1;
+        const prevRound = maxRound - 1;
 
-        if (swappedItems.length === 0) {
-            triggerNotification(`Tidak ditemukan data swap aktif untuk counter "${counterName}".`);
+        if (maxRound <= 1) {
+            triggerNotification(`Counter "${counterName}" masih berada di Ronde 1, tidak ada ronde yang bisa dibatalkan.`);
             return;
         }
 
-        const batchId = swappedItems[0].lastSwapBatchId;
-        const batchItems = masterDataList.filter(m => m.id && m.lastSwapBatchId === batchId);
-        const round = batchItems[0].currentRound || 2;
-        const prevRound = round - 1;
+        // Cari task swap batch atau seluruh task counter ini di ronde aktif
+        const batchItem = masterDataList.find(m => 
+            m.id && m.lastSwapBatchId && 
+            ((m.counter || '').toLowerCase().trim() === cleanCounter || (m.previousCounter || '').toLowerCase().trim() === cleanCounter)
+        );
+        const batchId = batchItem?.lastSwapBatchId;
 
-        const alreadyCounted = batchItems.some(m => m.isCounted && m.currentRound === round);
+        const batchItems = batchId
+            ? masterDataList.filter(m => m.id && m.lastSwapBatchId === batchId)
+            : masterDataList.filter(m => m.id && (m.counter || '').toLowerCase().trim() === cleanCounter && (m.currentRound || 1) === maxRound);
+
+        const alreadyCounted = batchItems.some(m => m.isCounted && (m.currentRound || 1) === maxRound);
         if (alreadyCounted) {
-            triggerNotification(`⚠️ Tidak dapat membatalkan: Salah satu counter sudah mulai menginput hitungan fisik di Ronde ${round}!`);
+            triggerNotification(`⚠️ Tidak dapat membatalkan: Salah satu counter sudah mulai menginput hitungan fisik di Ronde ${maxRound}!`);
             return;
         }
 
@@ -2615,7 +2622,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         const prevCountersInvolved = Array.from(new Set(batchItems.map(m => (m.previousCounter || '').toLowerCase().trim()))).filter(Boolean);
         const allCounters = Array.from(new Set([...countersInvolved, ...prevCountersInvolved]));
 
-        if (!window.confirm(`Batalkan Swap Ronde ${round} untuk ${allCounters.join(' ⇄ ')}? Seluruh task dispute akan dikembalikan ke counter asal di Ronde ${prevRound}.`)) {
+        if (!window.confirm(`Batalkan Ronde ${maxRound} untuk ${allCounters.join(' ⇄ ')}? Seluruh task dispute akan dikembalikan ke counter asal di Ronde ${prevRound}.`)) {
             return;
         }
 
@@ -2669,7 +2676,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 await b.commit();
             }
 
-                        triggerNotification(`↩️ SUKSES! Pertukaran ${allCounters.join(' ⇄ ')} berhasil dibatalkan. Seluruh tugas dikembalikan ke Ronde ${prevRound}.`);
+            triggerNotification(`↩️ SUKSES! Pertukaran ${allCounters.join(' ⇄ ')} berhasil dibatalkan. Seluruh tugas dikembalikan ke Ronde ${prevRound}.`);
         } catch (err: any) {
             console.error("Revert Swap Error:", err);
             triggerNotification(`Gagal membatalkan swap: ${err.message || 'Error'}`);
@@ -2677,7 +2684,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             setIsDeploySubmitting(false);
         }
     };
-
 
     const handleExportReconXLSX = () => {
         if (masterDataList.length === 0) {
@@ -7248,17 +7254,13 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                                                                     </div>
                                                                                                 </button>
 
-                                                                                                {effectiveRole === 'owner' && (() => {
-                                                                                                    const activeSwapForCounter = masterDataList.find(m => 
-                                                                                                        m.lastSwapBatchId && (m.currentRound || 1) > 1 &&
-                                                                                                        ((m.counter || '').toLowerCase().trim() === cleanCounterKey || (m.previousCounter || '').toLowerCase().trim() === cleanCounterKey)
-                                                                                                    );
-                                                                                                    if (!activeSwapForCounter) return null;
+                                                                                                {effectiveRole === 'owner' && cMaxRound > 1 && (() => {
                                                                                                     const isSwapCounted = masterDataList.some(m => 
-                                                                                                        m.lastSwapBatchId === activeSwapForCounter.lastSwapBatchId && m.isCounted && (m.currentRound || 1) > 1
+                                                                                                        (m.counter || '').toLowerCase().trim() === cleanCounterKey && m.isCounted && (m.currentRound || 1) === cMaxRound
                                                                                                     );
                                                                                                     return (
                                                                                                         <button
+                                                                                                            type="button"
                                                                                                             onClick={(e) => {
                                                                                                                 e.stopPropagation();
                                                                                                                 setMenuAnchor(null);
@@ -7277,7 +7279,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                                                                             <div className="flex-1 min-w-0">
                                                                                                                 <div className="text-xs font-bold leading-tight">Batalkan Swap / Rollback</div>
                                                                                                                 <div className="text-[10px] text-slate-400 font-normal">
-                                                                                                                    {isSwapCounted ? 'Sudah ada fisik terhitung di R2' : 'Kembalikan tugas ke ronde sebelumnya'}
+                                                                                                                    {isSwapCounted ? `Sudah ada fisik terhitung di R${cMaxRound}` : `Kembalikan tugas ke Ronde ${cMaxRound - 1}`}
                                                                                                                 </div>
                                                                                                             </div>
                                                                                                         </button>
