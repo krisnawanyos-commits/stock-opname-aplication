@@ -1367,10 +1367,23 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       ? (formatBadRemarks(unmappedBadBreakdown, unmappedUnit) || (unmappedSelectedCategories.length > 0 ? `[BAD STOCK] ${unmappedSelectedCategories.join(', ')}` : '[BAD STOCK]'))
       : '[BARANG TEMUAN FISIK]';
 
+    const cleanCode = unmappedBarcode.trim().toLowerCase();
+    const existingInRack = skuList.find(
+      (item) =>
+        item.sku.toUpperCase() === unmSku.toUpperCase() ||
+        (item.upc && item.upc.toLowerCase() === cleanCode) ||
+        (item.upc2 && item.upc2.toLowerCase() === cleanCode)
+    );
+
+    const activeRound = existingInRack?.currentRound || (skuList.length > 0 ? (skuList[0].currentRound || 1) : 1);
+
     const batch = writeBatch(db);
 
     // 1. Simpan inputan lokal SKU lain
     skuList.forEach(skuItem => {
+      // Jika SKU ini adalah existingInRack, lewati karena akan di-update khusus dengan inputan form temuan
+      if (existingInRack && skuItem.sku.toUpperCase() === existingInRack.sku.toUpperCase()) return;
+
       const rawGood = parseFloat(skuItem.qtyGood || "0") || 0;
       const rawBad = parseFloat(skuItem.qtyBad || "0") || 0;
       const pcsRatio = skuItem.pcsPerCarton || (skuItem.uom === 'CARTON' ? 24 : 1);
@@ -1412,35 +1425,60 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       }
     });
 
-    // 2. Simpan dokumen temuan baru
-    const taskId = `${rack.rackNumber}_${unmSku}_TEMUAN_${Date.now()}`;
-    const taskRef = doc(db, "master_tasks", taskId);
+    // 2. Simpan atau perbarui dokumen temuan
+    if (existingInRack) {
+      // SKU ini SUDAH ADA di rak (misal bawaan R1 yang dideploy ke R2)!
+      // Cukup update dokumen task yang sudah ada, JANGAN buat dokumen baru agar tidak double.
+      existingInRack.docIds.forEach((docId, i) => {
+        const existingTaskRef = doc(db, "master_tasks", docId);
+        batch.set(existingTaskRef, {
+          counter: cleanCounter,
+          counterPendamping: sessionData.partners?.[0] || '',
+          partner: sessionData.partners?.[0] || '',
+          isCounted: true,
+          QTY_ACTUAL: i === 0 ? totalSubmitted : 0,
+          QTY_GOOD: i === 0 ? qtyNumber : 0,
+          QTY_BAD: i === 0 ? badQtyNum : 0,
+          badRemarks: i === 0 ? badCatRemarks : '',
+          badBreakdown: i === 0 ? (unmappedBadBreakdown || {}) : {},
+          selectedCategories: i === 0 ? (unmappedSelectedCategories || []) : [],
+          photoUrl: unmappedPhotoUrl || existingInRack.photoUrl || '',
+          expDateActual: unmappedExpDate || existingInRack.expDateActual || '',
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+      });
+    } else {
+      // Belum ada sama sekali di rak -> Simpan dokumen temuan baru dengan ronde aktif
+      const taskId = `${rack.rackNumber}_${unmSku}_TEMUAN_${Date.now()}`;
+      const taskRef = doc(db, "master_tasks", taskId);
 
-    batch.set(taskRef, {
-      projectId: sessionData.projectId || '',
-      Owner: unmOwner,
-      SKU: unmSku,
-      Description: unmDesc,
-      UPC1: unmappedBarcode.trim(),
-      UPC2: '',
-      SKUBrand: unmBrand,
-      Location: rack.rackNumber,
-      counter: cleanCounter,
-      counterPendamping: sessionData.partners?.[0] || '',
-      partner: sessionData.partners?.[0] || '',
-      currentRound: 1,
-      Qty: 0,
-      QTY_ACTUAL: totalSubmitted,
-      QTY_GOOD: qtyNumber,
-      QTY_BAD: badQtyNum,
-      isCounted: true,
-      unitPrice: unmPrice,
-      badRemarks: badCatRemarks,
-      badBreakdown: unmappedBadBreakdown || {},
-      selectedCategories: unmappedSelectedCategories || [],
-      photoUrl: unmappedPhotoUrl || '',
-      updatedAt: new Date().toISOString()
-    }, { merge: true });
+      batch.set(taskRef, {
+        projectId: sessionData.projectId || '',
+        Owner: unmOwner,
+        SKU: unmSku,
+        Description: unmDesc,
+        UPC1: unmappedBarcode.trim(),
+        UPC2: '',
+        SKUBrand: unmBrand,
+        Location: rack.rackNumber,
+        counter: cleanCounter,
+        counterPendamping: sessionData.partners?.[0] || '',
+        partner: sessionData.partners?.[0] || '',
+        currentRound: activeRound,
+        Qty: 0,
+        QTY_ACTUAL: totalSubmitted,
+        QTY_GOOD: qtyNumber,
+        QTY_BAD: badQtyNum,
+        isCounted: true,
+        unitPrice: unmPrice,
+        badRemarks: badCatRemarks,
+        badBreakdown: unmappedBadBreakdown || {},
+        selectedCategories: unmappedSelectedCategories || [],
+        photoUrl: unmappedPhotoUrl || '',
+        expDateActual: unmappedExpDate || '',
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+    }
 
     // 3. Log Audit Trail (Auto-ID)
     const auditRef = doc(collection(db, "audit_logs"));
@@ -1455,7 +1493,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       upc1: unmappedBarcode.trim(),
       upc2: '-',
       counterPic: cleanCounter,
-      round: 1,
+      round: activeRound,
       qtyGood: qtyNumber,
       qtyBad: badQtyNum,
       totalFinalSubmitted: totalSubmitted,
@@ -1476,7 +1514,14 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     setUnmappedSelectedCategories([]);
     setUnmappedBadBreakdown({});
     setUnmappedDrawerOpen(false);
-    setModal({ isOpen: true, type: 'success', title: 'Item Temuan Tersimpan!', message: `Item ${unmSku} & seluruh inputan SKU lain pada Rak ${rack.rackNumber} tersimpan aman!` });
+    setModal({
+      isOpen: true,
+      type: 'success',
+      title: 'Item Temuan Tersimpan!',
+      message: existingInRack
+        ? `Item ${unmSku} sudah ada di rak ini dan berhasil diperbarui dengan hasil hitungan ${totalSubmitted}!`
+        : `Item ${unmSku} & seluruh inputan SKU lain pada Rak ${rack.rackNumber} tersimpan aman!`
+    });
   };
 
   const handleDeleteUnmapped = (id: string) => {
