@@ -704,6 +704,12 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                         round1Actual: data.round1Actual,
                         round2Actual: data.round2Actual,
                         round3Actual: data.round3Actual,
+                        round1Counter: data.round1Counter,
+                        round2Counter: data.round2Counter,
+                        round3Counter: data.round3Counter,
+                        previousCounter: data.previousCounter,
+                        counterPendamping: data.counterPendamping || data.partner,
+                        partner: data.partner,
                         isLocked: !!data.isLocked,
                         photoUrl: data.photoUrl || ''
                     };
@@ -2268,14 +2274,15 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
         const rows = sortedList.map((item, idx) => {
             const sysQty = item.Qty || 0;
-            const r1Actual = item.round1Actual !== undefined ? item.round1Actual : (item.currentRound === 1 && item.isCounted ? (item.countedQty ?? item.QTY_ACTUAL) : '-');
-            const r1Counter = item.round1Counter || (item.currentRound === 1 ? item.counter : '-');
+            const curRound = Number(item.currentRound) || 1;
+            const r1Actual = item.round1Actual !== undefined ? item.round1Actual : (curRound === 1 && item.isCounted ? (item.countedQty ?? item.QTY_ACTUAL) : '-');
+            const r1Counter = item.round1Counter || (curRound === 1 ? item.counter : (item.previousCounter || '-'));
 
-            const r2Actual = item.round2Actual !== undefined ? item.round2Actual : (item.currentRound === 2 && item.isCounted ? (item.countedQty ?? item.QTY_ACTUAL) : '-');
-            const r2Counter = item.round2Counter || (item.currentRound === 2 ? item.counter : '-');
+            const r2Actual = item.round2Actual !== undefined ? item.round2Actual : (curRound === 2 && item.isCounted ? (item.countedQty ?? item.QTY_ACTUAL) : '-');
+            const r2Counter = item.round2Counter || (curRound === 2 ? item.counter : '-');
 
-            const r3Actual = item.round3Actual !== undefined ? item.round3Actual : (item.currentRound >= 3 && item.isCounted ? (item.countedQty ?? item.QTY_ACTUAL) : '-');
-            const r3Counter = item.round3Counter || (item.currentRound >= 3 ? item.counter : '-');
+            const r3Actual = item.round3Actual !== undefined ? item.round3Actual : (curRound >= 3 && item.isCounted ? (item.countedQty ?? item.QTY_ACTUAL) : '-');
+            const r3Counter = item.round3Counter || (curRound >= 3 ? item.counter : '-');
 
             const isCounted = !!item.isCounted;
             const effectiveActual = isCounted ? (item.countedQty ?? item.QTY_ACTUAL ?? sysQty) : '-';
@@ -2738,6 +2745,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     ? (item.photoUrl.startsWith('http') ? item.photoUrl : 'ADA FOTO FISIK (Lihat di Web/App)')
                     : '-';
 
+                const curRound = Number(item.currentRound) || 1;
                 return {
                     'NO': idx + 1,
                     'OWNER SKU': item.Owner || 'DDI',
@@ -2747,12 +2755,12 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     'DESKRIPSI PRODUK': item.Description,
                     'BRAND': item.SKUBrand || '',
                     'LOKASI RAK': item.Location,
-                    'COUNTER R1': item.round1Counter || (item.currentRound >= 1 ? (item.previousCounter || item.counter) : '-'),
-                    'QTY R1': item.round1Actual !== undefined ? item.round1Actual : (item.currentRound === 1 && isCounted ? actQty : '-'),
-                    'COUNTER R2': item.round2Counter || (item.currentRound >= 2 ? (item.currentRound === 2 ? item.counter : (item.previousCounter || '-')) : '-'),
-                    'QTY R2': item.round2Actual !== undefined ? item.round2Actual : (item.currentRound === 2 && isCounted ? actQty : '-'),
-                    'COUNTER R3': item.round3Counter || (item.currentRound >= 3 ? item.counter : '-'),
-                    'QTY R3': item.round3Actual !== undefined ? item.round3Actual : (item.currentRound === 3 && isCounted ? actQty : '-'),
+                    'COUNTER R1': item.round1Counter || (curRound >= 1 ? (item.previousCounter || item.counter) : '-'),
+                    'QTY R1': item.round1Actual !== undefined ? item.round1Actual : (curRound === 1 && isCounted ? actQty : '-'),
+                    'COUNTER R2': item.round2Counter || (curRound >= 2 ? (curRound === 2 ? item.counter : (item.previousCounter || '-')) : '-'),
+                    'QTY R2': item.round2Actual !== undefined ? item.round2Actual : (curRound === 2 && isCounted ? actQty : '-'),
+                    'COUNTER R3': item.round3Counter || (curRound >= 3 ? item.counter : '-'),
+                    'QTY R3': item.round3Actual !== undefined ? item.round3Actual : (curRound >= 3 && isCounted ? actQty : '-'),
                     'FINAL COUNTER PIC': item.counter,
                     'QTY SYSTEM (WMS)': sysQty,
                     'QTY GOOD': isCounted ? goodQty : '-',
@@ -3696,7 +3704,13 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 tasks = masterDataList;
             } else {
                 const tasksSnap = await getDocs(collection(db, "master_tasks"));
-                tasks = tasksSnap.docs.map(docSnap => {
+                const filteredDocs = tasksSnap.docs.filter(docSnap => {
+                    const data = docSnap.data();
+                    if (proj.id && data.projectId && data.projectId !== proj.id) return false;
+                    if (!data.SKU || !data.SKU.trim() || data.SKU === 'SKU_UNKNOWN') return false;
+                    return true;
+                });
+                tasks = filteredDocs.map(docSnap => {
                     const data = docSnap.data();
                     const gQty = data.QTY_GOOD ?? data.qtyGood;
                     const bQty = data.QTY_BAD ?? data.qtyBad;
@@ -3736,7 +3750,15 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                         unitPrice: parseInt(data.unitPrice) || 0,
                         round1Actual: data.round1Actual,
                         round2Actual: data.round2Actual,
-                        round3Actual: data.round3Actual
+                        round3Actual: data.round3Actual,
+                        round1Counter: data.round1Counter,
+                        round2Counter: data.round2Counter,
+                        round3Counter: data.round3Counter,
+                        previousCounter: data.previousCounter,
+                        counterPendamping: data.counterPendamping || data.partner,
+                        partner: data.partner,
+                        isLocked: !!data.isLocked,
+                        photoUrl: data.photoUrl || ''
                     } as MasterSKUItem;
                 });
             }
@@ -3869,9 +3891,12 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     "BARCODE / UPC": t.UPC1 || t.UPC2 || '-',
                     "SATUAN": t.satuanHitung || 'PCS',
                     "QTY SISTEM": sysQty,
-                    "ROUND 1": t.round1Actual !== undefined ? t.round1Actual : '-',
-                    "ROUND 2": t.round2Actual !== undefined ? t.round2Actual : '-',
-                    "ROUND 3": t.round3Actual !== undefined ? t.round3Actual : '-',
+                    "PIC R1": t.round1Counter || (((Number(t.currentRound) || 1) === 1) ? t.counter : (t.previousCounter || '-')),
+                    "ROUND 1": t.round1Actual !== undefined ? t.round1Actual : (((Number(t.currentRound) || 1) === 1 && t.isCounted) ? actQty : '-'),
+                    "PIC R2": t.round2Counter || (Number(t.currentRound) === 2 ? t.counter : '-'),
+                    "ROUND 2": t.round2Actual !== undefined ? t.round2Actual : ((Number(t.currentRound) === 2 && t.isCounted) ? actQty : '-'),
+                    "PIC R3": t.round3Counter || (Number(t.currentRound) >= 3 ? t.counter : '-'),
+                    "ROUND 3": t.round3Actual !== undefined ? t.round3Actual : ((Number(t.currentRound) >= 3 && t.isCounted) ? actQty : '-'),
                     "FINAL FISIK": t.isCounted ? actQty : '-',
                     "QTY GOOD": t.isCounted ? (t.qtyGood ?? actQty) : '-',
                     "QTY BAD": t.isCounted ? (t.qtyBad ?? 0) : '-',
@@ -3879,7 +3904,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     "STATUS VARIANSI": statusVariance,
                     "HARGA SATUAN": t.unitPrice || 0,
                     "ESTIMASI NILAI SELISIH": t.isCounted ? (diff * (t.unitPrice || 0)) : 0,
-                    "COUNTER": t.counter || '-',
+                    "FINAL PIC COUNTER": t.counter || '-',
                     "KETERANGAN": t.Remarks || '-'
                 };
             });
