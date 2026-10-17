@@ -174,6 +174,8 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
     const [selectedCounterForDetail, setSelectedCounterForDetail] = useState<string | null>(null);
     const [ktpSearch, setKtpSearch] = useState<string>('');
     const [counterSearch, setCounterSearch] = useState<string>('');
+    const [counterProgressFilter, setCounterProgressFilter] = useState<'ALL' | 'IN_PROGRESS' | 'DONE' | 'NOT_STARTED' | 'DISPUTE'>('ALL');
+    const [counterSortBy, setCounterSortBy] = useState<'NAME_ASC' | 'PROGRESS_ASC' | 'PROGRESS_DESC' | 'DISPUTE_DESC'>('NAME_ASC');
     const [catalogSearch, setCatalogSearch] = useState<string>('');
     const [masterTaskSearch, setMasterTaskSearch] = useState<string>('');
 
@@ -783,7 +785,8 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
         setIsDeploySubmitting(true);
         try {
-            const sourceTasks = masterDataList.filter(m => m.counter === sourceCounter);
+            const cleanSource = sourceCounter.toLowerCase().trim();
+            const sourceTasks = masterDataList.filter(m => (m.counter || '').toLowerCase().trim() === cleanSource);
             const sourceDispute = sourceTasks.filter(item => {
                 const act = item.countedQty ?? item.Qty;
                 const isR2MatchR1 = (sourceRound === 2 && item.round1Actual !== undefined && act === item.round1Actual);
@@ -951,7 +954,8 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 });
 
                 // 2. Periksa tugas targetCounter
-                const targetTasks = masterDataList.filter(m => m.counter === targetCounter);
+                const cleanTarget = targetCounter.toLowerCase().trim();
+                const targetTasks = masterDataList.filter(m => (m.counter || '').toLowerCase().trim() === cleanTarget);
                 const targetDisputeInNextRound = targetTasks.filter(item => item.currentRound === nextRound && !item.isCounted);
                 const targetDisputeInSourceRound = targetTasks.filter(item => {
                     const act = item.countedQty ?? item.Qty;
@@ -4012,6 +4016,92 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         );
     }, [counterGroups, counterSearch]);
 
+    const counterFilterCounts = useMemo(() => {
+        let done = 0;
+        let inProgress = 0;
+        let notStarted = 0;
+        let dispute = 0;
+
+        Object.keys(counterGroups).forEach(cName => {
+            const cData = counterGroups[cName];
+            if (!cData || cData.total === 0) {
+                notStarted++;
+                return;
+            }
+            if (cData.counted === 0) {
+                notStarted++;
+            } else if (cData.counted >= cData.total) {
+                done++;
+            } else {
+                inProgress++;
+            }
+
+            if (cData.errorCount > 0) {
+                dispute++;
+            }
+        });
+
+        return {
+            all: Object.keys(counterGroups).length,
+            done,
+            inProgress,
+            notStarted,
+            dispute
+        };
+    }, [counterGroups]);
+
+    const displayedCounterNames = useMemo(() => {
+        const lowerSearch = counterSearch.toLowerCase().trim();
+        let list = Object.keys(counterGroups).filter(cName =>
+            cName.toLowerCase().includes(lowerSearch)
+        );
+
+        if (counterProgressFilter === 'DONE') {
+            list = list.filter(cName => {
+                const c = counterGroups[cName];
+                return c && c.total > 0 && c.counted >= c.total;
+            });
+        } else if (counterProgressFilter === 'IN_PROGRESS') {
+            list = list.filter(cName => {
+                const c = counterGroups[cName];
+                return c && c.total > 0 && c.counted > 0 && c.counted < c.total;
+            });
+        } else if (counterProgressFilter === 'NOT_STARTED') {
+            list = list.filter(cName => {
+                const c = counterGroups[cName];
+                return !c || c.total === 0 || c.counted === 0;
+            });
+        } else if (counterProgressFilter === 'DISPUTE') {
+            list = list.filter(cName => {
+                const c = counterGroups[cName];
+                return c && c.errorCount > 0;
+            });
+        }
+
+        list.sort((a, b) => {
+            const cA = counterGroups[a] || { total: 0, counted: 0, errorCount: 0 };
+            const cB = counterGroups[b] || { total: 0, counted: 0, errorCount: 0 };
+            const pctA = cA.total > 0 ? (cA.counted / cA.total) * 100 : 0;
+            const pctB = cB.total > 0 ? (cB.counted / cB.total) * 100 : 0;
+
+            if (counterSortBy === 'PROGRESS_ASC') {
+                if (pctA !== pctB) return pctA - pctB;
+                return a.localeCompare(b);
+            }
+            if (counterSortBy === 'PROGRESS_DESC') {
+                if (pctA !== pctB) return pctB - pctA;
+                return a.localeCompare(b);
+            }
+            if (counterSortBy === 'DISPUTE_DESC') {
+                if (cA.errorCount !== cB.errorCount) return cB.errorCount - cA.errorCount;
+                return a.localeCompare(b);
+            }
+            return a.localeCompare(b);
+        });
+
+        return list;
+    }, [counterGroups, counterSearch, counterProgressFilter, counterSortBy]);
+
     const counterDiscrepancies = useMemo(() => {
         if (!selectedCounterForDetail) return [];
         return masterDataList.filter(m => m.counter === selectedCounterForDetail && m.isCounted && (m.countedQty ?? m.Qty) !== m.Qty);
@@ -5036,10 +5126,11 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                         <button
                                             type="button"
                                             onClick={() => {
-                                                const eligibleCandidates = filteredCounterNames.filter(cName => {
-                                                    if (cName === deployModal.sourceCounter) return false;
+                                                const cleanSource = (deployModal.sourceCounter || '').toLowerCase().trim();
+                                                const eligibleCandidates = Object.keys(counterGroups).filter(cName => {
+                                                    if ((cName || '').toLowerCase().trim() === cleanSource) return false;
                                                     const cData = counterGroups[cName];
-                                                    const cTasks = masterDataList.filter(m => m.counter === cName);
+                                                    const cTasks = masterDataList.filter(m => (m.counter || '').toLowerCase().trim() === cName.toLowerCase().trim());
                                                     const cRound = cTasks.length > 0 ? Math.max(...cTasks.map(t => t.currentRound || 1)) : 1;
                                                     const isAlreadyInNextRound = cRound === deployModal.sourceRound + 1;
                                                     const isSameRoundDone = (cRound === deployModal.sourceRound) && (cData && cData.total > 0 && cData.counted === cData.total);
@@ -5076,9 +5167,24 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
                                     {/* Counter Candidate List */}
                                     <div className="max-h-48 overflow-y-auto space-y-2 pr-1 scrollbar-thin">
-                                        {filteredCounterNames
-                                            .filter(cName => cName !== deployModal.sourceCounter)
+                                        {Object.keys(counterGroups)
+                                            .filter(cName => cName.toLowerCase().trim() !== (deployModal.sourceCounter || '').toLowerCase().trim())
                                             .filter(cName => cName.toLowerCase().includes(deployModal.searchQuery.toLowerCase()))
+                                            .sort((a, b) => {
+                                                const cDataA = counterGroups[a];
+                                                const cTasksA = masterDataList.filter(m => (m.counter || '').toLowerCase().trim() === a.toLowerCase().trim());
+                                                const cRoundA = cTasksA.length > 0 ? Math.max(...cTasksA.map(t => t.currentRound || 1)) : 1;
+                                                const isEligibleA = (cRoundA === deployModal.sourceRound + 1) || ((cRoundA === deployModal.sourceRound) && (cDataA && cDataA.total > 0 && cDataA.counted === cDataA.total));
+
+                                                const cDataB = counterGroups[b];
+                                                const cTasksB = masterDataList.filter(m => (m.counter || '').toLowerCase().trim() === b.toLowerCase().trim());
+                                                const cRoundB = cTasksB.length > 0 ? Math.max(...cTasksB.map(t => t.currentRound || 1)) : 1;
+                                                const isEligibleB = (cRoundB === deployModal.sourceRound + 1) || ((cRoundB === deployModal.sourceRound) && (cDataB && cDataB.total > 0 && cDataB.counted === cDataB.total));
+
+                                                if (isEligibleA && !isEligibleB) return -1;
+                                                if (!isEligibleA && isEligibleB) return 1;
+                                                return a.localeCompare(b);
+                                            })
                                             .map((cName) => {
                                                 const cData = counterGroups[cName];
                                                 const cTasks = masterDataList.filter(m => m.counter === cName);
@@ -5144,9 +5250,15 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                 );
                                             })}
 
-                                        {filteredCounterNames.filter(cName => cName !== deployModal.sourceCounter).length === 0 && (
+                                        {Object.keys(counterGroups).filter(cName => cName.toLowerCase().trim() !== (deployModal.sourceCounter || '').toLowerCase().trim()).length === 0 && (
                                             <p className="text-xs text-slate-400 text-center py-4">
                                                 Tidak ada counter lain yang terdaftar.
+                                            </p>
+                                        )}
+                                        {Object.keys(counterGroups).filter(cName => cName.toLowerCase().trim() !== (deployModal.sourceCounter || '').toLowerCase().trim()).length > 0 &&
+                                         Object.keys(counterGroups).filter(cName => cName.toLowerCase().trim() !== (deployModal.sourceCounter || '').toLowerCase().trim()).filter(cName => cName.toLowerCase().includes(deployModal.searchQuery.toLowerCase())).length === 0 && (
+                                            <p className="text-xs text-slate-400 text-center py-4">
+                                                Tidak ada counter yang cocok dengan "{deployModal.searchQuery}".
                                             </p>
                                         )}
                                     </div>
@@ -6642,7 +6754,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                                 <div className="flex items-center gap-2">
                                                                     <h3 className="text-sm font-black text-slate-900 tracking-tight">PENDING STOCK COUNTS</h3>
                                                                     <span className="text-[10px] font-black bg-cyan-100/80 text-cyan-800 px-2 py-0.5 rounded-full border border-cyan-200/50">
-                                                                        {filteredCounterNames.length} Counter
+                                                                        {displayedCounterNames.length} Counter
                                                                     </span>
                                                                 </div>
                                                                 <p className="text-[11px] text-slate-400 font-medium">Monitoring Real-Time PIC Counter Lapangan</p>
@@ -6659,6 +6771,95 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                                 onChange={(e) => setCounterSearch(e.target.value)}
                                                                 className="w-full pl-9 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none transition-all"
                                                             />
+                                                        </div>
+                                                    </div>
+
+                                                    {/* FILTER BY PROGRESS CHIPS & SORT SELECTOR */}
+                                                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 p-2 bg-slate-50/80 rounded-2xl border border-slate-200/70">
+                                                        {/* Filter Chips */}
+                                                        <div className="flex flex-wrap items-center gap-1.5">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setCounterProgressFilter('ALL')}
+                                                                className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition-all cursor-pointer ${
+                                                                    counterProgressFilter === 'ALL'
+                                                                        ? 'bg-slate-900 text-white shadow-2xs'
+                                                                        : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200/80'
+                                                                }`}
+                                                            >
+                                                                Semua ({counterFilterCounts.all})
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setCounterProgressFilter('IN_PROGRESS')}
+                                                                className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                                                                    counterProgressFilter === 'IN_PROGRESS'
+                                                                        ? 'bg-cyan-500 text-slate-950 font-black shadow-2xs'
+                                                                        : 'bg-cyan-50/80 hover:bg-cyan-100 text-cyan-800 border border-cyan-200/80'
+                                                                }`}
+                                                            >
+                                                                <span>⏳ Sedang Hitung</span>
+                                                                <span className="text-[10px] font-extrabold px-1.5 py-0.2 bg-white/70 rounded-md">
+                                                                    {counterFilterCounts.inProgress}
+                                                                </span>
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setCounterProgressFilter('DONE')}
+                                                                className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                                                                    counterProgressFilter === 'DONE'
+                                                                        ? 'bg-emerald-600 text-white shadow-2xs'
+                                                                        : 'bg-emerald-50/80 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80'
+                                                                }`}
+                                                            >
+                                                                <span>✓ Selesai 100%</span>
+                                                                <span className="text-[10px] font-extrabold px-1.5 py-0.2 bg-white/70 rounded-md">
+                                                                    {counterFilterCounts.done}
+                                                                </span>
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setCounterProgressFilter('NOT_STARTED')}
+                                                                className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                                                                    counterProgressFilter === 'NOT_STARTED'
+                                                                        ? 'bg-slate-600 text-white shadow-2xs'
+                                                                        : 'bg-white hover:bg-slate-100 text-slate-600 border border-slate-200/80'
+                                                                }`}
+                                                            >
+                                                                <span>Belum Mulai (0%)</span>
+                                                                <span className="text-[10px] font-extrabold px-1.5 py-0.2 bg-slate-100 rounded-md">
+                                                                    {counterFilterCounts.notStarted}
+                                                                </span>
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setCounterProgressFilter('DISPUTE')}
+                                                                className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                                                                    counterProgressFilter === 'DISPUTE'
+                                                                        ? 'bg-red-600 text-white shadow-2xs'
+                                                                        : 'bg-red-50/80 hover:bg-red-100 text-red-700 border border-red-200/80'
+                                                                }`}
+                                                            >
+                                                                <span>⚠️ Ada Selisih</span>
+                                                                <span className="text-[10px] font-extrabold px-1.5 py-0.2 bg-white/70 rounded-md">
+                                                                    {counterFilterCounts.dispute}
+                                                                </span>
+                                                            </button>
+                                                        </div>
+
+                                                        {/* Sort Dropdown */}
+                                                        <div className="flex items-center gap-1.5 shrink-0 sm:ml-auto">
+                                                            <span className="text-[11px] font-bold text-slate-400">Urutkan:</span>
+                                                            <select
+                                                                value={counterSortBy}
+                                                                onChange={(e) => setCounterSortBy(e.target.value as any)}
+                                                                className="px-2.5 py-1 bg-white border border-slate-200 rounded-xl text-[11px] font-bold text-slate-800 outline-none shadow-2xs cursor-pointer hover:border-cyan-400 transition-colors"
+                                                            >
+                                                                <option value="NAME_ASC">Nama PIC (A-Z)</option>
+                                                                <option value="PROGRESS_ASC">Progress Terendah (0% ➔ 100%)</option>
+                                                                <option value="PROGRESS_DESC">Progress Tertinggi (100% ➔ 0%)</option>
+                                                                <option value="DISPUTE_DESC">Selisih Terbanyak (⚠️)</option>
+                                                            </select>
                                                         </div>
                                                     </div>
 
@@ -6793,7 +6994,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
                                                     {/* COUNTER PIC LIST */}
                                                     <div className="space-y-3 max-h-110 overflow-y-auto pr-1 scrollbar-thin">
-                                                        {filteredCounterNames.map((cName, idx) => {
+                                                        {displayedCounterNames.map((cName, idx) => {
                                                             const cData = counterGroups[cName];
                                                             const pct = cData.total > 0 ? Math.round((cData.counted / cData.total) * 100) : 0;
                                                             const cleanCounterKey = cName.toLowerCase().trim();
@@ -7145,9 +7346,21 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                             );
                                                         })}
 
-                                                        {filteredCounterNames.length === 0 && (
-                                                            <div className="p-8 text-center text-xs text-slate-400 font-medium">
-                                                                Tidak ada counter PIC yang sesuai pencarian.
+                                                        {displayedCounterNames.length === 0 && (
+                                                            <div className="p-8 text-center text-xs text-slate-400 font-medium space-y-2">
+                                                                <p>Tidak ada counter PIC yang sesuai kriteria filter / pencarian.</p>
+                                                                {(counterProgressFilter !== 'ALL' || counterSearch) && (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => {
+                                                                            setCounterProgressFilter('ALL');
+                                                                            setCounterSearch('');
+                                                                        }}
+                                                                        className="px-3 py-1 bg-cyan-50 text-cyan-800 rounded-lg text-xs font-bold hover:bg-cyan-100 transition-colors cursor-pointer"
+                                                                    >
+                                                                        Reset Filter & Pencarian
+                                                                    </button>
+                                                                )}
                                                             </div>
                                                         )}
                                                     </div>
