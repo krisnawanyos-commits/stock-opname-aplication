@@ -42,6 +42,7 @@ export interface MasterSKUItem {
   pcsPerCarton?: number;
   SKUBrand: string;
   isCounted?: boolean;
+  photoUrl?: string;
 }
 
 export interface RackItem {

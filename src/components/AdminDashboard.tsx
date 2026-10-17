@@ -15,7 +15,7 @@ import {
     LogOut, Contact, Eye, EyeOff, UserCheck, Clock, Store, Link2, KeyRound,
     Mail, Edit2, Smartphone, Lock, Unlock, Repeat, Copy, Tag, RefreshCw, HardDrive, Loader2, AlertCircle, X,
     ChevronLeft, ChevronRight, ChevronDown, Settings, Bell, LayoutDashboard, ArrowRightLeft,
-    Printer, Shuffle, FileDown,
+    Printer, Shuffle, FileDown, Camera,
     Archive, ArchiveRestore, ExternalLink, FolderArchive,
     Zap, Gauge, CheckCheck
 } from 'lucide-react';
@@ -86,6 +86,7 @@ interface MasterSKUItem {
     isLocked?: boolean;
     counterPendamping?: string;
     partner?: string;
+    photoUrl?: string;
 }
 
 interface LocationOption {
@@ -242,6 +243,16 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
     const vendorFileInputRef = useRef<HTMLInputElement>(null);
     const [isVendorImporting, setIsVendorImporting] = useState<boolean>(false);
     
+    // MODAL PREVIEW FOTO BARANG TEMUAN FISIK
+    const [photoPreviewModal, setPhotoPreviewModal] = useState<{
+        isOpen: boolean;
+        photoUrl: string;
+        sku: string;
+        location: string;
+        description: string;
+        counter: string;
+    } | null>(null);
+
     // EXPORT CONFIG: Default false agar aman dibagikan ke 3rd party vendor (Blind Count - Tanpa Qty Sistem & Status)
     const [exportIncludeSystemQty, setExportIncludeSystemQty] = useState<boolean>(false);
 
@@ -690,7 +701,8 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                         isCounted: !!isCounted,
                         unitPrice: parseInt(data.unitPrice) || 0,
                         round1Actual: data.round1Actual,
-                        round2Actual: data.round2Actual
+                        round2Actual: data.round2Actual,
+                        photoUrl: data.photoUrl || ''
                     };
                 });
 
@@ -2747,7 +2759,8 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 'VALUASI SELISIH (RP)': isDiscrepant ? (isCounted ? valDiscrepancy : 0) : '-',
                 'QTY FINAL RECOVERY': overrideQty,
                 'VALUASI FINAL (RP)': isDiscrepant ? finalValuation : '-',
-                'CATATAN (REMARKS)': item.Remarks || ''
+                'CATATAN (REMARKS)': item.Remarks || '',
+                'FOTO TEMUAN': item.photoUrl || '-'
             };
         });
 
@@ -4234,6 +4247,9 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             } else {
                 existing.totalSys += sys;
                 existing.totalAct += act;
+                if (!existing.item.photoUrl && m.photoUrl) {
+                    existing.item.photoUrl = m.photoUrl;
+                }
             }
         });
 
@@ -4962,7 +4978,29 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                         return (
                                             <tr key={idx} className="hover:bg-red-50/30">
                                                 <td className="p-3 font-mono font-bold text-indigo-600 flex items-center"><MapPin className="w-3.5 h-3.5 text-indigo-400 mr-1" />{item.Location}</td>
-                                                <td className="p-3 font-mono font-bold text-slate-900">{item.SKU}</td>
+                                                <td className="p-3 font-mono font-bold text-slate-900">
+                                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                                        <span>{item.SKU}</span>
+                                                        {item.photoUrl && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setPhotoPreviewModal({
+                                                                    isOpen: true,
+                                                                    photoUrl: item.photoUrl!,
+                                                                    sku: item.SKU,
+                                                                    location: item.Location,
+                                                                    description: item.Description,
+                                                                    counter: item.counter
+                                                                })}
+                                                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-black bg-amber-100 text-amber-800 hover:bg-amber-200 border border-amber-300 transition-all cursor-pointer shadow-2xs"
+                                                                title="Lihat Foto Fisik Barang Temuan"
+                                                            >
+                                                                <Camera className="w-2.5 h-2.5 text-amber-700" />
+                                                                <span>Foto</span>
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                </td>
                                                 <td className="p-3 truncate max-w-xs">{item.Description}</td>
                                                 <td className="p-3 text-center text-slate-500">{(item as any).totalSysQty ?? item.Qty}</td>
                                                 <td className="p-3 text-center font-black">{(item as any).totalActQty ?? item.countedQty}</td>
@@ -7813,7 +7851,33 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                         {paginatedMasterTask.map((row, idx) => (
                                             <tr key={idx} className="hover:bg-slate-50">
                                                 <td className="p-3 font-bold text-slate-800">{row.Owner || 'DDI'}</td>
-                                                <td className="p-3 font-mono font-black text-indigo-600">{row.SKU}</td>
+                                                <td className="p-3 font-mono font-black text-indigo-600">
+                                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                                        <span>{row.SKU}</span>
+                                                        {row.photoUrl ? (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setPhotoPreviewModal({
+                                                                    isOpen: true,
+                                                                    photoUrl: row.photoUrl!,
+                                                                    sku: row.SKU,
+                                                                    location: row.Location,
+                                                                    description: row.Description,
+                                                                    counter: row.counter
+                                                                })}
+                                                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-black bg-amber-100 text-amber-800 hover:bg-amber-200 border border-amber-300 transition-all cursor-pointer shadow-2xs"
+                                                                title="Lihat Foto Fisik Barang Temuan"
+                                                            >
+                                                                <Camera className="w-3 h-3 text-amber-700" />
+                                                                <span>Foto</span>
+                                                            </button>
+                                                        ) : (row.Qty === 0 || row.id?.includes('TEMUAN')) ? (
+                                                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">
+                                                                Temuan
+                                                            </span>
+                                                        ) : null}
+                                                    </div>
+                                                </td>
                                                 <td className="p-3 truncate max-w-xs">{row.Description}</td>
                                                 <td className="p-3 font-mono">{row.UPC1 || '-'}</td>
                                                 <td className="p-3 font-mono">{row.UPC2 || '-'}</td>
@@ -8095,6 +8159,24 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                             <td className="p-3.5">
                                                                 <div className="flex items-center gap-2 flex-wrap">
                                                                     <span className="font-mono font-bold text-indigo-600">{item.SKU}</span>
+                                                                    {item.photoUrl && (
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => setPhotoPreviewModal({
+                                                                                isOpen: true,
+                                                                                photoUrl: item.photoUrl!,
+                                                                                sku: item.SKU,
+                                                                                location: item.Location,
+                                                                                description: item.Description,
+                                                                                counter: item.counter
+                                                                            })}
+                                                                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-black bg-amber-100 text-amber-800 hover:bg-amber-200 border border-amber-300 transition-all cursor-pointer shadow-2xs"
+                                                                            title="Lihat Foto Fisik Barang Temuan"
+                                                                        >
+                                                                            <Camera className="w-3 h-3 text-amber-700" />
+                                                                            <span>Foto Temuan</span>
+                                                                        </button>
+                                                                    )}
                                                                     {isRoundPending ? (
                                                                         <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-amber-50 text-amber-800 border border-amber-200">
                                                                             🔄 Ronde {item.currentRound} ({item.counter})
@@ -8257,7 +8339,30 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                 <td className="p-3 border-r font-mono whitespace-nowrap">{log.timestamp ? new Date(log.timestamp).toLocaleString('id-ID') : '-'}</td>
                                                 <td className="p-3 border-r font-bold font-mono text-indigo-600">{log.rackLocation || log.Location}</td>
                                                 <td className="p-3 border-r font-bold">{log.ownerSku || log.Owner || 'DDI'}</td>
-                                                <td className="p-3 border-r max-w-xs truncate"><span className="font-mono font-bold text-slate-900">{log.sku || log.SKU}</span> - {log.description || log.Description}</td>
+                                                <td className="p-3 border-r max-w-xs truncate">
+                                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                                        <span className="font-mono font-bold text-slate-900">{log.sku || log.SKU}</span>
+                                                        {log.photoUrl && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setPhotoPreviewModal({
+                                                                    isOpen: true,
+                                                                    photoUrl: log.photoUrl,
+                                                                    sku: log.sku || log.SKU || '-',
+                                                                    location: log.rackLocation || log.Location || '-',
+                                                                    description: log.description || log.Description || '',
+                                                                    counter: log.counterPic || log.counter || '-'
+                                                                })}
+                                                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 text-amber-800 hover:bg-amber-200 border border-amber-300 transition-colors cursor-pointer"
+                                                                title="Lihat Foto Bukti Hitungan"
+                                                            >
+                                                                <Camera className="w-2.5 h-2.5 text-amber-700" />
+                                                                <span>Foto</span>
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                    <div className="text-[10px] text-slate-400 truncate">{log.description || log.Description}</div>
+                                                </td>
                                                 <td className="p-3 border-r font-mono">{log.upc1 || log.UPC1 || '-'}</td>
                                                 <td className="p-3 border-r font-mono">{log.upc2 || log.UPC2 || '-'}</td>
                                                 <td className="p-3 border-r font-bold uppercase">{log.counterPic || log.counter}</td>
@@ -8401,6 +8506,78 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                             </div>
                         </div>
                     )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* LIGHTBOX MODAL PREVIEW FOTO BARANG TEMUAN FISIK */}
+            {photoPreviewModal?.isOpen && (
+                <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-60 flex items-center justify-center p-4 animate-in fade-in duration-200">
+                    <div className="bg-white rounded-3xl max-w-lg w-full overflow-hidden shadow-2xl border border-slate-200 flex flex-col max-h-[90vh]">
+                        {/* Header */}
+                        <div className="p-4 bg-slate-900 text-white flex justify-between items-center shrink-0">
+                            <div className="flex items-center space-x-2.5">
+                                <div className="p-2 bg-amber-500/20 text-amber-400 rounded-xl">
+                                    <Camera className="w-5 h-5" />
+                                </div>
+                                <div>
+                                    <h4 className="text-sm font-black tracking-tight">Foto Fisik Barang Temuan</h4>
+                                    <p className="text-[11px] font-mono text-slate-300">{photoPreviewModal.sku} • Rak {photoPreviewModal.location}</p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => setPhotoPreviewModal(null)}
+                                className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+                            >
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+
+                        {/* Photo Body */}
+                        <div className="p-4 bg-slate-950 flex items-center justify-center overflow-auto flex-1 min-h-[300px]">
+                            <img
+                                src={photoPreviewModal.photoUrl}
+                                alt={`Foto temuan ${photoPreviewModal.sku}`}
+                                className="max-h-[60vh] max-w-full rounded-2xl object-contain shadow-2xl border border-white/10"
+                            />
+                        </div>
+
+                        {/* Footer Details */}
+                        <div className="p-4 bg-white border-t border-slate-100 space-y-3 shrink-0">
+                            <div className="grid grid-cols-2 gap-2 text-xs">
+                                <div className="p-2 bg-slate-50 rounded-xl">
+                                    <span className="text-[10px] font-bold text-slate-400 block uppercase">Counter PIC</span>
+                                    <span className="font-bold text-slate-800 uppercase">{photoPreviewModal.counter || '-'}</span>
+                                </div>
+                                <div className="p-2 bg-slate-50 rounded-xl">
+                                    <span className="text-[10px] font-bold text-slate-400 block uppercase">Lokasi Rak</span>
+                                    <span className="font-mono font-bold text-indigo-600">{photoPreviewModal.location || '-'}</span>
+                                </div>
+                            </div>
+                            {photoPreviewModal.description && (
+                                <p className="text-xs text-slate-600 font-medium line-clamp-2">
+                                    {photoPreviewModal.description}
+                                </p>
+                            )}
+                            <div className="flex justify-between items-center pt-1">
+                                <a
+                                    href={photoPreviewModal.photoUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                                >
+                                    <ExternalLink className="w-3.5 h-3.5" />
+                                    <span>Buka Tab Baru</span>
+                                </a>
+                                <button
+                                    type="button"
+                                    onClick={() => setPhotoPreviewModal(null)}
+                                    className="px-4 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold cursor-pointer transition-colors"
+                                >
+                                    Tutup
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
