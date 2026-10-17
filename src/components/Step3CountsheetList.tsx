@@ -205,7 +205,7 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
   const inProgressCount = racks.filter((r) => r.status === 'in-progress').length;
   const pendingCount = racks.filter((r) => r.status === 'pending').length;
   const totalRacks = racks.length || 1;
-  const progressPercent = Math.round((completedCount / totalRacks) * 100);
+  const progressPercent = completedCount === totalRacks ? 100 : Math.min(99, Math.floor((completedCount / totalRacks) * 100));
 
   const filteredRacks = racks.filter((rack) => {
     const matchesFilter =

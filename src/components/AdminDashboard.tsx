@@ -4091,6 +4091,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
             const activeRound = counterMaxRoundMap.get(cName) || 1;
             if (item.currentRound === activeRound) {
+                if (item.isLocked && !item.isCounted) continue;
                 groups[cName].total++;
                 if (item.isCounted) {
                     groups[cName].counted++;
@@ -4297,7 +4298,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
         return allKnownCounters.map(cName => {
             const cData = counterGroups[cName];
-            const pct = cData && cData.total > 0 ? Math.round((cData.counted / cData.total) * 100) : 0;
+            const pct = cData && cData.total > 0 ? (cData.counted >= cData.total ? 100 : Math.min(99, Math.floor((cData.counted / cData.total) * 100))) : 0;
             const is100Done = cData && cData.total > 0 && cData.counted === cData.total;
             const labelSuffix = is100Done ? ' — 100% Selesai (Siap Bantu ✨)' : (cData ? ` — ${pct}% Progress (${cData.counted}/${cData.total} SKU)` : '');
             return {
@@ -7141,7 +7142,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                     <div className="space-y-3 max-h-110 overflow-y-auto pr-1 scrollbar-thin">
                                                         {displayedCounterNames.map((cName, idx) => {
                                                             const cData = counterGroups[cName];
-                                                            const pct = cData.total > 0 ? Math.round((cData.counted / cData.total) * 100) : 0;
+                                                            const pct = cData.total > 0 ? (cData.counted >= cData.total ? 100 : Math.min(99, Math.floor((cData.counted / cData.total) * 100))) : 0;
                                                             const cleanCounterKey = cName.toLowerCase().trim();
                                                             const isLocked = !!lockedCounters[cleanCounterKey];
                                                             const cTasks = masterDataList.filter(m => m.counter === cleanCounterKey);
