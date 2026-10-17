@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { db } from '../firebase';
 import {
-    collection, onSnapshot, doc, setDoc, deleteDoc, writeBatch, getDocs, query, orderBy, limit, updateDoc
+    collection, onSnapshot, doc, setDoc, deleteDoc, writeBatch, getDocs, query, orderBy, limit, updateDoc, startAfter
 } from 'firebase/firestore';
 import * as XLSX from 'xlsx';
 import emailjs from '@emailjs/browser';
@@ -2807,14 +2807,31 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
         let rawLogs: any[] = [];
         let usedFallback = false;
+        let fetchErrMsg = '';
         try {
             triggerNotification("Memuat Audit Trail dari Cloud...");
-            const qAuditFull = query(collection(db, "audit_logs"), orderBy("timestamp", "desc"), limit(20000));
-            const snap = await getDocs(qAuditFull);
-            rawLogs = snap.docs.map(d => d.data());
+            // Ambil bertahap per 500 dokumen (hindari timeout / batas query besar)
+            const PAGE_SIZE = 500;
+            const MAX_DOCS = 20000;
+            let lastDoc: any = null;
+            while (rawLogs.length < MAX_DOCS) {
+                const qPage = lastDoc
+                    ? query(collection(db, "audit_logs"), orderBy("timestamp", "desc"), startAfter(lastDoc), limit(PAGE_SIZE))
+                    : query(collection(db, "audit_logs"), orderBy("timestamp", "desc"), limit(PAGE_SIZE));
+                const snap = await getDocs(qPage);
+                if (snap.empty) break;
+                rawLogs.push(...snap.docs.map(d => d.data()));
+                lastDoc = snap.docs[snap.docs.length - 1];
+                if (snap.docs.length < PAGE_SIZE) break;
+                triggerNotification(`Memuat Audit Trail... ${rawLogs.length} log`);
+            }
         } catch (err: any) {
             console.error("Export Audit Error (fetch):", err);
-            if (auditLogs.length > 0) {
+            fetchErrMsg = `${err?.code || ''} ${err?.message || ''}`.trim();
+            if (rawLogs.length > 0) {
+                // Sebagian halaman sudah berhasil diambil, tetap ekspor yang ada
+                usedFallback = true;
+            } else if (auditLogs.length > 0) {
                 // Fallback ke cache realtime (100 log terbaru) agar tetap bisa diunduh
                 rawLogs = auditLogs;
                 usedFallback = true;
@@ -2853,7 +2870,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             XLSX.utils.book_append_sheet(wb, ws, "Audit_Trail_Log");
             XLSX.writeFile(wb, `Audit_Trail_Snapshot_${activeProject?.sessionCode || '360'}_${Date.now()}.xlsx`);
             triggerNotification(usedFallback
-                ? "Cloud gagal diakses — diunduh 100 log terbaru dari cache."
+                ? `Sebagian gagal (${rawLogs.length} log diunduh). Error: ${fetchErrMsg}`
                 : "Audit Trail Log (.xlsx) berhasil diunduh!");
         } catch (err: any) {
             console.error("Export Audit Error (xlsx):", err);
