@@ -650,7 +650,10 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 const filteredDocs = snapshot.docs.filter(docSnap => {
                     const data = docSnap.data();
                     if (!activeProjId) return false;
-                    return data.projectId === activeProjId;
+                    if (data.projectId !== activeProjId) return false;
+                    // Abaikan dokumen placeholder lokasi rak tanpa SKU barang
+                    if (!data.SKU || !data.SKU.trim() || data.SKU === 'SKU_UNKNOWN') return false;
+                    return true;
                 });
 
                 const taskList: MasterSKUItem[] = filteredDocs.map(docSnap => {

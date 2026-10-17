@@ -185,7 +185,8 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
       counter: cleanCounter,
       currentRound: 1,
       Qty: 0,
-      isCounted: false,
+      isCounted: true,
+      isRackPlaceholder: true,
       Remarks: '[LOKASI RAK BARU DITAMBAHKAN MANUAL]',
       createdAt: new Date().toISOString()
     });
