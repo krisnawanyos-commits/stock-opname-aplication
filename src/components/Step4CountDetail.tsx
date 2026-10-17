@@ -46,6 +46,7 @@ interface GroupedSKUItem {
   batchCount: number;
   allSystemEds: string[];
   isUnmappedFound?: boolean;
+  photoUrl?: string;
 }
 
 // HELPER PARSE BAD REMARKS STRING KE BREAKDOWN OBJECT
@@ -528,7 +529,8 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
               docIds: [docSnap.id],
               batchCount: 1,
               allSystemEds: edSys ? [edSys] : [],
-              isUnmappedFound: isUnmapped
+              isUnmappedFound: isUnmapped,
+              photoUrl: (data.photoUrl || data.photo || '').toString().trim()
             };
           } else {
             groupedMap[skuKey].totalSystemQty += sysQty;
@@ -540,6 +542,10 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             }
             if ((!groupedMap[skuKey].upc || groupedMap[skuKey].upc === 'N/A') && (data.UPC1 || data.upc)) {
               groupedMap[skuKey].upc = (data.UPC1 || data.upc).toString().trim();
+            }
+
+            if (!groupedMap[skuKey].photoUrl && (data.photoUrl || data.photo)) {
+              groupedMap[skuKey].photoUrl = (data.photoUrl || data.photo).toString().trim();
             }
 
             if (edSys && !groupedMap[skuKey].allSystemEds.includes(edSys)) {
@@ -585,6 +591,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
   const [unmappedBadBreakdown, setUnmappedBadBreakdown] = useState<Record<string, string>>({});
 
   const [unmappedList, setUnmappedList] = useState<UnmappedItem[]>([]);
+  const [selectedPhotoPreview, setSelectedPhotoPreview] = useState<{ url: string; title: string } | null>(null);
 
   // ON-DEMAND LOOKUP BARCODE MASTER (0ms untuk rak aktif, ~150ms untuk cloud lookup via limit 1)
   useEffect(() => {
@@ -1431,6 +1438,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       badRemarks: badCatRemarks,
       badBreakdown: unmappedBadBreakdown || {},
       selectedCategories: unmappedSelectedCategories || [],
+      photoUrl: unmappedPhotoUrl || '',
       updatedAt: new Date().toISOString()
     }, { merge: true });
 
@@ -1452,7 +1460,8 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       qtyBad: badQtyNum,
       totalFinalSubmitted: totalSubmitted,
       edActual: unmappedExpDate || '-',
-      remarks: badCatRemarks
+      remarks: badCatRemarks,
+      photoUrl: unmappedPhotoUrl || ''
     }, { merge: true });
 
     await batch.commit();
@@ -1812,6 +1821,20 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                         }`}>
                           {currentSku.sku}
                         </span>
+                        {currentSku.photoUrl && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedPhotoPreview({ url: currentSku.photoUrl!, title: `${currentSku.sku} - ${currentSku.name}` });
+                            }}
+                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 text-[10px] font-bold cursor-pointer transition-all"
+                            title="Klik untuk melihat foto fisik barang temuan"
+                          >
+                            <Camera className="w-3 h-3 text-amber-800" />
+                            <span>Foto Fisik</span>
+                          </button>
+                        )}
                       </div>
                       <h3 className="font-headline-sm text-slate-900 font-bold text-xs sm:text-sm leading-snug line-clamp-2">
                         {currentSku.name}
@@ -1956,6 +1979,19 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                           <p className="text-[11px] text-slate-500 font-medium truncate">
                             {currentSku.category}
                           </p>
+
+                          {currentSku.photoUrl && (
+                            <div className="pt-1">
+                              <button
+                                type="button"
+                                onClick={() => setSelectedPhotoPreview({ url: currentSku.photoUrl!, title: `${currentSku.sku} - ${currentSku.name}` })}
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-950 border border-amber-300 text-xs font-bold cursor-pointer shadow-2xs"
+                              >
+                                <Camera className="w-3.5 h-3.5 text-amber-800" />
+                                <span>Lihat Foto Fisik Barang (Temuan)</span>
+                              </button>
+                            </div>
+                          )}
 
                           {/* BARCODE / UPC HANYA MUNCUL DI POPUP JIKA BENAR-BENAR VALID */}
                           {(hasValidUpc1 || hasValidUpc2) && (
@@ -2529,6 +2565,20 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                 )}
 
                 <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-600 block">
+                    Nama / Deskripsi Barang Fisik:
+                  </label>
+                  <input
+                    type="text"
+                    disabled={isSessionLocked}
+                    value={unmappedDesc}
+                    onChange={(e) => setUnmappedDesc(e.target.value)}
+                    placeholder={matchedMasterSKU?.Description || "Ketik nama barang fisik (cth: Kit Speed Detailer)..."}
+                    className={`w-full h-10 border border-slate-300 px-3 rounded-lg text-xs font-bold ${isSessionLocked ? 'bg-slate-100 opacity-60' : 'bg-white'}`}
+                  />
+                </div>
+
+                <div className="space-y-1">
                   <label className="text-[10px] font-bold text-slate-600 block">Exp Date:</label>
                   <input type="date" disabled={isSessionLocked} value={unmappedExpDate} onChange={(e) => setUnmappedExpDate(e.target.value)} className={`w-full h-10 border border-slate-300 px-3 rounded-lg text-xs font-mono font-bold ${isSessionLocked ? 'bg-slate-100 opacity-60' : 'bg-white'}`} />
                 </div>
@@ -2977,6 +3027,25 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                 Terapkan Satuan Fisik
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* LIGHTBOX MODAL PREVIEW FOTO BARANG TEMUAN */}
+      {selectedPhotoPreview && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={() => setSelectedPhotoPreview(null)}>
+          <div className="bg-white rounded-2xl max-w-sm w-full p-4 space-y-3 shadow-2xl border border-slate-200" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b pb-2">
+              <div className="flex items-center gap-1.5 min-w-0 pr-2">
+                <Camera className="w-4 h-4 text-amber-600 shrink-0" />
+                <span className="font-bold text-xs text-slate-900 truncate">{selectedPhotoPreview.title}</span>
+              </div>
+              <button type="button" onClick={() => setSelectedPhotoPreview(null)} className="p-1 text-slate-400 hover:text-slate-700 bg-slate-100 rounded-lg text-xs font-bold cursor-pointer">✕</button>
+            </div>
+            <div className="rounded-xl overflow-hidden bg-slate-950 border border-slate-200 flex items-center justify-center max-h-80">
+              <img src={selectedPhotoPreview.url} alt={selectedPhotoPreview.title} className="max-h-80 w-auto object-contain" />
+            </div>
+            <button type="button" onClick={() => setSelectedPhotoPreview(null)} className="w-full py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold cursor-pointer shadow-md">Tutup</button>
           </div>
         </div>
       )}
