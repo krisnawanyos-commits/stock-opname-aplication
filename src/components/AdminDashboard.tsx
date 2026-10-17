@@ -4074,24 +4074,13 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
     // 1. OPTIMIZED COUNTER GROUPS (Single-pass O(N))
     const counterGroups = useMemo(() => {
-        // Tentukan ronde aktif untuk masing-masing counter:
-        // Jika counter memiliki task yang belum di-lock (!isLocked), prioritaskan ronde dari task aktif tersebut
-        const counterActiveRoundMap = new Map<string, number>();
         const counterMaxRoundMap = new Map<string, number>();
-
         for (let i = 0; i < masterDataList.length; i++) {
             const item = masterDataList[i];
             const cName = item.counter || 'Unassigned';
             const round = item.currentRound || 1;
             const curMax = counterMaxRoundMap.get(cName) || 1;
             if (round > curMax) counterMaxRoundMap.set(cName, round);
-
-            if (!item.isLocked) {
-                const curActive = counterActiveRoundMap.get(cName);
-                if (curActive === undefined || round > curActive) {
-                    counterActiveRoundMap.set(cName, round);
-                }
-            }
         }
 
         const groups: Record<string, { total: number; counted: number; errorCount: number }> = {};
@@ -4100,14 +4089,8 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             const cName = item.counter || 'Unassigned';
             if (!groups[cName]) groups[cName] = { total: 0, counted: 0, errorCount: 0 };
 
-            const hasUnlocked = counterActiveRoundMap.has(cName);
-            const activeRound = counterActiveRoundMap.get(cName) ?? (counterMaxRoundMap.get(cName) || 1);
-
-            const isTargetItem = hasUnlocked 
-                ? (!item.isLocked && item.currentRound === activeRound)
-                : (item.currentRound === activeRound);
-
-            if (isTargetItem) {
+            const activeRound = counterMaxRoundMap.get(cName) || 1;
+            if (item.currentRound === activeRound) {
                 groups[cName].total++;
                 if (item.isCounted) {
                     groups[cName].counted++;
@@ -7162,10 +7145,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                             const cleanCounterKey = cName.toLowerCase().trim();
                                                             const isLocked = !!lockedCounters[cleanCounterKey];
                                                             const cTasks = masterDataList.filter(m => m.counter === cleanCounterKey);
-                                                            const cActiveTasks = cTasks.filter(t => !t.isLocked);
-                                                            const cMaxRound = cActiveTasks.length > 0 
-                                                                ? (cActiveTasks[0].currentRound || 1) 
-                                                                : (cTasks.length > 0 ? Math.max(...cTasks.map(t => t.currentRound || 1)) : 1);
+                                                            const cMaxRound = cTasks.length > 0 ? Math.max(...cTasks.map(t => t.currentRound || 1)) : 1;
 
                                                             return (
                                                                 <div key={idx} className="p-3.5 bg-slate-50/80 hover:bg-slate-50 border border-slate-200/80 rounded-2xl transition-all space-y-2.5">
