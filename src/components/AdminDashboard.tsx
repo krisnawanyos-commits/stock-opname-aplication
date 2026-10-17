@@ -2698,77 +2698,86 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
     };
 
     const handleExportReconXLSX = () => {
-        if (masterDataList.length === 0) {
-            triggerNotification("Tidak ada data untuk diexport!");
-            return;
-        }
-
-        const exportData = masterDataList.map((item, idx) => {
-            const sysQty = item.Qty || 0;
-            const isCounted = !!item.isCounted;
-
-            const actQty = isCounted ? (item.countedQty !== undefined ? item.countedQty : sysQty) : 0;
-            const goodQty = isCounted ? (item.qtyGood !== undefined ? item.qtyGood : actQty) : 0;
-            const badQty = isCounted ? (item.qtyBad !== undefined ? item.qtyBad : 0) : 0;
-
-            const diff = isCounted ? (actQty - sysQty) : 0;
-            const unitPrice = item.unitPrice || 0;
-            const valDiscrepancy = diff * unitPrice;
-
-            const vendorQty = item.thirdPartyQty;
-            const diffVendor = vendorQty !== undefined && isCounted ? (actQty - vendorQty) : '-';
-            const isDiscrepant = isCounted && (diff !== 0 || (vendorQty !== undefined && vendorQty !== actQty));
-
-            let statusSelisih = 'Uncounted / Pending';
-            if (isCounted) {
-                if (diff === 0 && (vendorQty === undefined || vendorQty === actQty)) statusSelisih = 'Match';
-                else if (vendorQty !== undefined && vendorQty !== actQty) statusSelisih = 'Dispute Vendor';
-                else if (diff < 0) statusSelisih = 'Shortage';
-                else statusSelisih = 'Overage';
+        try {
+            if (masterDataList.length === 0) {
+                triggerNotification("Tidak ada data untuk diexport!");
+                return;
             }
 
-            const overrideQty = recoveryAdjustments[item.SKU] !== undefined ? recoveryAdjustments[item.SKU] : (isCounted ? actQty : sysQty);
-            const finalValuation = (overrideQty - sysQty) * unitPrice;
+            const exportData = masterDataList.map((item, idx) => {
+                const sysQty = item.Qty || 0;
+                const isCounted = !!item.isCounted;
 
-            return {
-                'NO': idx + 1,
-                'OWNER SKU': item.Owner || 'DDI',
-                'SKU BARANG': item.SKU,
-                'UPC 1 (ECERAN)': item.UPC1 || item.SKU,
-                'UPC 2 (KARDUS)': item.UPC2 || '-',
-                'DESKRIPSI PRODUK': item.Description,
-                'BRAND': item.SKUBrand || '',
-                'LOKASI RAK': item.Location,
-                'COUNTER R1': item.round1Counter || (item.currentRound >= 1 ? (item.previousCounter || item.counter) : '-'),
-                'QTY R1': item.round1Actual !== undefined ? item.round1Actual : (item.currentRound === 1 && isCounted ? actQty : '-'),
-                'COUNTER R2': item.round2Counter || (item.currentRound >= 2 ? (item.currentRound === 2 ? item.counter : (item.previousCounter || '-')) : '-'),
-                'QTY R2': item.round2Actual !== undefined ? item.round2Actual : (item.currentRound === 2 && isCounted ? actQty : '-'),
-                'COUNTER R3': item.round3Counter || (item.currentRound >= 3 ? item.counter : '-'),
-                'QTY R3': item.round3Actual !== undefined ? item.round3Actual : (item.currentRound === 3 && isCounted ? actQty : '-'),
-                'FINAL COUNTER PIC': item.counter,
-                'QTY SYSTEM (WMS)': sysQty,
-                'QTY GOOD': isCounted ? goodQty : '-',
-                'QTY BAD': isCounted ? badQty : '-',
-                'TOTAL QTY ACTUAL': isCounted ? actQty : '-',
-                'QTY VENDOR (3RD PARTY)': vendorQty !== undefined ? vendorQty : '-',
-                'SELISIH INT VS VENDOR': diffVendor,
-                'SELISIH QTY': isCounted ? diff : '-',
-                'STATUS SELISIH': statusSelisih,
-                // Selective Price Masking
-                'HARGA SATUAN (RP)': isDiscrepant ? (item.unitPrice || 0) : '*** (Protected)',
-                'VALUASI SELISIH (RP)': isDiscrepant ? (isCounted ? valDiscrepancy : 0) : '-',
-                'QTY FINAL RECOVERY': overrideQty,
-                'VALUASI FINAL (RP)': isDiscrepant ? finalValuation : '-',
-                'CATATAN (REMARKS)': item.Remarks || '',
-                'FOTO TEMUAN': item.photoUrl || '-'
-            };
-        });
+                const actQty = isCounted ? (item.countedQty !== undefined ? item.countedQty : sysQty) : 0;
+                const goodQty = isCounted ? (item.qtyGood !== undefined ? item.qtyGood : actQty) : 0;
+                const badQty = isCounted ? (item.qtyBad !== undefined ? item.qtyBad : 0) : 0;
 
-        const ws = XLSX.utils.json_to_sheet(exportData);
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, "Recon_Recovery_Report");
-        XLSX.writeFile(wb, `Laporan_Recon_SO_${activeProject?.sessionCode || '360'}_${new Date().toISOString().split('T')[0]}.xlsx`);
-        triggerNotification("Laporan Recon & Recovery (.xlsx) berhasil diunduh!");
+                const diff = isCounted ? (actQty - sysQty) : 0;
+                const unitPrice = item.unitPrice || 0;
+                const valDiscrepancy = diff * unitPrice;
+
+                const vendorQty = item.thirdPartyQty;
+                const diffVendor = vendorQty !== undefined && isCounted ? (actQty - vendorQty) : '-';
+                const isDiscrepant = isCounted && (diff !== 0 || (vendorQty !== undefined && vendorQty !== actQty));
+
+                let statusSelisih = 'Uncounted / Pending';
+                if (isCounted) {
+                    if (diff === 0 && (vendorQty === undefined || vendorQty === actQty)) statusSelisih = 'Match';
+                    else if (vendorQty !== undefined && vendorQty !== actQty) statusSelisih = 'Dispute Vendor';
+                    else if (diff < 0) statusSelisih = 'Shortage';
+                    else statusSelisih = 'Overage';
+                }
+
+                const overrideQty = recoveryAdjustments[item.SKU] !== undefined ? recoveryAdjustments[item.SKU] : (isCounted ? actQty : sysQty);
+                const finalValuation = (overrideQty - sysQty) * unitPrice;
+
+                const photoStatus = item.photoUrl
+                    ? (item.photoUrl.startsWith('http') ? item.photoUrl : 'ADA FOTO FISIK (Lihat di Web/App)')
+                    : '-';
+
+                return {
+                    'NO': idx + 1,
+                    'OWNER SKU': item.Owner || 'DDI',
+                    'SKU BARANG': item.SKU,
+                    'UPC 1 (ECERAN)': item.UPC1 || item.SKU,
+                    'UPC 2 (KARDUS)': item.UPC2 || '-',
+                    'DESKRIPSI PRODUK': item.Description,
+                    'BRAND': item.SKUBrand || '',
+                    'LOKASI RAK': item.Location,
+                    'COUNTER R1': item.round1Counter || (item.currentRound >= 1 ? (item.previousCounter || item.counter) : '-'),
+                    'QTY R1': item.round1Actual !== undefined ? item.round1Actual : (item.currentRound === 1 && isCounted ? actQty : '-'),
+                    'COUNTER R2': item.round2Counter || (item.currentRound >= 2 ? (item.currentRound === 2 ? item.counter : (item.previousCounter || '-')) : '-'),
+                    'QTY R2': item.round2Actual !== undefined ? item.round2Actual : (item.currentRound === 2 && isCounted ? actQty : '-'),
+                    'COUNTER R3': item.round3Counter || (item.currentRound >= 3 ? item.counter : '-'),
+                    'QTY R3': item.round3Actual !== undefined ? item.round3Actual : (item.currentRound === 3 && isCounted ? actQty : '-'),
+                    'FINAL COUNTER PIC': item.counter,
+                    'QTY SYSTEM (WMS)': sysQty,
+                    'QTY GOOD': isCounted ? goodQty : '-',
+                    'QTY BAD': isCounted ? badQty : '-',
+                    'TOTAL QTY ACTUAL': isCounted ? actQty : '-',
+                    'QTY VENDOR (3RD PARTY)': vendorQty !== undefined ? vendorQty : '-',
+                    'SELISIH INT VS VENDOR': diffVendor,
+                    'SELISIH QTY': isCounted ? diff : '-',
+                    'STATUS SELISIH': statusSelisih,
+                    // Selective Price Masking
+                    'HARGA SATUAN (RP)': isDiscrepant ? (item.unitPrice || 0) : '*** (Protected)',
+                    'VALUASI SELISIH (RP)': isDiscrepant ? (isCounted ? valDiscrepancy : 0) : '-',
+                    'QTY FINAL RECOVERY': overrideQty,
+                    'VALUASI FINAL (RP)': isDiscrepant ? finalValuation : '-',
+                    'CATATAN (REMARKS)': item.Remarks || '',
+                    'FOTO TEMUAN': photoStatus
+                };
+            });
+
+            const ws = XLSX.utils.json_to_sheet(exportData);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "Recon_Recovery_Report");
+            XLSX.writeFile(wb, `Laporan_Recon_SO_${activeProject?.sessionCode || '360'}_${new Date().toISOString().split('T')[0]}.xlsx`);
+            triggerNotification("Laporan Recon & Recovery (.xlsx) berhasil diunduh!");
+        } catch (err: any) {
+            console.error("Export Recon Error:", err);
+            triggerNotification(`Gagal mengunduh Recon: ${err.message || 'Error'}`);
+        }
     };
 
     const handleExportAuditTrailXLSX = async () => {
