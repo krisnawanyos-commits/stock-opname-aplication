@@ -179,6 +179,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
     const [counterSortBy, setCounterSortBy] = useState<'NAME_ASC' | 'PROGRESS_ASC' | 'PROGRESS_DESC' | 'DISPUTE_DESC'>('NAME_ASC');
     const [catalogSearch, setCatalogSearch] = useState<string>('');
     const [masterTaskSearch, setMasterTaskSearch] = useState<string>('');
+    const [reconSearch, setReconSearch] = useState<string>('');
 
     // PAGINATION STATES (Pencegah Lag Memory)
     const [masterCurrentPage, setMasterCurrentPage] = useState<number>(1);
@@ -702,6 +703,8 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                         unitPrice: parseInt(data.unitPrice) || 0,
                         round1Actual: data.round1Actual,
                         round2Actual: data.round2Actual,
+                        round3Actual: data.round3Actual,
+                        isLocked: !!data.isLocked,
                         photoUrl: data.photoUrl || ''
                     };
                 });
@@ -4535,13 +4538,28 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
     // 8. DISCREPANCY TABLE LIST & PAGINATION (Pencegah Freeze Layar Rekapitulasi)
     const filteredDiscrepancies = useMemo(() => {
+        const lower = reconSearch.toLowerCase().trim();
         return masterDataList.filter(i => {
-            if (i.isCounted) {
-                return ((i.countedQty || 0) - i.Qty) !== 0;
+            const hasDiscrepancy = i.isCounted
+                ? ((i.countedQty || 0) - i.Qty) !== 0 || (i.thirdPartyQty !== undefined && i.thirdPartyQty !== (i.countedQty || 0))
+                : (i.currentRound > 1 && i.round1Actual !== undefined && i.round1Actual !== i.Qty);
+
+            if (!hasDiscrepancy) return false;
+
+            if (lower) {
+                const skuMatch = (i.SKU || '').toLowerCase().includes(lower);
+                const descMatch = (i.Description || '').toLowerCase().includes(lower);
+                const locMatch = (i.Location || '').toLowerCase().includes(lower);
+                const counterMatch = (i.counter || '').toLowerCase().includes(lower);
+                const brandMatch = (i.SKUBrand || '').toLowerCase().includes(lower);
+                const upc1Match = (i.UPC1 || '').toLowerCase().includes(lower);
+                const upc2Match = (i.UPC2 || '').toLowerCase().includes(lower);
+                return skuMatch || descMatch || locMatch || counterMatch || brandMatch || upc1Match || upc2Match;
             }
-            return i.currentRound > 1 && i.round1Actual !== undefined && i.round1Actual !== i.Qty;
+
+            return true;
         });
-    }, [masterDataList]);
+    }, [masterDataList, reconSearch]);
 
     const totalReconPages = Math.ceil(filteredDiscrepancies.length / ITEMS_PER_PAGE) || 1;
     const paginatedDiscrepancies = useMemo(() => {
@@ -8130,6 +8148,57 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                     </div>
                                 </div>
 
+                                {/* SEARCH BAR REKONSILIASI */}
+                                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-slate-50 p-3 rounded-2xl border border-slate-200/80">
+                                    <div className="relative flex-1">
+                                        <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                                        <input
+                                            type="text"
+                                            value={reconSearch}
+                                            onChange={(e) => {
+                                                setReconSearch(e.target.value);
+                                                setReconCurrentPage(1);
+                                            }}
+                                            placeholder="Cari SKU, nama barang, rak/lokasi, counter, brand, atau barcode UPC..."
+                                            className="w-full pl-10 pr-9 py-2 bg-white border border-slate-200 rounded-xl text-xs font-medium outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all shadow-xs"
+                                        />
+                                        {reconSearch && (
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setReconSearch('');
+                                                    setReconCurrentPage(1);
+                                                }}
+                                                className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer"
+                                                title="Hapus pencarian"
+                                            >
+                                                <X className="w-3.5 h-3.5" />
+                                            </button>
+                                        )}
+                                    </div>
+                                    <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                                        <span className="text-xs font-bold text-slate-500 bg-white px-3 py-2 rounded-xl border border-slate-200 shadow-2xs">
+                                            {reconSearch ? (
+                                                <>Ditemukan: <span className="text-indigo-600 font-extrabold">{filteredDiscrepancies.length}</span> SKU</>
+                                            ) : (
+                                                <>Total Selisih: <span className="text-slate-800 font-extrabold">{filteredDiscrepancies.length}</span> SKU</>
+                                            )}
+                                        </span>
+                                        {reconSearch && (
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setReconSearch('');
+                                                    setReconCurrentPage(1);
+                                                }}
+                                                className="text-xs text-indigo-600 hover:text-indigo-700 font-bold px-2 py-1 underline cursor-pointer"
+                                            >
+                                                Reset
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+
                                 <div className="overflow-x-auto border rounded-2xl">
                                     <table className="w-full text-left text-sm">
                                         <thead className="bg-slate-50 font-black text-slate-600 border-b">
@@ -8148,8 +8217,27 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                         <tbody className="divide-y divide-slate-100 font-medium">
                                             {paginatedDiscrepancies.length === 0 ? (
                                                 <tr>
-                                                    <td colSpan={9} className="p-8 text-center text-slate-400 font-bold">
-                                                        Tidak ada selisih stok (Seluruh item terhitung cocok / belum ada variansi).
+                                                    <td colSpan={9} className="p-10 text-center text-slate-400 font-bold">
+                                                        {reconSearch ? (
+                                                            <div className="flex flex-col items-center justify-center space-y-2 py-4">
+                                                                <Search className="w-8 h-8 text-slate-300 mb-1" />
+                                                                <p className="text-slate-600 font-semibold text-sm">
+                                                                    Tidak ada SKU selisih yang cocok dengan kata kunci &quot;<span className="text-indigo-600 font-bold">{reconSearch}</span>&quot;
+                                                                </p>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        setReconSearch('');
+                                                                        setReconCurrentPage(1);
+                                                                    }}
+                                                                    className="mt-2 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold rounded-xl transition-all cursor-pointer"
+                                                                >
+                                                                    Reset Pencarian
+                                                                </button>
+                                                            </div>
+                                                        ) : (
+                                                            'Tidak ada selisih stok (Seluruh item terhitung cocok / belum ada variansi).'
+                                                        )}
                                                     </td>
                                                 </tr>
                                             ) : (
