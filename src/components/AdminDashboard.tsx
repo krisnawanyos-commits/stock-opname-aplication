@@ -1128,7 +1128,8 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             tasks.sort((a, b) => (a.Location || '').localeCompare(b.Location || '') || (a.SKU || '').localeCompare(b.SKU || ''));
 
             const taskPagesCount = Math.max(1, Math.ceil(tasks.length / ROWS_PER_PAGE));
-            const totalPagesForCounter = taskPagesCount + 1; // Ditambahkan 1 halaman khusus untuk Lembar Catatan Barang Temuan Baru (Unmapped SKU)
+            const isRound1 = roundNumber === 1;
+            const totalPagesForCounter = isRound1 ? taskPagesCount + 1 : taskPagesCount;
 
             for (let pageIdx = 0; pageIdx < taskPagesCount; pageIdx++) {
                 const pageTasks = tasks.slice(pageIdx * ROWS_PER_PAGE, (pageIdx + 1) * ROWS_PER_PAGE);
@@ -1203,9 +1204,31 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
                         ${isLastTaskPage ? `
                             <div style="margin-top: 10px; display: flex; justify-content: space-between; align-items: center; font-size: 8.5px; color: #475569; border-top: 1px dashed #cbd5e1; padding-top: 5px;">
-                                <span>✓ <b>Total SKU Sistem PIC Ini:</b> ${tasks.length} Item</span>
-                                <span style="font-weight: bold; color: #2563eb;">➔ Lanjut ke Halaman ${totalPagesForCounter}: Lembar Catatan Barang Temuan Baru (Unmapped SKU)</span>
+                                <span>✓ <b>Total SKU ${isRound1 ? 'Sistem' : 'Recount'} PIC Ini:</b> ${tasks.length} Item</span>
+                                ${isRound1 
+                                    ? `<span style="font-weight: bold; color: #2563eb;">➔ Lanjut ke Halaman ${totalPagesForCounter}: Lembar Catatan Barang Temuan Baru (Unmapped SKU)</span>` 
+                                    : `<span style="font-weight: bold; color: #16a34a;">✓ Akhir Lembar Kerja Ronde ${roundNumber}</span>`
+                                }
                             </div>
+                            ${!isRound1 ? `
+                                <div class="sig-container" style="margin-top: 25px;">
+                                    <div class="sig-box">
+                                        <div class="sig-title">Petugas Penghitung (Internal)</div>
+                                        <div class="sig-line"></div>
+                                        <div class="sig-name">${cName}</div>
+                                    </div>
+                                    <div class="sig-box">
+                                        <div class="sig-title">Counter Vendor / Pendamping WH</div>
+                                        <div class="sig-line"></div>
+                                        <div class="sig-name">(........................................)</div>
+                                    </div>
+                                    <div class="sig-box">
+                                        <div class="sig-title">Koordinator / SPV Lapangan</div>
+                                        <div class="sig-line"></div>
+                                        <div class="sig-name">(........................................)</div>
+                                    </div>
+                                </div>
+                            ` : ''}
                         ` : `
                             <div style="margin-top: 12px; text-align: right; font-size: 8px; color: #64748b; font-style: italic;">
                                 Bersambung ke halaman ${pageIdx + 2}...
@@ -1216,87 +1239,91 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             }
 
             // HALAMAN KHUSUS: LEMBAR CATATAN BARANG TEMUAN BARU (UNMAPPED SKU)
-            const UNMAPPED_ROWS_COUNT = 14;
-            const unmappedRowsHtml = Array.from({ length: UNMAPPED_ROWS_COUNT }, (_, i) => `
-                <tr style="height: 27px;">
-                    <td style="text-align: center; font-weight: bold; color: #64748b; font-size: 8.5px;">${i + 1}</td>
-                    <td style="height: 27px;"></td>
-                    <td style="height: 27px;"></td>
-                    <td style="height: 27px;"></td>
-                    <td style="height: 27px; text-align: center;"></td>
-                    <td style="height: 27px; background-color: #f0fdf4;"></td>
-                    <td style="height: 27px; background-color: #fef2f2;"></td>
-                    <td style="height: 27px; text-align: center;"></td>
-                    <td style="height: 27px;"></td>
-                    <td style="height: 27px;"></td>
-                </tr>
-            `).join('');
+            // Hanya dicetak pada Ronde 1 (Blind Count) karena pada ronde recount (Ronde 2, Ronde 3),
+            // temuan fisik dari ronde sebelumnya sudah otomatis masuk ke dalam list master data sistem.
+            if (isRound1) {
+                const UNMAPPED_ROWS_COUNT = 14;
+                const unmappedRowsHtml = Array.from({ length: UNMAPPED_ROWS_COUNT }, (_, i) => `
+                    <tr style="height: 27px;">
+                        <td style="text-align: center; font-weight: bold; color: #64748b; font-size: 8.5px;">${i + 1}</td>
+                        <td style="height: 27px;"></td>
+                        <td style="height: 27px;"></td>
+                        <td style="height: 27px;"></td>
+                        <td style="height: 27px; text-align: center;"></td>
+                        <td style="height: 27px; background-color: #f0fdf4;"></td>
+                        <td style="height: 27px; background-color: #fef2f2;"></td>
+                        <td style="height: 27px; text-align: center;"></td>
+                        <td style="height: 27px;"></td>
+                        <td style="height: 27px;"></td>
+                    </tr>
+                `).join('');
 
-            pagesHtml += `
-                <div class="sheet-page">
-                    <div class="header-container">
-                        <div class="header-left">
-                            <h2 class="doc-title" style="color: #b45309;">LEMBAR KERJA STOCK OPNAME - CATATAN BARANG TEMUAN BARU</h2>
-                            <div class="sub-meta">
-                                <span><b>Sesi:</b> ${project?.sessionCode || 'SO-360'}</span> | 
-                                <span><b>Lokasi:</b> ${project?.locationName || 'Gudang Utama'}</span> | 
-                                <span><b>Tanggal:</b> ${project?.opnameDate || new Date().toISOString().split('T')[0]}</span> | 
-                                <span><b>Halaman:</b> ${totalPagesForCounter} dari ${totalPagesForCounter} (LEMBAR TEMUAN)</span>
+                pagesHtml += `
+                    <div class="sheet-page">
+                        <div class="header-container">
+                            <div class="header-left">
+                                <h2 class="doc-title" style="color: #b45309;">LEMBAR KERJA STOCK OPNAME - CATATAN BARANG TEMUAN BARU</h2>
+                                <div class="sub-meta">
+                                    <span><b>Sesi:</b> ${project?.sessionCode || 'SO-360'}</span> | 
+                                    <span><b>Lokasi:</b> ${project?.locationName || 'Gudang Utama'}</span> | 
+                                    <span><b>Tanggal:</b> ${project?.opnameDate || new Date().toISOString().split('T')[0]}</span> | 
+                                    <span><b>Halaman:</b> ${totalPagesForCounter} dari ${totalPagesForCounter} (LEMBAR TEMUAN)</span>
+                                </div>
+                            </div>
+                            <div class="header-right">
+                                <div class="counter-badge" style="border-color: #d97706; background-color: #fffbeb;">
+                                    <span class="badge-label" style="color: #92400e;">PETUGAS / PIC:</span>
+                                    <span class="badge-name" style="color: #78350f;">${cName.toUpperCase()}</span>
+                                </div>
+                                <div class="round-badge" style="background: #d97706;">RONDE ${roundNumber}</div>
                             </div>
                         </div>
-                        <div class="header-right">
-                            <div class="counter-badge" style="border-color: #d97706; background-color: #fffbeb;">
-                                <span class="badge-label" style="color: #92400e;">PETUGAS / PIC:</span>
-                                <span class="badge-name" style="color: #78350f;">${cName.toUpperCase()}</span>
+
+                        <div class="notice-bar" style="background: #fffbeb; border-color: #f59e0b; color: #92400e;">
+                            📝 <b>PETUNJUK PENCATATAN BARANG TEMUAN FISIK (UNMAPPED SKU):</b><br/>
+                            Tuliskan seluruh barang fisik yang ditemukan di rak atau area kerja yang <b>TIDAK ADA</b> pada lembar task sistem sebelumnya. Cantumkan Lokasi Rak, Barcode/UPC, Deskripsi, Exp Date, Satuan, dan Kategori Kerusakan (jika rusak) secara teliti.
+                        </div>
+
+                        <table class="count-table">
+                            <thead>
+                                <tr style="background-color: #fef3c7;">
+                                    <th style="width: 26px; text-align: center;">NO</th>
+                                    <th style="width: 75px;">LOKASI / RAK</th>
+                                    <th style="width: 100px;">BARCODE / UPC / SKU</th>
+                                    <th>DESKRIPSI NAMA PRODUK</th>
+                                    <th style="width: 65px; text-align: center;">EXP DATE</th>
+                                    <th style="width: 55px; text-align: center; background-color: #dcfce7;">QTY BAIK</th>
+                                    <th style="width: 55px; text-align: center; background-color: #fee2e2;">QTY RUSAK</th>
+                                    <th style="width: 48px; text-align: center;">SATUAN</th>
+                                    <th style="width: 110px;">KONDISI / KET</th>
+                                    <th style="width: 45px; text-align: center;">PARAF</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${unmappedRowsHtml}
+                            </tbody>
+                        </table>
+
+                        <div class="sig-container" style="margin-top: 25px;">
+                            <div class="sig-box">
+                                <div class="sig-title">Petugas Penghitung (Internal)</div>
+                                <div class="sig-line"></div>
+                                <div class="sig-name">${cName}</div>
                             </div>
-                            <div class="round-badge" style="background: #d97706;">RONDE ${roundNumber}</div>
+                            <div class="sig-box">
+                                <div class="sig-title">Counter Vendor / Pendamping WH</div>
+                                <div class="sig-line"></div>
+                                <div class="sig-name">(........................................)</div>
+                            </div>
+                            <div class="sig-box">
+                                <div class="sig-title">Koordinator / SPV Lapangan</div>
+                                <div class="sig-line"></div>
+                                <div class="sig-name">(........................................)</div>
+                            </div>
                         </div>
                     </div>
-
-                    <div class="notice-bar" style="background: #fffbeb; border-color: #f59e0b; color: #92400e;">
-                        📝 <b>PETUNJUK PENCATATAN BARANG TEMUAN FISIK (UNMAPPED SKU):</b><br/>
-                        Tuliskan seluruh barang fisik yang ditemukan di rak atau area kerja yang <b>TIDAK ADA</b> pada lembar task sistem sebelumnya. Cantumkan Lokasi Rak, Barcode/UPC, Deskripsi, Exp Date, Satuan, dan Kategori Kerusakan (jika rusak) secara teliti.
-                    </div>
-
-                    <table class="count-table">
-                        <thead>
-                            <tr style="background-color: #fef3c7;">
-                                <th style="width: 26px; text-align: center;">NO</th>
-                                <th style="width: 75px;">LOKASI / RAK</th>
-                                <th style="width: 100px;">BARCODE / UPC / SKU</th>
-                                <th>DESKRIPSI NAMA PRODUK</th>
-                                <th style="width: 65px; text-align: center;">EXP DATE</th>
-                                <th style="width: 55px; text-align: center; background-color: #dcfce7;">QTY BAIK</th>
-                                <th style="width: 55px; text-align: center; background-color: #fee2e2;">QTY RUSAK</th>
-                                <th style="width: 48px; text-align: center;">SATUAN</th>
-                                <th style="width: 110px;">KONDISI / KET</th>
-                                <th style="width: 45px; text-align: center;">PARAF</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${unmappedRowsHtml}
-                        </tbody>
-                    </table>
-
-                    <div class="sig-container" style="margin-top: 25px;">
-                        <div class="sig-box">
-                            <div class="sig-title">Petugas Penghitung (Internal)</div>
-                            <div class="sig-line"></div>
-                            <div class="sig-name">${cName}</div>
-                        </div>
-                        <div class="sig-box">
-                            <div class="sig-title">Counter Vendor / Pendamping WH</div>
-                            <div class="sig-line"></div>
-                            <div class="sig-name">(........................................)</div>
-                        </div>
-                        <div class="sig-box">
-                            <div class="sig-title">Koordinator / SPV Lapangan</div>
-                            <div class="sig-line"></div>
-                            <div class="sig-name">(........................................)</div>
-                        </div>
-                    </div>
-                </div>
-            `;
+                `;
+            }
         });
 
         printWindow.document.write(`
