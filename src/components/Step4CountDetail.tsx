@@ -515,8 +515,8 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
               pcsPerCarton: itemPcsRatio,
               inputUom: itemInputUom,
               totalSystemQty: sysQty,
-              qtyGood: existingLocal ? (existingLocal.qtyGood ? snapQty(parseFloat(existingLocal.qtyGood) || 0).toString() : "") : (!isNaN(numGoodQty) ? snapQty(numGoodQty).toString() : (hasActQty ? snapQty(numActQty).toString() : "")),
-              qtyBad: existingLocal ? (existingLocal.qtyBad ? snapQty(parseFloat(existingLocal.qtyBad) || 0).toString() : "") : (!isNaN(numBadQty) && numBadQty > 0 ? snapQty(numBadQty).toString() : ""),
+              qtyGood: existingLocal ? (existingLocal.qtyGood !== undefined && existingLocal.qtyGood !== "" ? snapQty(parseFloat(existingLocal.qtyGood) || 0).toString() : "") : (!isNaN(numGoodQty) ? snapQty(numGoodQty).toString() : (hasActQty ? snapQty(numActQty).toString() : "")),
+              qtyBad: existingLocal ? (existingLocal.qtyBad !== undefined && existingLocal.qtyBad !== "" ? snapQty(parseFloat(existingLocal.qtyBad) || 0).toString() : "") : (!isNaN(numBadQty) && numBadQty > 0 ? snapQty(numBadQty).toString() : ""),
               expDateSystem: edSys,
               expDateActual: existingLocal ? existingLocal.expDateActual : (data.expDateActual || data.expiredDateActual || edSys || ''),
               isBadStock: existingLocal ? existingLocal.isBadStock : ((!isNaN(numBadQty) && numBadQty > 0) || !!data.badRemarks),
@@ -709,12 +709,12 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
           if (type === 'good') {
             const current = parseFloat(item.qtyGood || "0");
             const nextVal = Math.max(0, snapQty(current + delta));
-            return { ...item, qtyGood: nextVal === 0 ? "" : nextVal.toString() };
+            return { ...item, qtyGood: nextVal.toString() };
           }
           if (type === 'bad') {
             const current = parseFloat(item.qtyBad || "0");
             const nextVal = Math.max(0, snapQty(current + delta));
-            return { ...item, qtyBad: nextVal === 0 ? "" : nextVal.toString() };
+            return { ...item, qtyBad: nextVal.toString() };
           }
         }
         return item;
@@ -1564,7 +1564,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
   };
 
   const currentDisplayRound = skuList[0]?.currentRound || 1;
-  const completedCount = skuList.filter(s => s.isCounted || ((s.qtyGood !== "" || s.qtyBad !== "") && (parseInt(s.qtyGood || "0", 10) + parseInt(s.qtyBad || "0", 10) > 0))).length;
+  const completedCount = skuList.filter(s => s.isCounted || s.qtyGood !== "" || s.qtyBad !== "").length;
 
   return (
     <div className="bg-slate-50 text-slate-900 font-body-md text-body-md flex flex-col min-h-screen">
@@ -1674,11 +1674,8 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
               .map((sku, originalIndex) => ({ sku, originalIndex }))
               .filter(({ sku }) => {
                 if (expandedSku === sku.sku) return true;
-                const numGood = parseFloat(sku.qtyGood || "0") || 0;
-                const numBad = parseFloat(sku.qtyBad || "0") || 0;
-                const totalCounted = snapQty(numGood + numBad);
                 const hasInputValue = sku.qtyGood !== "" || sku.qtyBad !== "";
-                const isCounted = sku.isCounted || (hasInputValue && totalCounted > 0);
+                const isCounted = sku.isCounted || hasInputValue;
                 return !isCounted;
               });
 
@@ -1686,11 +1683,8 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
               .map((sku, originalIndex) => ({ sku, originalIndex }))
               .filter(({ sku }) => {
                 if (expandedSku === sku.sku) return false;
-                const numGood = parseFloat(sku.qtyGood || "0") || 0;
-                const numBad = parseFloat(sku.qtyBad || "0") || 0;
-                const totalCounted = snapQty(numGood + numBad);
                 const hasInputValue = sku.qtyGood !== "" || sku.qtyBad !== "";
-                const isCounted = sku.isCounted || (hasInputValue && totalCounted > 0);
+                const isCounted = sku.isCounted || hasInputValue;
                 return isCounted;
               });
 
@@ -1699,7 +1693,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
               const numBad = parseFloat(currentSku.qtyBad || "0") || 0;
               const totalRawCounted = snapQty(numGood + numBad);
               const hasInputValue = currentSku.qtyGood !== "" || currentSku.qtyBad !== "";
-              const isCounted = currentSku.isCounted || (hasInputValue && totalRawCounted > 0);
+              const isCounted = currentSku.isCounted || hasInputValue;
 
               const inputUnit = currentSku.inputUom || currentSku.uom;
               const sysUnit = currentSku.uom;
@@ -2159,6 +2153,42 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                               />
                             </div>
                             <button type="button" disabled={isSessionLocked} onClick={() => adjustQty(idx, 'good', 1)} className={`w-14 h-14 rounded-xl flex items-center justify-center text-xl shrink-0 cursor-pointer transition-all ${isSessionLocked ? 'bg-slate-400 opacity-50 cursor-not-allowed text-white' : 'bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-black shadow-md active:scale-95'}`}><Plus className="w-5 h-5" /></button>
+                          </div>
+
+                          {/* SHORTCUT STOK KOSONG (0 FISIK) & RESET */}
+                          <div className="flex items-center justify-between pt-1">
+                            <button
+                              type="button"
+                              disabled={isSessionLocked}
+                              onClick={() => {
+                                if (isSessionLocked) return;
+                                setIsDirty(true);
+                                setSkuList(prev => prev.map((item, i) => i === idx ? { ...item, qtyGood: '0', qtyBad: '' } : item));
+                                triggerHapticFeedback('success');
+                              }}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                                currentSku.qtyGood === '0' && (!currentSku.qtyBad || currentSku.qtyBad === '0')
+                                  ? 'bg-emerald-600 text-white shadow-xs'
+                                  : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-300'
+                              }`}
+                            >
+                              <span>🚫 Stok Fisik Kosong (0)</span>
+                            </button>
+                            {currentSku.qtyGood !== '' && (
+                              <button
+                                type="button"
+                                disabled={isSessionLocked}
+                                onClick={() => {
+                                  if (isSessionLocked) return;
+                                  setIsDirty(true);
+                                  setSkuList(prev => prev.map((item, i) => i === idx ? { ...item, qtyGood: '', qtyBad: '' } : item));
+                                  triggerHapticFeedback('warning');
+                                }}
+                                className="text-[11px] font-bold text-slate-400 hover:text-slate-600 underline cursor-pointer"
+                              >
+                                Reset / Kosongkan
+                              </button>
+                            )}
                           </div>
                         </div>
 
