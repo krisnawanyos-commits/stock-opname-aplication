@@ -43,11 +43,48 @@ interface GroupedSKUItem {
   isCounted: boolean;
   currentRound: number;
   docIds: string[];
+  docsDetail?: { id: string; sysQty: number }[];
   batchCount: number;
   allSystemEds: string[];
   isUnmappedFound?: boolean;
   photoUrl?: string;
 }
+
+// HELPER DISTRIBUSI QUANTITY PROPORSI / GREEDY WATERFALL KE MULTI-DOKUMEN BATCH
+export const distributeQtyAcrossDocs = (
+  totalVal: number,
+  docs: { id: string; sysQty: number }[]
+): number[] => {
+  if (!docs || docs.length === 0) return [];
+  if (docs.length === 1) return [snapQty(totalVal)];
+
+  const totalSys = docs.reduce((acc, d) => acc + (d.sysQty || 0), 0);
+  if (totalSys <= 0) {
+    const res = new Array(docs.length).fill(0);
+    res[0] = snapQty(totalVal);
+    return res;
+  }
+
+  // Jika total tepat sama dengan total sistem, setiap baris mendapatkan persis sesuai sistemnya
+  if (Math.abs(totalVal - totalSys) < 0.0001) {
+    return docs.map(d => snapQty(d.sysQty || 0));
+  }
+
+  // Greedy waterfall distribution: isi setiap baris sesuai kuota sistem, sisa dialokasikan ke baris terakhir
+  let remaining = totalVal;
+  const result: number[] = [];
+  for (let i = 0; i < docs.length; i++) {
+    if (i === docs.length - 1) {
+      result.push(snapQty(remaining));
+    } else {
+      const docSys = docs[i].sysQty || 0;
+      const allocated = snapQty(Math.min(docSys, Math.max(0, remaining)));
+      result.push(allocated);
+      remaining = Math.max(0, remaining - allocated);
+    }
+  }
+  return result;
+};
 
 // HELPER PARSE BAD REMARKS STRING KE BREAKDOWN OBJECT
 export const parseBadRemarksToBreakdown = (remarks?: string): Record<string, string> => {
@@ -527,6 +564,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
               isCounted: !!data.isCounted || hasActQty,
               currentRound: taskRound,
               docIds: [docSnap.id],
+              docsDetail: [{ id: docSnap.id, sysQty }],
               batchCount: 1,
               allSystemEds: edSys ? [edSys] : [],
               isUnmappedFound: isUnmapped,
@@ -535,6 +573,8 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
           } else {
             groupedMap[skuKey].totalSystemQty += sysQty;
             groupedMap[skuKey].docIds.push(docSnap.id);
+            if (!groupedMap[skuKey].docsDetail) groupedMap[skuKey].docsDetail = [];
+            groupedMap[skuKey].docsDetail.push({ id: docSnap.id, sysQty });
             groupedMap[skuKey].batchCount += 1;
 
             if (!groupedMap[skuKey].upc2 && (data.UPC2 || data.upc2)) {
@@ -1375,8 +1415,41 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
         (item.upc2 && item.upc2.toLowerCase() === cleanCode)
     );
 
-    const activeRound = existingInRack?.currentRound || (skuList.length > 0 ? (skuList[0].currentRound || 1) : 1);
+    // Cek juga ke database jika SKU ini sudah ada di rak tetapi sedang di-assign ke counter lain
+    let matchedDocDetails: { id: string; sysQty: number }[] = [];
+    let matchedActiveRound = existingInRack?.currentRound || (skuList.length > 0 ? (skuList[0].currentRound || 1) : 1);
+    let matchedPhotoUrl = '';
+    let matchedExpDate = '';
 
+    if (!existingInRack) {
+      try {
+        const qRackCheck = query(
+          collection(db, "master_tasks"),
+          where("Location", "==", rack.rackNumber)
+        );
+        const rackSnap = await getDocs(qRackCheck);
+        rackSnap.forEach(d => {
+          const dData = d.data();
+          if (sessionData.projectId && dData.projectId && dData.projectId !== sessionData.projectId) return;
+          const dSku = (dData.SKU || '').toUpperCase().trim();
+          const dUpc1 = (dData.UPC1 || '').toLowerCase().trim();
+          const dUpc2 = (dData.UPC2 || '').toLowerCase().trim();
+          if (dSku === unmSku || (cleanCode && (dUpc1 === cleanCode || dUpc2 === cleanCode))) {
+            matchedDocDetails.push({
+              id: d.id,
+              sysQty: parseInt(dData.Qty || dData.QTY_SYSTEM) || 0
+            });
+            if (dData.currentRound) matchedActiveRound = parseInt(dData.currentRound, 10) || matchedActiveRound;
+            if (dData.photoUrl) matchedPhotoUrl = dData.photoUrl;
+            if (dData.expDateActual || dData.expiredDateActual) matchedExpDate = dData.expDateActual || dData.expiredDateActual;
+          }
+        });
+      } catch (err) {
+        console.warn("Gagal mengecek keberadaan SKU di rak Firestore:", err);
+      }
+    }
+
+    const activeRound = matchedActiveRound;
     const batch = writeBatch(db);
 
     // 1. Simpan inputan lokal SKU lain
@@ -1401,17 +1474,29 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       const finalRemarks = (skuItem.badRemarks || (skuItem.badBreakdown ? formatBadRemarks(skuItem.badBreakdown, inputUnit) : '')) + conversionNote;
 
       if (skuTotalSubmitted > 0 || skuItem.expDateActual) {
+        const docsInfo = skuItem.docsDetail && skuItem.docsDetail.length === skuItem.docIds.length
+          ? skuItem.docsDetail
+          : skuItem.docIds.map((id, i) => ({ id, sysQty: i === 0 ? skuItem.totalSystemQty : 0 }));
+
+        const allocatedActuals = distributeQtyAcrossDocs(skuTotalSubmitted, docsInfo);
+        const allocatedGoods = distributeQtyAcrossDocs(finalGoodQty, docsInfo);
+        const allocatedBads = distributeQtyAcrossDocs(finalBadQty, docsInfo);
+
         skuItem.docIds.forEach((docId, i) => {
           const existingTaskRef = doc(db, "master_tasks", docId);
+          const docActual = allocatedActuals[i] ?? 0;
+          const docGood = allocatedGoods[i] ?? 0;
+          const docBad = allocatedBads[i] ?? 0;
+
           batch.set(existingTaskRef, {
             counter: cleanCounter,
             counterPendamping: sessionData.partners?.[0] || '',
             partner: sessionData.partners?.[0] || '',
             isCounted: true,
-            QTY_ACTUAL: i === 0 ? skuTotalSubmitted : 0,
-            QTY_GOOD: i === 0 ? finalGoodQty : 0,
-            QTY_BAD: i === 0 ? finalBadQty : 0,
-            [`round${skuItem.currentRound || 1}Actual`]: i === 0 ? skuTotalSubmitted : 0,
+            QTY_ACTUAL: docActual,
+            QTY_GOOD: docGood,
+            QTY_BAD: docBad,
+            [`round${skuItem.currentRound || 1}Actual`]: docActual,
             [`round${skuItem.currentRound || 1}Counter`]: cleanCounter,
             badRemarks: i === 0 ? finalRemarks : '',
             badBreakdown: i === 0 ? (skuItem.badBreakdown || {}) : {},
@@ -1419,8 +1504,8 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             expDateActual: skuItem.expDateActual || '',
             pcsPerCarton: pcsRatio,
             countedInUom: inputUnit,
-            rawGoodInput: rawGood,
-            rawBadInput: rawBad,
+            rawGoodInput: i === 0 ? rawGood : 0,
+            rawBadInput: i === 0 ? rawBad : 0,
             updatedAt: new Date().toISOString()
           }, { merge: true });
         });
@@ -1429,25 +1514,66 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
 
     // 2. Simpan atau perbarui dokumen temuan
     if (existingInRack) {
-      // SKU ini SUDAH ADA di rak (misal bawaan R1 yang dideploy ke R2)!
-      // Cukup update dokumen task yang sudah ada, JANGAN buat dokumen baru agar tidak double.
+      // SKU ini SUDAH ADA di rak (terlihat di layar counter)
+      const docsInfo = existingInRack.docsDetail && existingInRack.docsDetail.length === existingInRack.docIds.length
+        ? existingInRack.docsDetail
+        : existingInRack.docIds.map((id, i) => ({ id, sysQty: i === 0 ? existingInRack.totalSystemQty : 0 }));
+
+      const allocatedActuals = distributeQtyAcrossDocs(totalSubmitted, docsInfo);
+      const allocatedGoods = distributeQtyAcrossDocs(qtyNumber, docsInfo);
+      const allocatedBads = distributeQtyAcrossDocs(badQtyNum, docsInfo);
+
       existingInRack.docIds.forEach((docId, i) => {
         const existingTaskRef = doc(db, "master_tasks", docId);
+        const docActual = allocatedActuals[i] ?? 0;
+        const docGood = allocatedGoods[i] ?? 0;
+        const docBad = allocatedBads[i] ?? 0;
+
         batch.set(existingTaskRef, {
           counter: cleanCounter,
           counterPendamping: sessionData.partners?.[0] || '',
           partner: sessionData.partners?.[0] || '',
           isCounted: true,
-          QTY_ACTUAL: i === 0 ? totalSubmitted : 0,
-          QTY_GOOD: i === 0 ? qtyNumber : 0,
-          QTY_BAD: i === 0 ? badQtyNum : 0,
-          [`round${activeRound}Actual`]: i === 0 ? totalSubmitted : 0,
+          QTY_ACTUAL: docActual,
+          QTY_GOOD: docGood,
+          QTY_BAD: docBad,
+          [`round${activeRound}Actual`]: docActual,
           [`round${activeRound}Counter`]: cleanCounter,
           badRemarks: i === 0 ? badCatRemarks : '',
           badBreakdown: i === 0 ? (unmappedBadBreakdown || {}) : {},
           selectedCategories: i === 0 ? (unmappedSelectedCategories || []) : [],
           photoUrl: unmappedPhotoUrl || existingInRack.photoUrl || '',
           expDateActual: unmappedExpDate || existingInRack.expDateActual || '',
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+      });
+    } else if (matchedDocDetails.length > 0) {
+      // SKU ini SUDAH ADA di rak tapi di-assign ke counter lain -> Perbarui & alihkan ke counter ini tanpa buat dokumen temuan ganda
+      const allocatedActuals = distributeQtyAcrossDocs(totalSubmitted, matchedDocDetails);
+      const allocatedGoods = distributeQtyAcrossDocs(qtyNumber, matchedDocDetails);
+      const allocatedBads = distributeQtyAcrossDocs(badQtyNum, matchedDocDetails);
+
+      matchedDocDetails.forEach((docItem, i) => {
+        const existingTaskRef = doc(db, "master_tasks", docItem.id);
+        const docActual = allocatedActuals[i] ?? 0;
+        const docGood = allocatedGoods[i] ?? 0;
+        const docBad = allocatedBads[i] ?? 0;
+
+        batch.set(existingTaskRef, {
+          counter: cleanCounter,
+          counterPendamping: sessionData.partners?.[0] || '',
+          partner: sessionData.partners?.[0] || '',
+          isCounted: true,
+          QTY_ACTUAL: docActual,
+          QTY_GOOD: docGood,
+          QTY_BAD: docBad,
+          [`round${activeRound}Actual`]: docActual,
+          [`round${activeRound}Counter`]: cleanCounter,
+          badRemarks: i === 0 ? badCatRemarks : '',
+          badBreakdown: i === 0 ? (unmappedBadBreakdown || {}) : {},
+          selectedCategories: i === 0 ? (unmappedSelectedCategories || []) : [],
+          photoUrl: unmappedPhotoUrl || matchedPhotoUrl || '',
+          expDateActual: unmappedExpDate || matchedExpDate || '',
           updatedAt: new Date().toISOString()
         }, { merge: true });
       });
@@ -1562,17 +1688,29 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
 
         const remarksText = (skuItem.badRemarks || (skuItem.badBreakdown ? formatBadRemarks(skuItem.badBreakdown, inputUnit) : '-')) + conversionNote;
 
+        const docsInfo = skuItem.docsDetail && skuItem.docsDetail.length === skuItem.docIds.length
+          ? skuItem.docsDetail
+          : skuItem.docIds.map((id, i) => ({ id, sysQty: i === 0 ? skuItem.totalSystemQty : 0 }));
+
+        const allocatedActuals = distributeQtyAcrossDocs(totalSubmitted, docsInfo);
+        const allocatedGoods = distributeQtyAcrossDocs(finalGoodQty, docsInfo);
+        const allocatedBads = distributeQtyAcrossDocs(finalBadQty, docsInfo);
+
         skuItem.docIds.forEach((docId, i) => {
           const taskRef = doc(db, "master_tasks", docId);
+          const docActual = allocatedActuals[i] ?? 0;
+          const docGood = allocatedGoods[i] ?? 0;
+          const docBad = allocatedBads[i] ?? 0;
+
           batch.set(taskRef, {
             counter: cleanCounter,
             counterPendamping: sessionData.partners?.[0] || '',
             partner: sessionData.partners?.[0] || '',
             isCounted: true,
-            QTY_ACTUAL: i === 0 ? totalSubmitted : 0,
-            QTY_GOOD: i === 0 ? finalGoodQty : 0,
-            QTY_BAD: i === 0 ? finalBadQty : 0,
-            [`round${currentRoundNum}Actual`]: i === 0 ? totalSubmitted : 0,
+            QTY_ACTUAL: docActual,
+            QTY_GOOD: docGood,
+            QTY_BAD: docBad,
+            [`round${currentRoundNum}Actual`]: docActual,
             [`round${currentRoundNum}Counter`]: cleanCounter,
             badRemarks: i === 0 ? remarksText : '',
             badBreakdown: i === 0 ? (skuItem.badBreakdown || {}) : {},
@@ -1580,8 +1718,8 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             expDateActual: skuItem.expDateActual || '',
             pcsPerCarton: pcsRatio,
             countedInUom: inputUnit,
-            rawGoodInput: rawGood,
-            rawBadInput: rawBad,
+            rawGoodInput: i === 0 ? rawGood : 0,
+            rawBadInput: i === 0 ? rawBad : 0,
             updatedAt: new Date().toISOString()
           }, { merge: true });
         });

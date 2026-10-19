@@ -24,6 +24,9 @@ export interface SessionData {
 
 // Master Data SKU & WMS Header
 export interface MasterSKUItem {
+  id?: string;
+  projectId?: string;
+  sessionCode?: string;
   Owner: string;
   SKU: string;
   Description: string;

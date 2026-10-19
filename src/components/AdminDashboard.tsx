@@ -46,6 +46,8 @@ interface ProjectTeamMember {
 
 interface MasterSKUItem {
     id?: string;
+    projectId?: string;
+    sessionCode?: string;
     Owner: string;
     SKU: string;
     Description: string;
@@ -525,6 +527,167 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             }
         };
         reader.readAsText(file);
+    };
+
+    const [isRecovering, setIsRecovering] = useState<boolean>(false);
+
+    const handleScanAndRunAutoRecovery = async () => {
+        if (isRecovering) return;
+        setIsRecovering(true);
+        triggerNotification("🔍 Memulai pemindaian data task & log audit...");
+
+        try {
+            const activeProjId = activeProject?.id;
+            let currentTasks = masterDataList;
+            if (currentTasks.length === 0) {
+                const snap = await getDocs(collection(db, "master_tasks"));
+                currentTasks = snap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+            }
+            if (activeProjId) {
+                currentTasks = currentTasks.filter(t => t.projectId === activeProjId || !t.projectId);
+            }
+
+            const auditMap: { [key: string]: any[] } = {};
+            try {
+                const auditSnap = await getDocs(query(collection(db, "audit_logs"), orderBy("timestamp", "desc"), limit(10000)));
+                auditSnap.docs.forEach(d => {
+                    const data = d.data();
+                    const k = `${(data.rackLocation || data.Location || '').trim()}___${(data.sku || data.SKU || '').trim()}`;
+                    if (!auditMap[k]) auditMap[k] = [];
+                    auditMap[k].push(data);
+                });
+            } catch (e) {
+                console.warn("Audit log fetch error in recovery:", e);
+            }
+
+            const grouped: { [key: string]: any[] } = {};
+            currentTasks.forEach(t => {
+                const k = `${(t.Location || '').trim()}___${(t.SKU || '').trim()}`;
+                if (!grouped[k]) grouped[k] = [];
+                grouped[k].push(t);
+            });
+
+            const updates: { ref: any; data: any }[] = [];
+            let rebalancedCount = 0;
+            let auditRestoredCount = 0;
+            let temuanMergedCount = 0;
+
+            Object.entries(grouped).forEach(([, list]) => {
+                const masterDocs = list.filter(t => !t.id.includes('_TEMUAN_'));
+                const temuanDocs = list.filter(t => t.id.includes('_TEMUAN_'));
+
+                if (masterDocs.length > 0 && temuanDocs.length > 0) {
+                    temuanDocs.forEach(td => {
+                        const temuanAct = td.QTY_ACTUAL ?? td.countedQty ?? 0;
+                        if (temuanAct > 0) {
+                            const targetMaster = masterDocs.find(md => (md.QTY_ACTUAL === 0 || md.QTY_ACTUAL === null || !md.isCounted)) || masterDocs[0];
+                            if (targetMaster) {
+                                targetMaster.QTY_ACTUAL = (targetMaster.QTY_ACTUAL || 0) + temuanAct;
+                                targetMaster.countedQty = targetMaster.QTY_ACTUAL;
+                                targetMaster.isCounted = true;
+                                updates.push({
+                                    ref: doc(db, "master_tasks", targetMaster.id),
+                                    data: {
+                                        QTY_ACTUAL: targetMaster.QTY_ACTUAL,
+                                        countedQty: targetMaster.QTY_ACTUAL,
+                                        isCounted: true,
+                                        updatedAt: new Date().toISOString()
+                                    }
+                                });
+                                temuanMergedCount++;
+                            }
+                        }
+                    });
+                }
+
+                if (masterDocs.length > 1) {
+                    const totalSys = masterDocs.reduce((acc, t) => acc + (Number(t.Qty || t.QTY_SYSTEM) || 0), 0);
+                    const totalAct = masterDocs.reduce((acc, t) => acc + (Number(t.QTY_ACTUAL ?? t.countedQty) || 0), 0);
+                    const anyCounted = masterDocs.some(t => t.isCounted || (t.QTY_ACTUAL !== null && t.QTY_ACTUAL !== undefined));
+
+                    const hasZeroProblem = masterDocs.some(t => (t.QTY_ACTUAL === 0 || t.QTY_ACTUAL === null) && (Number(t.Qty || t.QTY_SYSTEM) || 0) > 0);
+
+                    if (anyCounted && totalAct > 0 && hasZeroProblem) {
+                        let rem = totalAct;
+                        masterDocs.forEach((t, i) => {
+                            const sys = Number(t.Qty || t.QTY_SYSTEM) || 0;
+                            let alloc = 0;
+                            if (totalAct === totalSys) {
+                                alloc = sys;
+                            } else if (i === masterDocs.length - 1) {
+                                alloc = Math.round(rem * 1000) / 1000;
+                            } else {
+                                alloc = Math.min(sys, rem);
+                                rem -= alloc;
+                            }
+
+                            t.QTY_ACTUAL = alloc;
+                            t.countedQty = alloc;
+                            t.isCounted = true;
+
+                            updates.push({
+                                ref: doc(db, "master_tasks", t.id),
+                                data: {
+                                    QTY_ACTUAL: alloc,
+                                    countedQty: alloc,
+                                    isCounted: true,
+                                    updatedAt: new Date().toISOString()
+                                }
+                            });
+                            rebalancedCount++;
+                        });
+                    }
+                } else if (masterDocs.length === 1) {
+                    const t = masterDocs[0];
+                    const sys = Number(t.Qty || t.QTY_SYSTEM) || 0;
+                    const act = t.QTY_ACTUAL ?? t.countedQty;
+                    const keyStr = `${(t.Location || '').trim()}___${(t.SKU || '').trim()}`;
+
+                    if ((act === 0 || act === null || act === undefined) && sys > 0 && t.isCounted) {
+                        const logs = auditMap[keyStr];
+                        if (logs && logs.length > 0) {
+                            const positive = logs.filter(l => Number(l.totalFinalSubmitted ?? l.qtyActual) > 0);
+                            if (positive.length > 0) {
+                                const latest = positive[0];
+                                const restoredVal = Number(latest.totalFinalSubmitted ?? latest.qtyActual);
+                                updates.push({
+                                    ref: doc(db, "master_tasks", t.id),
+                                    data: {
+                                        QTY_ACTUAL: restoredVal,
+                                        countedQty: restoredVal,
+                                        isCounted: true,
+                                        restoredFromAudit: true,
+                                        updatedAt: new Date().toISOString()
+                                    }
+                                });
+                                auditRestoredCount++;
+                            }
+                        }
+                    }
+                }
+            });
+
+            if (updates.length === 0) {
+                triggerNotification("ℹ️ Seluruh data sudah rapi dan seimbang! Tidak ada task yang memerlukan pemulihan.");
+                return;
+            }
+
+            triggerNotification(`Menyimpan ${updates.length} pemulihan ke Cloud Firestore...`);
+            const CHUNK = 400;
+            for (let i = 0; i < updates.length; i += CHUNK) {
+                const chunk = updates.slice(i, i + CHUNK);
+                const batch = writeBatch(db);
+                chunk.forEach(op => batch.set(op.ref, op.data, { merge: true }));
+                await batch.commit();
+            }
+
+            triggerNotification(`✅ RECOVERY SUKSES! ${rebalancedCount} task multi-doc diseimbangkan, ${auditRestoredCount} data audit dipulihkan, ${temuanMergedCount} temuan digabung.`);
+        } catch (err: any) {
+            console.error("Auto Recovery Error:", err);
+            triggerNotification(`Gagal recovery: ${err.message || String(err)}`);
+        } finally {
+            setIsRecovering(false);
+        }
     };
 
     const handleUpdateOwnerAccount = async () => {
@@ -8639,9 +8802,19 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                             type="file"
                                             accept=".json"
                                             className="hidden"
-                                            onChange={(e) => { if (e.target.files?.[0]) handleRestoreDatabaseFromJSON(e.target.files[0]); }}
+                                            onChange={(e) => { if (e.target.files?.[0]) handleRestoreDatabaseFromJSON(e.target.files?.[0]); }}
                                         />
                                     </label>
+
+                                    <button
+                                        onClick={handleScanAndRunAutoRecovery}
+                                        disabled={isRecovering}
+                                        className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-extrabold flex items-center space-x-2 shadow-md cursor-pointer disabled:opacity-50"
+                                        title="Rekonsiliasi & pulihkan multi-doc lot yang terpecah 0 dan pulihkan dari log audit"
+                                    >
+                                        {isRecovering ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+                                        <span>{isRecovering ? 'Memproses Recovery...' : 'Auto-Recovery & Rebalance Multi-Doc'}</span>
+                                    </button>
                                 </div>
                             </div>
 
