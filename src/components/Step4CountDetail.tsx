@@ -180,6 +180,8 @@ const formatDateDisplay = (dateStr: string) => {
 export default function Step4CountDetail({ sessionData, rack, onBackToList, onLogout, onSelectNextRack }: Step4CountDetailProps) {
   const { t, lang, translateDamageCat } = useLanguage();
   const cameraInputRef = useRef<HTMLInputElement>(null);
+  const editCameraInputRef = useRef<HTMLInputElement>(null);
+  const [isCompressingEditPhoto, setIsCompressingEditPhoto] = useState<boolean>(false);
 
   const [skuList, setSkuList] = useState<GroupedSKUItem[]>([]);
   const [matchedMasterSKU, setMatchedMasterSKU] = useState<any | null>(null);
@@ -1348,6 +1350,88 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     }
   };
 
+  const triggerEditCamera = () => { if (editCameraInputRef.current) editCameraInputRef.current.click(); };
+
+  const handleEditPhotoCaptured = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !expandedSku) return;
+    setIsCompressingEditPhoto(true);
+    try {
+      let compressedBase64 = '';
+      try {
+        compressedBase64 = await compressImage(file, 960, 960, 0.65);
+      } catch (cErr) {
+        console.error('Failed to compress photo, falling back to raw:', cErr);
+        compressedBase64 = await new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.readAsDataURL(file);
+        });
+      }
+
+      if (!compressedBase64) return;
+
+      const activeIdx = skuList.findIndex(s => s.sku === expandedSku);
+      if (activeIdx !== -1) {
+        updateItemField(activeIdx, 'photoUrl', compressedBase64);
+
+        // Langsung commit ke Firestore master_tasks agar foto temuan langsung tersimpan aman di Cloud
+        const targetSkuItem = skuList[activeIdx];
+        if (targetSkuItem.docIds && targetSkuItem.docIds.length > 0) {
+          const batch = writeBatch(db);
+          targetSkuItem.docIds.forEach(docId => {
+            const taskRef = doc(db, "master_tasks", docId);
+            batch.set(taskRef, {
+              photoUrl: compressedBase64,
+              updatedAt: new Date().toISOString()
+            }, { merge: true });
+          });
+          await batch.commit();
+        }
+
+        playScanSuccessBeep();
+        triggerHapticFeedback('success');
+      }
+    } catch (err: any) {
+      console.error("Gagal menyimpan foto saat edit:", err);
+      playErrorBuzzer();
+      triggerHapticFeedback('error');
+      setModal({
+        isOpen: true,
+        type: 'error',
+        title: 'Gagal Menyimpan Foto',
+        message: err?.code === 'permission-denied'
+          ? 'Akses Firestore Ditolak (Security Rules): Buka Firebase Console > Firestore > Rules.'
+          : (err?.message || 'Gagal memproses foto fisik.')
+      });
+    } finally {
+      setIsCompressingEditPhoto(false);
+      if (editCameraInputRef.current) editCameraInputRef.current.value = '';
+    }
+  };
+
+  const handleRemoveEditPhoto = async (index: number) => {
+    const targetSkuItem = skuList[index];
+    if (!targetSkuItem) return;
+    updateItemField(index, 'photoUrl', '');
+    try {
+      if (targetSkuItem.docIds && targetSkuItem.docIds.length > 0) {
+        const batch = writeBatch(db);
+        targetSkuItem.docIds.forEach(docId => {
+          const taskRef = doc(db, "master_tasks", docId);
+          batch.set(taskRef, {
+            photoUrl: '',
+            updatedAt: new Date().toISOString()
+          }, { merge: true });
+        });
+        await batch.commit();
+      }
+      triggerHapticFeedback('warning');
+    } catch (err) {
+      console.warn("Gagal menghapus photoUrl di Firestore:", err);
+    }
+  };
+
   const handleBarcodeDetected = (scannedCode: string) => {
     const cleanCode = scannedCode.trim();
     if (!cleanCode) return;
@@ -1715,6 +1799,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             badRemarks: i === 0 ? remarksText : '',
             badBreakdown: i === 0 ? (skuItem.badBreakdown || {}) : {},
             selectedCategories: i === 0 ? (skuItem.selectedCategories || []) : [],
+            photoUrl: skuItem.photoUrl || '',
             expDateActual: skuItem.expDateActual || '',
             pcsPerCarton: pcsRatio,
             countedInUom: inputUnit,
@@ -1749,7 +1834,8 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
           rawGoodInput: rawGood,
           rawBadInput: rawBad,
           edActual: skuItem.expDateActual || '-',
-          remarks: remarksText
+          remarks: remarksText,
+          photoUrl: skuItem.photoUrl || ''
         }, { merge: true });
       });
 
@@ -1811,11 +1897,16 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       playScanSuccessBeep();
       triggerHapticFeedback('success');
       triggerSafeBack();
-    } catch (err) {
+    } catch (err: any) {
       console.error("Firestore Save Error:", err);
       playErrorBuzzer();
       triggerHapticFeedback('error');
-      setModal({ isOpen: true, type: 'error', title: 'Gagal Menyimpan', message: 'Periksa koneksi internet kamu.' });
+      const errorMsg = err?.code === 'permission-denied'
+        ? 'Akses Firestore Ditolak (Security Rules): Buka Firebase Console > Firestore Database > Rules untuk mengizinkan read/write.'
+        : (err?.code === 'resource-exhausted'
+          ? 'Kuota Firebase Firestore habis (Resource Exhausted).'
+          : (err?.message ? `Gagal Menyimpan: ${err.message}` : 'Periksa koneksi internet atau status Firestore kamu.'));
+      setModal({ isOpen: true, type: 'error', title: 'Gagal Menyimpan', message: errorMsg });
     } finally {
       setIsLoadingSave(false);
     }
@@ -1836,6 +1927,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       />
 
       <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handlePhotoCaptured} />
+      <input ref={editCameraInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleEditPhotoCaptured} />
 
       {/* HEADER HP COUNTER (RELATIVE - TIDAK IKUT TURUN SAAT SCROLLING) */}
       <header className="relative w-full z-10 bg-white border-b border-slate-200/90 pt-safe shadow-xs shrink-0">
@@ -2012,7 +2104,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                         }`}>
                           {currentSku.sku}
                         </span>
-                        {currentSku.photoUrl && (
+                        {currentSku.photoUrl ? (
                           <button
                             type="button"
                             onClick={(e) => {
@@ -2023,9 +2115,22 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                             title="Klik untuk melihat foto fisik barang temuan"
                           >
                             <Camera className="w-3 h-3 text-amber-800" />
-                            <span>Foto Fisik</span>
+                            <span>Foto Fisik ✓</span>
                           </button>
-                        )}
+                        ) : currentSku.isUnmappedFound ? (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setExpandedSku(currentSku.sku);
+                            }}
+                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-rose-50 hover:bg-rose-100 text-rose-700 border border-dashed border-rose-300 text-[10px] font-bold cursor-pointer transition-all animate-pulse"
+                            title="Foto fisik belum dilampirkan! Klik untuk menambahkan foto"
+                          >
+                            <Camera className="w-3 h-3 text-rose-600" />
+                            <span>+ Tambah Foto</span>
+                          </button>
+                        ) : null}
                       </div>
                       <h3 className="font-headline-sm text-slate-900 font-bold text-xs sm:text-sm leading-snug line-clamp-2">
                         {currentSku.name}
@@ -2171,7 +2276,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                             {currentSku.category}
                           </p>
 
-                          {currentSku.photoUrl && (
+                          {currentSku.photoUrl ? (
                             <div className="pt-1">
                               <button
                                 type="button"
@@ -2179,10 +2284,22 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                                 className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-950 border border-amber-300 text-xs font-bold cursor-pointer shadow-2xs"
                               >
                                 <Camera className="w-3.5 h-3.5 text-amber-800" />
-                                <span>Lihat Foto Fisik Barang (Temuan)</span>
+                                <span>Lihat Foto Fisik (Temuan)</span>
                               </button>
                             </div>
-                          )}
+                          ) : currentSku.isUnmappedFound ? (
+                            <div className="pt-1">
+                              <button
+                                type="button"
+                                disabled={isSessionLocked || isCompressingEditPhoto}
+                                onClick={triggerEditCamera}
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-rose-100 hover:bg-rose-200 text-rose-950 border border-rose-300 text-xs font-bold cursor-pointer shadow-2xs animate-pulse"
+                              >
+                                <Camera className="w-3.5 h-3.5 text-rose-700" />
+                                <span>+ Ambil Foto Fisik</span>
+                              </button>
+                            </div>
+                          ) : null}
 
                           {/* BARCODE / UPC HANYA MUNCUL DI POPUP JIKA BENAR-BENAR VALID */}
                           {(hasValidUpc1 || hasValidUpc2) && (
@@ -2214,6 +2331,98 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
 
                       {/* POP-UP BODY (SCROLLABLE) */}
                       <div className="p-4 overflow-y-auto space-y-3.5 flex-1">
+                        {/* FOTO FISIK BARANG TEMUAN / UNMAPPED (BISA DITAMBAH / DIUBAH / DILIHAT / DIHAPUS SAAT EDIT) */}
+                        {(currentSku.isUnmappedFound || currentSku.photoUrl) && (
+                          <div className={`p-3 rounded-2xl border transition-all ${
+                            currentSku.photoUrl 
+                              ? 'bg-amber-50/70 border-amber-200' 
+                              : 'bg-rose-50/70 border-rose-300 ring-2 ring-rose-400/20'
+                          }`}>
+                            <div className="flex items-center justify-between gap-2 mb-2">
+                              <span className="font-headline-sm text-xs sm:text-sm font-bold flex items-center gap-1.5 text-slate-900">
+                                <Camera className="w-4 h-4 text-amber-700" />
+                                <span>Foto Fisik Barang Temuan</span>
+                              </span>
+                              {currentSku.photoUrl ? (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1">
+                                  <span>✓ Foto Terlampir</span>
+                                </span>
+                              ) : (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-300 animate-pulse">
+                                  ⚠️ Belum Ada Foto
+                                </span>
+                              )}
+                            </div>
+
+                            {currentSku.photoUrl ? (
+                              <div className="flex items-center gap-3 bg-white p-2.5 rounded-xl border border-amber-200">
+                                <img
+                                  src={currentSku.photoUrl}
+                                  alt="Foto Temuan"
+                                  onClick={() => setSelectedPhotoPreview({ url: currentSku.photoUrl!, title: `${currentSku.sku} - ${currentSku.name}` })}
+                                  className="w-16 h-16 object-cover rounded-lg border border-slate-200 shrink-0 cursor-pointer hover:opacity-90 shadow-2xs"
+                                  title="Klik untuk memperbesar"
+                                />
+                                <div className="flex-1 min-w-0 space-y-1.5">
+                                  <div className="text-[11px] font-bold text-slate-700 truncate">
+                                    Foto fisik tersimpan aman di Cloud
+                                  </div>
+                                  <div className="flex flex-wrap items-center gap-1.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => setSelectedPhotoPreview({ url: currentSku.photoUrl!, title: `${currentSku.sku} - ${currentSku.name}` })}
+                                      className="px-2.5 py-1 bg-amber-100 hover:bg-amber-200 text-amber-950 rounded-lg text-xs font-bold border border-amber-300 cursor-pointer shadow-2xs"
+                                    >
+                                      🔍 Perbesar
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={isSessionLocked || isCompressingEditPhoto}
+                                      onClick={triggerEditCamera}
+                                      className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg text-xs font-bold border border-slate-300 cursor-pointer shadow-2xs flex items-center gap-1"
+                                    >
+                                      <Camera className="w-3 h-3 text-slate-600" />
+                                      <span>{isCompressingEditPhoto ? 'Memproses...' : 'Ganti Foto'}</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={isSessionLocked || isCompressingEditPhoto}
+                                      onClick={() => handleRemoveEditPhoto(idx)}
+                                      className="p-1 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-lg cursor-pointer transition-colors"
+                                      title="Hapus foto ini"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="space-y-2">
+                                <p className="text-[11px] text-rose-800 font-medium leading-relaxed">
+                                  Counter sebelumnya belum sempat melampirkan foto. Silakan ambil foto fisik barang sekarang agar barang temuan dapat diverifikasi oleh SPV / Admin.
+                                </p>
+                                <button
+                                  type="button"
+                                  disabled={isSessionLocked || isCompressingEditPhoto}
+                                  onClick={triggerEditCamera}
+                                  className="w-full py-2.5 px-3 rounded-xl border border-rose-600 bg-rose-500 hover:bg-rose-600 text-white font-bold text-xs flex items-center justify-center gap-2 cursor-pointer shadow-xs shadow-rose-500/20 active:scale-98 transition-all"
+                                >
+                                  {isCompressingEditPhoto ? (
+                                    <>
+                                      <Loader2 className="w-4 h-4 animate-spin" />
+                                      <span>Mengompres Foto...</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Camera className="w-4 h-4" />
+                                      <span>Ambil Foto Fisik Barang (Kamera / Galeri)</span>
+                                    </>
+                                  )}
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )}
                         {/* EXPIRED DATE FEFO DENGAN FORMAT DD/MM/YYYY */}
                         <div className="bg-cyan-50/60 border border-cyan-200 p-space-sm rounded-xl space-y-2">
                           <div className="flex justify-between items-center gap-2 flex-wrap">

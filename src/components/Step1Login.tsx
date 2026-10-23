@@ -90,9 +90,15 @@ export default function Step1Login({ onSuccessLogin }: Step1LoginProps) {
       }
 
       setErrorMsg(lang === 'en' ? 'Username not found in system.' : 'Username tidak terdaftar di KTP Cloud.');
-    } catch (err) {
+    } catch (err: any) {
       console.error("Login Error:", err);
-      setErrorMsg(lang === 'en' ? 'Network error. Please check your connection.' : 'Terjadi kesalahan koneksi. Periksa internet kamu.');
+      if (err?.code === 'permission-denied') {
+        setErrorMsg('Akses Cloud Ditolak: Aturan Firebase Security Rules kedaluwarsa atau memblokir akses. Periksa Firebase Console > Firestore > Rules.');
+      } else if (err?.code === 'resource-exhausted') {
+        setErrorMsg('Kuota harian Firebase Firestore telah habis (Resource Exhausted).');
+      } else {
+        setErrorMsg(err?.message ? `Gagal login: ${err.message}` : (lang === 'en' ? 'Network error. Please check your connection.' : 'Terjadi kesalahan koneksi. Periksa internet kamu.'));
+      }
     } finally {
       setIsLoading(false);
     }
