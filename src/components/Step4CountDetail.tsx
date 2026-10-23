@@ -248,6 +248,19 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     modalOpenRef.current = modal.isOpen;
   }, [modal.isOpen]);
 
+  // PROTEKSI SINKRONISASI: PASTIKAN sessionData.projectId TIDAK KOSONG AGAR INPUT PASTI MASUK KE DASHBOARD ADMIN
+  useEffect(() => {
+    if (!sessionData.projectId) {
+      const qProj = query(collection(db, "projects"), where("status", "==", "LIVE_ACTIVE"), limit(1));
+      getDocs(qProj).then(snap => {
+        if (!snap.empty) {
+          sessionData.projectId = snap.docs[0].id;
+          sessionData.sessionCode = snap.docs[0].data().sessionCode;
+        }
+      }).catch(err => console.debug("Auto-detect active project:", err));
+    }
+  }, [sessionData]);
+
   // Helper navigasi mundur aman yang menyelaraskan browser history
   const triggerSafeBack = () => {
     if (window.history.state?.inRackDetail) {
@@ -1745,6 +1758,104 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     setUnmappedList((prev) => prev.filter((item) => item.id !== id));
   };
 
+  // AUTO-SYNC KE FIRESTORE SAAT TOMBOL "SELESAI & SIMPAN ITEM" DI POP-UP DIKLIK
+  // Ini memastikan Admin Dashboard langsung terupdate secara realtime (< 300ms) tanpa menunggu satu rak selesai
+  const handleSaveSingleItem = async (skuToSave: string) => {
+    if (isSessionLocked) return;
+    const targetSku = skuList.find(s => s.sku === skuToSave);
+    if (!targetSku) return;
+
+    const rawGood = parseFloat(targetSku.qtyGood || "0") || 0;
+    const rawBad = parseFloat(targetSku.qtyBad || "0") || 0;
+    const pcsRatio = targetSku.pcsPerCarton || (targetSku.uom === 'CARTON' ? 24 : 1);
+    const inputUnit = targetSku.inputUom || targetSku.uom;
+    const sysUnit = targetSku.uom;
+
+    const finalGoodQty = convertToSystemQty(rawGood, inputUnit, sysUnit, pcsRatio).finalQty;
+    const finalBadQty = convertToSystemQty(rawBad, inputUnit, sysUnit, pcsRatio).finalQty;
+    const totalSubmitted = Math.round((finalGoodQty + finalBadQty) * 1000) / 1000;
+    const currentRoundNum = targetSku.currentRound || 1;
+    const cleanCounter = (sessionData.primaryCounter || 'Unassigned').toLowerCase().trim();
+
+    const conversionNote = inputUnit !== sysUnit
+      ? ` [Dihitung: ${rawGood + rawBad} ${inputUnit} (isi ${pcsRatio}/ctn) -> Dikonversi ke ${totalSubmitted} ${sysUnit}]`
+      : '';
+    const remarksText = (targetSku.badRemarks || (targetSku.badBreakdown ? formatBadRemarks(targetSku.badBreakdown, inputUnit) : '-')) + conversionNote;
+
+    const docsInfo = targetSku.docsDetail && targetSku.docsDetail.length === targetSku.docIds.length
+      ? targetSku.docsDetail
+      : targetSku.docIds.map((id, i) => ({ id, sysQty: i === 0 ? targetSku.totalSystemQty : 0 }));
+
+    const allocatedActuals = distributeQtyAcrossDocs(totalSubmitted, docsInfo);
+    const allocatedGoods = distributeQtyAcrossDocs(finalGoodQty, docsInfo);
+    const allocatedBads = distributeQtyAcrossDocs(finalBadQty, docsInfo);
+
+    try {
+      const batch = writeBatch(db);
+      targetSku.docIds.forEach((docId, i) => {
+        const taskRef = doc(db, "master_tasks", docId);
+        const docActual = allocatedActuals[i] ?? 0;
+        const docGood = allocatedGoods[i] ?? 0;
+        const docBad = allocatedBads[i] ?? 0;
+
+        batch.set(taskRef, {
+          counter: cleanCounter,
+          counterPendamping: sessionData.partners?.[0] || '',
+          partner: sessionData.partners?.[0] || '',
+          isCounted: true,
+          QTY_ACTUAL: docActual,
+          QTY_GOOD: docGood,
+          QTY_BAD: docBad,
+          [`round${currentRoundNum}Actual`]: docActual,
+          [`round${currentRoundNum}Counter`]: cleanCounter,
+          badRemarks: i === 0 ? remarksText : '',
+          badBreakdown: i === 0 ? (targetSku.badBreakdown || {}) : {},
+          selectedCategories: i === 0 ? (targetSku.selectedCategories || []) : [],
+          photoUrl: targetSku.photoUrl || '',
+          expDateActual: targetSku.expDateActual || '',
+          pcsPerCarton: pcsRatio,
+          countedInUom: inputUnit,
+          rawGoodInput: i === 0 ? rawGood : 0,
+          rawBadInput: i === 0 ? rawBad : 0,
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+      });
+
+      const auditRef = doc(collection(db, "audit_logs"));
+      batch.set(auditRef, {
+        projectId: sessionData.projectId || '',
+        sessionCode: sessionData.sessionCode || '',
+        timestamp: new Date().toISOString(),
+        rackLocation: rack.rackNumber,
+        ownerSku: 'DDI',
+        sku: targetSku.sku,
+        description: targetSku.name,
+        upc1: targetSku.upc,
+        upc2: targetSku.upc2 || '-',
+        counterPic: cleanCounter,
+        counterPendamping: sessionData.partners?.[0] || '-',
+        partner: sessionData.partners?.[0] || '-',
+        round: currentRoundNum,
+        qtyGood: finalGoodQty,
+        qtyBad: finalBadQty,
+        totalFinalSubmitted: totalSubmitted,
+        uom: sysUnit,
+        countedInUom: inputUnit,
+        pcsPerCarton: pcsRatio,
+        rawGoodInput: rawGood,
+        rawBadInput: rawBad,
+        edActual: targetSku.expDateActual || '-',
+        remarks: remarksText,
+        photoUrl: targetSku.photoUrl || ''
+      }, { merge: true });
+
+      await batch.commit();
+      setSkuList(prev => prev.map(s => s.sku === skuToSave ? { ...s, isCounted: true } : s));
+    } catch (err) {
+      console.warn("Gagal auto-sync single item ke Cloud:", err);
+    }
+  };
+
   const handleSaveAndNext = async (goToNextRack: boolean = true) => {
     if (isSessionLocked) return;
     setIsLoadingSave(true);
@@ -2864,8 +2975,10 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                         <button
                           type="button"
                           onClick={() => {
+                            const targetSku = currentSku.sku;
                             setExpandedSku(null);
                             triggerHapticFeedback('success');
+                            handleSaveSingleItem(targetSku);
                           }}
                           className="w-full py-3.5 px-4 bg-linear-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 active:scale-98 text-white rounded-xl font-black text-sm flex items-center justify-center gap-2 shadow-md shadow-emerald-500/20 cursor-pointer transition-all"
                         >

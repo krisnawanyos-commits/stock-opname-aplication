@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { db } from '../firebase';
 import {
-    collection, onSnapshot, doc, setDoc, deleteDoc, writeBatch, getDocs, query, orderBy, limit, updateDoc, startAfter
+    collection, onSnapshot, doc, setDoc, deleteDoc, writeBatch, getDocs, query, where, orderBy, limit, updateDoc, startAfter
 } from 'firebase/firestore';
 import * as XLSX from 'xlsx';
 import emailjs from '@emailjs/browser';
@@ -804,7 +804,12 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
     useEffect(() => {
         if (!activeProject) return;
 
-        const qTasks = collection(db, "master_tasks");
+        const activeProjId = activeProject.id;
+        // Query DENGAN where("projectId", "==", activeProjId) agar hanya men-download task untuk project yang aktif!
+        // Ini memangkas beban kuota & memori IndexedDB dari puluhan ribu task menjadi hanya ratusan dokumen.
+        const qTasks = activeProjId
+            ? query(collection(db, "master_tasks"), where("projectId", "==", activeProjId))
+            : collection(db, "master_tasks");
         let updateTimer: any = null;
 
         const unsubscribe = onSnapshot(qTasks, (snapshot) => {
@@ -812,11 +817,9 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             if (updateTimer) clearTimeout(updateTimer);
 
             updateTimer = setTimeout(() => {
-                const activeProjId = activeProject?.id;
                 const filteredDocs = snapshot.docs.filter(docSnap => {
                     const data = docSnap.data();
-                    if (!activeProjId) return false;
-                    if (data.projectId !== activeProjId) return false;
+                    if (activeProjId && data.projectId && data.projectId !== activeProjId) return false;
                     // Abaikan dokumen placeholder lokasi rak tanpa SKU barang
                     if (!data.SKU || !data.SKU.trim() || data.SKU === 'SKU_UNKNOWN') return false;
                     return true;
