@@ -8,6 +8,7 @@ import NetworkStatusBadge from './NetworkStatusBadge';
 import { useLanguage, LanguageToggle } from '../utils/i18n';
 import { compressImage } from '../utils/imageCompressor';
 import { playScanSuccessBeep, playErrorBuzzer, triggerHapticFeedback } from '../utils/soundAndHaptics';
+import { trackedCommit } from '../utils/syncTracker';
 import { 
   ChevronLeft, LogOut, Users, MapPin, Calendar, Minus, Plus, ChevronDown, 
   Camera, Scan, PlusCircle, Trash2, Loader2, CheckCircle2, Lock,
@@ -1728,10 +1729,10 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       totalFinalSubmitted: totalSubmitted,
       edActual: unmappedExpDate || '-',
       remarks: badCatRemarks,
-      photoUrl: unmappedPhotoUrl || ''
+      hasPhoto: !!unmappedPhotoUrl
     }, { merge: true });
 
-    await batch.commit();
+    trackedCommit(batch);
     setIsDirty(false);
 
     setUnmappedBarcode('');
@@ -1750,6 +1751,88 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       message: existingInRack
         ? `Item ${unmSku} sudah ada di rak ini dan berhasil diperbarui dengan hasil hitungan ${totalSubmitted}!`
         : `Item ${unmSku} & seluruh inputan SKU lain pada Rak ${rack.rackNumber} tersimpan aman!`
+    });
+  };
+
+  const handleDeleteUnmappedSku = (skuItem: GroupedSKUItem) => {
+    if (isSessionLocked) return;
+
+    setModal({
+      isOpen: true,
+      type: 'warning',
+      title: 'Hapus Item Temuan?',
+      message: `Apakah kamu yakin ingin menghapus item temuan "${skuItem.sku} - ${skuItem.name}" dari rak ini? Data temuan ini akan dihapus permanen dari Firestore.`,
+      showCancel: true,
+      cancelText: 'Batal',
+      confirmText: 'Ya, Hapus Temuan',
+      onConfirm: async () => {
+        try {
+          const batch = writeBatch(db);
+          // Hapus dokumen master_tasks temuan
+          skuItem.docIds.forEach(docId => {
+            const docRef = doc(db, "master_tasks", docId);
+            batch.delete(docRef);
+          });
+
+          // Log pembatalan / penghapusan di audit_logs
+          const auditRef = doc(collection(db, "audit_logs"));
+          const cleanCounter = (sessionData.primaryCounter || 'Unassigned').toLowerCase().trim();
+          batch.set(auditRef, {
+            projectId: sessionData.projectId || '',
+            sessionCode: sessionData.sessionCode || '',
+            timestamp: new Date().toISOString(),
+            rackLocation: rack.rackNumber,
+            ownerSku: 'DDI',
+            sku: skuItem.sku,
+            description: skuItem.name,
+            counterPic: cleanCounter,
+            round: skuItem.currentRound || 1,
+            qtyGood: 0,
+            qtyBad: 0,
+            totalFinalSubmitted: 0,
+            remarks: `[HAPUS TEMUAN] Dihapus oleh counter ${cleanCounter} dari Rak ${rack.rackNumber}`,
+            hasPhoto: false
+          });
+
+          trackedCommit(batch);
+
+          // Hapus dari draft jika ada
+          try {
+            const rawDraft = localStorage.getItem(draftKey);
+            if (rawDraft) {
+              const parsed = JSON.parse(rawDraft);
+              if (parsed?.items?.[skuItem.sku]) {
+                delete parsed.items[skuItem.sku];
+                localStorage.setItem(draftKey, JSON.stringify(parsed));
+              }
+            }
+          } catch (e) {
+            console.debug('Failed to clear item from draft', e);
+          }
+
+          if (expandedSku === skuItem.sku) {
+            setExpandedSku(null);
+          }
+
+          playScanSuccessBeep();
+          triggerHapticFeedback('warning');
+          setModal({
+            isOpen: true,
+            type: 'success',
+            title: 'Item Temuan Dihapus',
+            message: `Item temuan ${skuItem.sku} berhasil dihapus dari rak ${rack.rackNumber}.`
+          });
+        } catch (err: any) {
+          console.error("Gagal menghapus item temuan:", err);
+          playErrorBuzzer();
+          setModal({
+            isOpen: true,
+            type: 'error',
+            title: 'Gagal Menghapus',
+            message: err?.message || 'Gagal menghapus item temuan dari Cloud Firestore.'
+          });
+        }
+      }
     });
   };
 
@@ -1846,17 +1929,18 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
         rawBadInput: rawBad,
         edActual: targetSku.expDateActual || '-',
         remarks: remarksText,
-        photoUrl: targetSku.photoUrl || ''
+        hasPhoto: !!targetSku.photoUrl
       }, { merge: true });
 
-      await batch.commit();
+      // Gunakan trackedCommit: langsung disimpan ke cache lokal IndexedDB, sync background
+      trackedCommit(batch);
       setSkuList(prev => prev.map(s => s.sku === skuToSave ? { ...s, isCounted: true } : s));
     } catch (err) {
       console.warn("Gagal auto-sync single item ke Cloud:", err);
     }
   };
 
-  const handleSaveAndNext = async (goToNextRack: boolean = true) => {
+  const executeSaveAndNext = async (goToNextRack: boolean = true) => {
     if (isSessionLocked) return;
     setIsLoadingSave(true);
 
@@ -1864,7 +1948,16 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       const batch = writeBatch(db);
       const cleanCounter = (sessionData.primaryCounter || 'Unassigned').toLowerCase().trim();
 
-      skuList.forEach(skuItem => {
+      // HANYA simpan SKU yang benar-benar memiliki inputan (qtyGood != "" atau qtyBad != "" atau ada foto / expDateActual)
+      // Ini mencegah SKU kosong yang belum dihitung tertimpa menjadi 0 di Round 2 / Round 3!
+      const itemsToSave = skuList.filter(s => 
+        (s.qtyGood !== undefined && s.qtyGood !== "") || 
+        (s.qtyBad !== undefined && s.qtyBad !== "") || 
+        !!s.expDateActual || 
+        !!s.photoUrl
+      );
+
+      itemsToSave.forEach(skuItem => {
         const rawGood = parseFloat(skuItem.qtyGood || "0") || 0;
         const rawBad = parseFloat(skuItem.qtyBad || "0") || 0;
         const pcsRatio = skuItem.pcsPerCarton || (skuItem.uom === 'CARTON' ? 24 : 1);
@@ -1946,11 +2039,15 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
           rawBadInput: rawBad,
           edActual: skuItem.expDateActual || '-',
           remarks: remarksText,
-          photoUrl: skuItem.photoUrl || ''
+          hasPhoto: !!skuItem.photoUrl
         }, { merge: true });
       });
 
-      await batch.commit();
+      if (itemsToSave.length > 0) {
+        // Tracked commit (simpan langsung ke cache lokal IndexedDB + background sync ke Cloud)
+        trackedCommit(batch);
+      }
+
       setIsDirty(false);
       try {
         localStorage.removeItem(draftKey);
@@ -2004,7 +2101,6 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       }
 
       // Jika tidak ada rak lagi di project ini (rak terakhir) ATAU user klik "Simpan & List":
-      // Langsung arahkan kembali ke Countsheet List tanpa modal berbelit atau nyasar ke rak kosong!
       playScanSuccessBeep();
       triggerHapticFeedback('success');
       triggerSafeBack();
@@ -2021,6 +2117,41 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     } finally {
       setIsLoadingSave(false);
     }
+  };
+
+  const handleSaveAndNext = async (goToNextRack: boolean = true) => {
+    if (isSessionLocked) return;
+
+    // Periksa apakah ada SKU yang masih kosong (belum diisi sama sekali)
+    const emptyCount = skuList.filter(s => (s.qtyGood === undefined || s.qtyGood === "") && (s.qtyBad === undefined || s.qtyBad === "")).length;
+    
+    if (emptyCount > 0 && emptyCount < skuList.length) {
+      setModal({
+        isOpen: true,
+        type: 'warning',
+        title: 'Ada SKU Belum Dihitung!',
+        message: `Terdapat ${emptyCount} dari ${skuList.length} SKU di rak ini yang masih kosong (belum diisi). SKU yang kosong TIDAK AKAN ditimpa menjadi 0. Lanjutkan menyimpan hasil hitungan SKU yang sudah diisi?`,
+        showCancel: true,
+        cancelText: 'Lanjut Hitung',
+        confirmText: 'Ya, Simpan Sebagian',
+        onConfirm: () => {
+          executeSaveAndNext(goToNextRack);
+        }
+      });
+      return;
+    }
+
+    if (emptyCount === skuList.length && !isDirty) {
+      // Tidak ada inputan sama sekali di rak ini
+      if (goToNextRack) {
+        triggerSafeBack();
+      } else {
+        triggerSafeBack();
+      }
+      return;
+    }
+
+    executeSaveAndNext(goToNextRack);
   };
 
   const currentDisplayRound = skuList[0]?.currentRound || 1;
@@ -2253,6 +2384,20 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                   </div>
 
                   <div className="flex items-center gap-2 shrink-0">
+                    {currentSku.isUnmappedFound && (
+                      <button
+                        type="button"
+                        disabled={isSessionLocked}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteUnmappedSku(currentSku);
+                        }}
+                        className="p-2 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer"
+                        title="Hapus / Batalkan Temuan Ini"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
                     {isCounted ? (
                       <div className="text-right">
                         <span className="px-2.5 py-1 bg-emerald-100 border border-emerald-300 text-emerald-900 text-xs font-black rounded-lg inline-flex items-center gap-1 shadow-2xs">
@@ -2971,7 +3116,19 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                       </div>
 
                       {/* POP-UP FOOTER (STICKY) */}
-                      <div className="p-3.5 bg-white border-t border-slate-200 shrink-0">
+                      <div className="p-3.5 bg-white border-t border-slate-200 shrink-0 flex items-center gap-2">
+                        {currentSku.isUnmappedFound && (
+                          <button
+                            type="button"
+                            disabled={isSessionLocked}
+                            onClick={() => handleDeleteUnmappedSku(currentSku)}
+                            className="py-3.5 px-3 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors shrink-0"
+                            title="Hapus item temuan ini"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                            <span>Hapus Temuan</span>
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => {
@@ -2980,7 +3137,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                             triggerHapticFeedback('success');
                             handleSaveSingleItem(targetSku);
                           }}
-                          className="w-full py-3.5 px-4 bg-linear-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 active:scale-98 text-white rounded-xl font-black text-sm flex items-center justify-center gap-2 shadow-md shadow-emerald-500/20 cursor-pointer transition-all"
+                          className="flex-1 py-3.5 px-4 bg-linear-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 active:scale-98 text-white rounded-xl font-black text-sm flex items-center justify-center gap-2 shadow-md shadow-emerald-500/20 cursor-pointer transition-all"
                         >
                           <CheckCircle2 className="w-5 h-5" />
                           <span>Selesai & Simpan Item</span>
