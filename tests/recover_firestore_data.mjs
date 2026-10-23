@@ -5,7 +5,7 @@ import xlsxModule from 'xlsx';
 const XLSX = xlsxModule.default || xlsxModule;
 
 const firebaseConfig = {
-    apiKey: "AIzaSyC51jZssAJh1rDU1tRDBIvr4ZTd0-FTJjE",
+    apiKey: "AIzaSyC51jZssAJh1rDU1tRD8Ivr4ZTd0-FTJjE",
     authDomain: "stock-opname-360.firebaseapp.com",
     projectId: "stock-opname-360",
     storageBucket: "stock-opname-360.firebasestorage.app",
