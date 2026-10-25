@@ -421,13 +421,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             }
         });
 
-        const qAuditLatest = query(collection(db, "audit_logs"), orderBy("timestamp", "desc"), limit(100));
-        const unsubAudit = onSnapshot(qAuditLatest, (snap) => {
-            if (isColdArchiveModeRef.current) return;
-            const logs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-            setAuditLogs(logs);
-        });
-
         let catalogTimer: any = null;
         const unsubCatalog = onSnapshot(collection(db, "sku_catalog"), (snap) => {
             if (isUploadingRef.current) return;
@@ -450,7 +443,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
         return () => { 
             if (catalogTimer) clearTimeout(catalogTimer);
-            unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); unsubOwner(); unsubBadStock(); unsubAudit(); unsubCatalog(); unsubPartners();
+            unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); unsubOwner(); unsubBadStock(); unsubCatalog(); unsubPartners();
         };
     }, []);
 
@@ -560,8 +553,19 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
             const auditMap: { [key: string]: any[] } = {};
             try {
-                const auditSnap = await getDocs(query(collection(db, "audit_logs"), orderBy("timestamp", "desc"), limit(10000)));
-                auditSnap.docs.forEach(d => {
+                let auditDocs: any[] = [];
+                if (activeProjId) {
+                    const subSnap = await getDocs(query(collection(db, "projects", activeProjId, "audit_logs"), orderBy("timestamp", "desc"), limit(10000)));
+                    auditDocs = subSnap.docs;
+                }
+                if (auditDocs.length === 0) {
+                    const auditQuery = activeProjId
+                        ? query(collection(db, "audit_logs"), where("projectId", "==", activeProjId), limit(10000))
+                        : query(collection(db, "audit_logs"), orderBy("timestamp", "desc"), limit(10000));
+                    const legacySnap = await getDocs(auditQuery);
+                    auditDocs = legacySnap.docs;
+                }
+                auditDocs.forEach(d => {
                     const data = d.data();
                     const k = `${(data.rackLocation || data.Location || '').trim()}___${(data.sku || data.SKU || '').trim()}`;
                     if (!auditMap[k]) auditMap[k] = [];
@@ -813,7 +817,10 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
     };
 
     useEffect(() => {
-        if (!activeProject) return;
+        if (!activeProject) {
+            setAuditLogs([]);
+            return;
+        }
         if (isColdArchiveMode) return; // Mode Cold Archive: Jangan query Firestore, pertahankan data dari JSON offline!
 
         const activeProjId = activeProject.id;
@@ -909,10 +916,36 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             }
         });
 
+        // AUDIT TRAIL SUBCOLLECTION (Terisolasi 100% per project: projects/{activeProjId}/audit_logs)
+        const qSubAudit = query(
+            collection(db, "projects", activeProjId, "audit_logs"),
+            orderBy("timestamp", "desc"),
+            limit(100)
+        );
+        const auditUnsubscribe = onSnapshot(qSubAudit, async (snap) => {
+            if (isColdArchiveModeRef.current) return;
+            if (!snap.empty) {
+                setAuditLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+            } else {
+                // Fallback untuk project lama (misal PROJ-4080) yang log-nya masih tersimpan di koleksi root audit_logs
+                try {
+                    const legacySnap = await getDocs(
+                        query(collection(db, "audit_logs"), where("projectId", "==", activeProjId), limit(100))
+                    );
+                    const legacyLogs = legacySnap.docs.map(d => ({ id: d.id, ...d.data() }));
+                    legacyLogs.sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+                    setAuditLogs(legacyLogs);
+                } catch {
+                    setAuditLogs([]);
+                }
+            }
+        });
+
         return () => {
             if (updateTimer) clearTimeout(updateTimer);
             unsubscribe();
             lockUnsubscribe();
+            auditUnsubscribe();
         };
     }, [activeProject]);
 
@@ -1073,7 +1106,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
                         const logId = `${activeProject.sessionCode}_DEPLOY_R${nextRound}_${sourceCounter}_${item.SKU}_${item.Location}`;
                         auditEntries.push({
-                            ref: doc(db, "audit_logs", logId),
+                            ref: doc(db, "projects", activeProject.id, "audit_logs", logId),
                             data: {
                                 timestamp: timestampNow,
                                 rackLocation: item.Location,
@@ -1125,7 +1158,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
                         const logId = `${activeProject.sessionCode}_ASSIGN_R${nextRound}_${sourceCounter}_TO_${targetCounter}_${item.SKU}_${item.Location}`;
                         auditEntries.push({
-                            ref: doc(db, "audit_logs", logId),
+                            ref: doc(db, "projects", activeProject.id, "audit_logs", logId),
                             data: {
                                 timestamp: timestampNow,
                                 rackLocation: item.Location,
@@ -1178,7 +1211,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
                         const logId = `${activeProject.sessionCode}_SWAP_R${nextRound}_${sourceCounter}_TO_${targetCounter}_${item.SKU}_${item.Location}`;
                         auditEntries.push({
-                            ref: doc(db, "audit_logs", logId),
+                            ref: doc(db, "projects", activeProject.id, "audit_logs", logId),
                             data: {
                                 timestamp: timestampNow,
                                 rackLocation: item.Location,
@@ -1939,7 +1972,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
                         const logId = `${activeProject.sessionCode}_MASS_SWAP_R${nextRoundA}_${counterA}_TO_${counterB}_${item.SKU}_${item.Location}`;
                         auditEntries.push({
-                            ref: doc(db, "audit_logs", logId),
+                            ref: doc(db, "projects", activeProject.id, "audit_logs", logId),
                             data: {
                                 timestamp: timestampNow,
                                 rackLocation: item.Location,
@@ -1991,7 +2024,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
                         const logId = `${activeProject.sessionCode}_MASS_SWAP_R${nextRoundB}_${counterB}_TO_${counterA}_${item.SKU}_${item.Location}`;
                         auditEntries.push({
-                            ref: doc(db, "audit_logs", logId),
+                            ref: doc(db, "projects", activeProject.id, "audit_logs", logId),
                             data: {
                                 timestamp: timestampNow,
                                 rackLocation: item.Location,
@@ -2996,20 +3029,41 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         let fetchErrMsg = '';
         try {
             triggerNotification("Memuat Audit Trail dari Cloud...");
-            // Ambil bertahap per 500 dokumen (hindari timeout / batas query besar)
+            const activeProjId = activeProject?.id;
             const PAGE_SIZE = 500;
             const MAX_DOCS = 20000;
             let lastDoc: any = null;
-            while (rawLogs.length < MAX_DOCS) {
-                const qPage = lastDoc
-                    ? query(collection(db, "audit_logs"), orderBy("timestamp", "desc"), startAfter(lastDoc), limit(PAGE_SIZE))
-                    : query(collection(db, "audit_logs"), orderBy("timestamp", "desc"), limit(PAGE_SIZE));
-                const snap = await getDocs(qPage);
-                if (snap.empty) break;
-                rawLogs.push(...snap.docs.map(d => d.data()));
-                lastDoc = snap.docs[snap.docs.length - 1];
-                if (snap.docs.length < PAGE_SIZE) break;
-                triggerNotification(`Memuat Audit Trail... ${rawLogs.length} log`);
+
+            if (activeProjId) {
+                // 1. Ambil dari subcollection project aktif
+                while (rawLogs.length < MAX_DOCS) {
+                    const qPage = lastDoc
+                        ? query(collection(db, "projects", activeProjId, "audit_logs"), orderBy("timestamp", "desc"), startAfter(lastDoc), limit(PAGE_SIZE))
+                        : query(collection(db, "projects", activeProjId, "audit_logs"), orderBy("timestamp", "desc"), limit(PAGE_SIZE));
+                    const snap = await getDocs(qPage);
+                    if (snap.empty) break;
+                    rawLogs.push(...snap.docs.map(d => d.data()));
+                    lastDoc = snap.docs[snap.docs.length - 1];
+                    if (snap.docs.length < PAGE_SIZE) break;
+                    triggerNotification(`Memuat Audit Trail... ${rawLogs.length} log`);
+                }
+
+                // 2. Jika subcollection masih kosong (project lama sebelum migrasi), fallback ke root audit_logs
+                if (rawLogs.length === 0) {
+                    try {
+                        const legacySnap = await getDocs(
+                            query(collection(db, "audit_logs"), where("projectId", "==", activeProjId), limit(10000))
+                        );
+                        rawLogs = legacySnap.docs.map(d => d.data());
+                        rawLogs.sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+                    } catch (e) {
+                        console.warn("Legacy audit fetch fallback error:", e);
+                    }
+                }
+            } else {
+                // Fallback jika tidak ada activeProject
+                const snap = await getDocs(query(collection(db, "audit_logs"), limit(PAGE_SIZE)));
+                rawLogs = snap.docs.map(d => d.data());
             }
         } catch (err: any) {
             console.error("Export Audit Error (fetch):", err);
@@ -3249,7 +3303,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 const rackTasks = targetTasksToMove.filter(t => t.Location === rackName);
                 const rackRound = rackTasks[0]?.currentRound || 1;
                 const logId = `${activeProject.sessionCode || 'SO'}_REASSIGN_${Date.now()}_${rackName.replace(/[\/\s]/g, '-')}`;
-                const auditRef = doc(db, "audit_logs", logId);
+                const auditRef = doc(db, "projects", activeProject.id, "audit_logs", logId);
                 auditBatch.set(auditRef, {
                     timestamp: timestampNow,
                     actionType: 'REASSIGN_PENDING_RACK',
@@ -3914,9 +3968,10 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
 
                 const teams = allProjectTeams.filter(t => t.projectId === proj.id);
 
-                const auditQuery = query(collection(db, "audit_logs"), where("projectId", "==", proj.id));
-                const auditSnap = await getDocs(auditQuery);
-                const logs = auditSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+                const subAuditSnap = await getDocs(collection(db, "projects", proj.id, "audit_logs"));
+                const legacyAuditSnap = await getDocs(query(collection(db, "audit_logs"), where("projectId", "==", proj.id)));
+                const allAuditDocs = [...subAuditSnap.docs, ...legacyAuditSnap.docs];
+                const logs = allAuditDocs.map(d => ({ id: d.id, ...d.data() }));
 
                 const totalTasks = tasks.length;
                 const countedTasks = tasks.filter(t => t.isCounted || t.countedQty !== undefined || (t.QTY_ACTUAL !== undefined && t.QTY_ACTUAL !== null));
@@ -3974,8 +4029,8 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 }
 
                 // 4. Purge audit_logs dari Firestore (chunk 400)
-                for (let i = 0; i < auditSnap.docs.length; i += CHUNK) {
-                    const chunk = auditSnap.docs.slice(i, i + CHUNK);
+                for (let i = 0; i < allAuditDocs.length; i += CHUNK) {
+                    const chunk = allAuditDocs.slice(i, i + CHUNK);
                     const batch = writeBatch(db);
                     chunk.forEach(docSnap => batch.delete(docSnap.ref));
                     await batch.commit();
@@ -4386,10 +4441,11 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 await batch.commit();
             }
 
-            const auditQuery = query(collection(db, "audit_logs"), where("projectId", "==", projectToDelete.id));
-            const auditSnap = await getDocs(auditQuery);
-            for (let i = 0; i < auditSnap.docs.length; i += CHUNK) {
-                const chunk = auditSnap.docs.slice(i, i + CHUNK);
+            const subAuditSnap = await getDocs(collection(db, "projects", projectToDelete.id, "audit_logs"));
+            const legacyAuditSnap = await getDocs(query(collection(db, "audit_logs"), where("projectId", "==", projectToDelete.id)));
+            const allAuditDocs = [...subAuditSnap.docs, ...legacyAuditSnap.docs];
+            for (let i = 0; i < allAuditDocs.length; i += CHUNK) {
+                const chunk = allAuditDocs.slice(i, i + CHUNK);
                 const batch = writeBatch(db);
                 chunk.forEach(docSnap => batch.delete(docSnap.ref));
                 await batch.commit();

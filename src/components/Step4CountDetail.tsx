@@ -1710,8 +1710,11 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       }, { merge: true });
     }
 
-    // 3. Log Audit Trail (Auto-ID)
-    const auditRef = doc(collection(db, "audit_logs"));
+    // 3. Log Audit Trail (Auto-ID) - Terisolasi per project (projects/{projectId}/audit_logs)
+    const targetAuditProjId = sessionData.projectId || (sessionData as any).sessionId || '';
+    const auditRef = targetAuditProjId
+      ? doc(collection(db, "projects", targetAuditProjId, "audit_logs"))
+      : doc(collection(db, "audit_logs"));
     batch.set(auditRef, {
       projectId: sessionData.projectId || '',
       sessionCode: sessionData.sessionCode || '',
@@ -1774,8 +1777,11 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             batch.delete(docRef);
           });
 
-          // Log pembatalan / penghapusan di audit_logs
-          const auditRef = doc(collection(db, "audit_logs"));
+          // Log pembatalan / penghapusan di audit_logs (terisolasi per project)
+          const targetAuditProjId = sessionData.projectId || (sessionData as any).sessionId || '';
+          const auditRef = targetAuditProjId
+            ? doc(collection(db, "projects", targetAuditProjId, "audit_logs"))
+            : doc(collection(db, "audit_logs"));
           const cleanCounter = (sessionData.primaryCounter || 'Unassigned').toLowerCase().trim();
           batch.set(auditRef, {
             projectId: sessionData.projectId || '',
@@ -1904,7 +1910,10 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
         }, { merge: true });
       });
 
-      const auditRef = doc(collection(db, "audit_logs"));
+      const targetAuditProjId = sessionData.projectId || (sessionData as any).sessionId || '';
+      const auditRef = targetAuditProjId
+        ? doc(collection(db, "projects", targetAuditProjId, "audit_logs"))
+        : doc(collection(db, "audit_logs"));
       batch.set(auditRef, {
         projectId: sessionData.projectId || '',
         sessionCode: sessionData.sessionCode || '',
@@ -2013,7 +2022,10 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
           }, { merge: true });
         });
 
-        const auditRef = doc(collection(db, "audit_logs"));
+        const targetAuditProjId = sessionData.projectId || (sessionData as any).sessionId || '';
+        const auditRef = targetAuditProjId
+          ? doc(collection(db, "projects", targetAuditProjId, "audit_logs"))
+          : doc(collection(db, "audit_logs"));
 
         batch.set(auditRef, {
           projectId: sessionData.projectId || '',
