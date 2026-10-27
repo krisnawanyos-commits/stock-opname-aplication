@@ -919,14 +919,19 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     const gQty = data.QTY_GOOD ?? data.qtyGood;
                     const bQty = data.QTY_BAD ?? data.qtyBad;
 
-                    const rawActQty = data.QTY_ACTUAL ?? data.countedQty;
+                    const rawActQty = data.QTY_ACTUAL ?? data.countedQty ?? (data.isCounted ? (data[`round${data.currentRound || 1}Actual`] ?? data.round1Actual) : undefined);
                     const numActQty = parseInt(rawActQty, 10);
 
                     const isCounted = !!data.isCounted || (rawActQty !== undefined && rawActQty !== null && !isNaN(numActQty));
 
-                    const calcGood = gQty !== undefined ? parseInt(gQty, 10) : (isCounted ? (isNaN(numActQty) ? 0 : numActQty) : 0);
-                    const calcBad = bQty !== undefined ? parseInt(bQty, 10) : 0;
-                    const totalActualCalculated = calcGood + calcBad;
+                    const parsedGood = gQty !== undefined && gQty !== null ? parseInt(gQty, 10) : NaN;
+                    const parsedBad = bQty !== undefined && bQty !== null ? parseInt(bQty, 10) : NaN;
+
+                    const calcGood = !isNaN(parsedGood) ? parsedGood : (isCounted ? (isNaN(numActQty) ? 0 : numActQty) : 0);
+                    const calcBad = !isNaN(parsedBad) ? parsedBad : 0;
+                    const totalActualCalculated = ( !isNaN(parsedGood) || !isNaN(parsedBad) )
+                        ? (calcGood + calcBad)
+                        : (!isNaN(numActQty) ? numActQty : 0);
 
                     return {
                         id: docSnap.id,
@@ -962,6 +967,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                         round2Counter: data.round2Counter,
                         round3Counter: data.round3Counter,
                         previousCounter: data.previousCounter,
+                        lastSwapBatchId: data.lastSwapBatchId,
                         counterPendamping: data.counterPendamping || data.partner,
                         partner: data.partner,
                         isLocked: !!data.isLocked,
@@ -2937,7 +2943,9 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 if (!item.id) return;
                 const ref = doc(db, "master_tasks", item.id);
                 const originalCounter = item.previousCounter || (item as any)[`round${prevRound}Counter`] || item.counter;
-                const origActual = (item as any)[`round${prevRound}Actual`] ?? item.countedQty ?? item.Qty;
+                const origActual = (item as any)[`round${prevRound}Actual`] ?? item.round1Actual ?? item.countedQty ?? item.Qty ?? 0;
+                const origBad = (item.qtyBad !== undefined && !isNaN(item.qtyBad)) ? item.qtyBad : 0;
+                const origGood = Math.max(0, origActual - origBad);
 
                 revertOps.push({
                     ref,
@@ -2946,8 +2954,11 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                         currentRound: prevRound,
                         isCounted: true,
                         QTY_ACTUAL: origActual,
+                        QTY_GOOD: origGood,
+                        QTY_BAD: origBad,
                         previousCounter: null,
                         lastSwapBatchId: null,
+                        isLocked: false,
                         updatedAt: timestampNow
                     }
                 });
@@ -4074,22 +4085,32 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
     const handleDeleteAllSKUCatalog = async () => {
         const activeProjId = activeProject?.id || '';
         const targetDocs = catalogDataList.filter(c => !activeProjId || !c.projectId || c.projectId === activeProjId);
-        if (targetDocs.length === 0) {
-            triggerNotification("Master Katalog SKU pada project ini sudah kosong.");
+        // Cek juga apakah ada hasil hitungan (master_tasks) di project aktif yang masih menempel label Master SKU lama
+        const mappedTasksInProject = masterDataList.filter(m =>
+            m.id && (
+                (m.Description && m.Description !== 'Barang Fisik Baru Unmapped' && m.Description !== 'Menunggu Mapping Master SKU' && m.Description !== '-') ||
+                (m.UPC1 && m.SKU && m.SKU !== m.UPC1)
+            )
+        );
+
+        if (targetDocs.length === 0 && mappedTasksInProject.length === 0) {
+            triggerNotification("Master Katalog SKU pada project ini sudah bersih & kosong.");
             return;
         }
 
         const confirmed = window.confirm(
-            `Apakah Anda yakin ingin MENGHAPUS SEMUA (${targetDocs.length.toLocaleString('id-ID')} item) Master Katalog SKU pada project ini?\n\n` +
-            `✅ AMAN: Seluruh Hasil Hitungan Fisik (Actual Qty) counter TIDAK AKAN TERHAPUS.\n` +
+            `Apakah Anda yakin ingin MENGHAPUS SEMUA Master Katalog SKU pada project ini (${targetDocs.length} item katalog & me-reset label pada ${mappedTasksInProject.length} task)?\n\n` +
+            `✅ AMAN: Seluruh Hasil Hitungan Fisik (Actual Qty), Lokasi Rak, & Counter TIDAK AKAN TERHAPUS.\n` +
             `✅ Setelah dihapus, Anda bisa Upload Master SKU baru dan hasil hitungan yang sudah ada akan otomatis ter-mapping ulang!`
         );
         if (!confirmed) return;
 
         try {
             isUploadingRef.current = true;
-            setUploadProgress({ current: 0, total: targetDocs.length, stepMessage: "Menghapus Master Katalog SKU..." });
+            const totalOps = targetDocs.length + mappedTasksInProject.length;
+            setUploadProgress({ current: 0, total: Math.max(1, totalOps), stepMessage: "Menghapus Master Katalog SKU & me-reset label..." });
             const CHUNK = 400;
+
             for (let i = 0; i < targetDocs.length; i += CHUNK) {
                 const chunk = targetDocs.slice(i, i + CHUNK);
                 const batch = writeBatch(db);
@@ -4097,16 +4118,31 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     if (c.id) batch.delete(doc(db, "sku_catalog", c.id));
                 });
                 await batch.commit();
-                setUploadProgress({
-                    current: Math.min(i + CHUNK, targetDocs.length),
-                    total: targetDocs.length,
-                    stepMessage: `Menghapus Master SKU (${Math.min(i + CHUNK, targetDocs.length)} / ${targetDocs.length})...`
-                });
             }
+
+            // Reset label deskripsi/SKU pada hasil hitungan kembali ke Barcode (UPC1) tanpa menyentuh QTY_ACTUAL sedikitpun!
+            for (let i = 0; i < mappedTasksInProject.length; i += CHUNK) {
+                const chunk = mappedTasksInProject.slice(i, i + CHUNK);
+                const batch = writeBatch(db);
+                chunk.forEach(t => {
+                    if (!t.id) return;
+                    const fallbackBarcode = (t.UPC1 && t.UPC1 !== '-') ? t.UPC1 : t.SKU;
+                    batch.set(doc(db, "master_tasks", t.id), {
+                        SKU: fallbackBarcode,
+                        UPC1: fallbackBarcode,
+                        Description: 'Menunggu Mapping Master SKU',
+                        SKUBrand: 'General',
+                        unitPrice: 0,
+                        updatedAt: new Date().toISOString()
+                    }, { merge: true });
+                });
+                await batch.commit();
+            }
+
             isUploadingRef.current = false;
             setUploadProgress(null);
             setCatalogDataList(prev => prev.filter(c => activeProjId && c.projectId && c.projectId !== activeProjId));
-            triggerNotification(`🗑️ ${targetDocs.length.toLocaleString('id-ID')} Master Katalog SKU berhasil dihapus! Hasil hitungan counter tetap utuh & siap di-mapping ulang.`);
+            triggerNotification(`🗑️ Master Katalog SKU berhasil dikosongkan & ${mappedTasksInProject.length} hasil hitungan di-reset ke Barcode (Actual Qty 100% aman)!`);
         } catch (err: any) {
             isUploadingRef.current = false;
             setUploadProgress(null);
@@ -4702,12 +4738,16 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     const data = docSnap.data();
                     const gQty = data.QTY_GOOD ?? data.qtyGood;
                     const bQty = data.QTY_BAD ?? data.qtyBad;
-                    const rawActQty = data.QTY_ACTUAL ?? data.countedQty;
+                    const rawActQty = data.QTY_ACTUAL ?? data.countedQty ?? (data.isCounted ? (data[`round${data.currentRound || 1}Actual`] ?? data.round1Actual) : undefined);
                     const numActQty = parseInt(rawActQty, 10);
                     const isCounted = !!data.isCounted || (rawActQty !== undefined && rawActQty !== null && !isNaN(numActQty));
-                    const calcGood = gQty !== undefined ? parseInt(gQty, 10) : (isCounted ? (isNaN(numActQty) ? 0 : numActQty) : 0);
-                    const calcBad = bQty !== undefined ? parseInt(bQty, 10) : 0;
-                    const totalActualCalculated = calcGood + calcBad;
+                    const parsedGood = gQty !== undefined && gQty !== null ? parseInt(gQty, 10) : NaN;
+                    const parsedBad = bQty !== undefined && bQty !== null ? parseInt(bQty, 10) : NaN;
+                    const calcGood = !isNaN(parsedGood) ? parsedGood : (isCounted ? (isNaN(numActQty) ? 0 : numActQty) : 0);
+                    const calcBad = !isNaN(parsedBad) ? parsedBad : 0;
+                    const totalActualCalculated = (!isNaN(parsedGood) || !isNaN(parsedBad))
+                        ? (calcGood + calcBad)
+                        : (!isNaN(numActQty) ? numActQty : 0);
 
                     return {
                         id: docSnap.id,
@@ -4743,6 +4783,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                         round2Counter: data.round2Counter,
                         round3Counter: data.round3Counter,
                         previousCounter: data.previousCounter,
+                        lastSwapBatchId: data.lastSwapBatchId,
                         counterPendamping: data.counterPendamping || data.partner,
                         partner: data.partner,
                         isLocked: !!data.isLocked,
@@ -5399,16 +5440,15 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         });
     }, [reassignModal.sourceCounter, counterGroups, globalAccounts]);
 
-    // 2. FILTERED SKU CATALOG WITH PAGINATION (Single-pass Map O(N) - Terisolasi Per Project!)
+    // 2. FILTERED SKU CATALOG WITH PAGINATION (Murni dari koleksi sku_catalog project aktif, tidak dicampur dengan master_tasks!)
     const filteredSKUCatalog = useMemo(() => {
         const catalogMap = new Map<string, any>();
         const activeProjId = activeProject?.id || '';
 
-        // Sumber 1: Master SKU Catalog yang diunggah khusus untuk Project Aktif
         for (let i = 0; i < catalogDataList.length; i++) {
             const c = catalogDataList[i];
             if (!c.SKU) continue;
-            // Isolasi Project Ketat: jangan sertakan Master SKU dari project lama saat membuka project baru
+            // Isolasi Project Ketat: hanya tampilkan Master SKU milik project aktif
             if (activeProjId && c.projectId !== activeProjId) continue;
 
             catalogMap.set(c.SKU, {
@@ -5425,33 +5465,6 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             });
         }
 
-        // Sumber 2: Data SKU dari Master Task WMS di Project Aktif
-        for (let i = 0; i < masterDataList.length; i++) {
-            const m = masterDataList[i];
-            if (!m.SKU) continue;
-            if (!catalogMap.has(m.SKU)) {
-                catalogMap.set(m.SKU, {
-                    id: sanitizeDocId(`${activeProjId || 'GLOBAL'}_${m.SKU}`),
-                    projectId: activeProjId,
-                    SKU: m.SKU,
-                    Owner: m.Owner || 'DDI',
-                    Description: m.Description || '-',
-                    UPC1: m.UPC1 || '-',
-                    UPC2: m.UPC2 || '-',
-                    SKUBrand: m.SKUBrand || '-',
-                    satuanHitung: m.satuanHitung || 'PCS',
-                    unitPrice: m.unitPrice || 0
-                });
-            } else {
-                const item = catalogMap.get(m.SKU);
-                if (item.Description === '-' && m.Description) item.Description = m.Description;
-                if (item.UPC1 === '-' && m.UPC1) item.UPC1 = m.UPC1;
-                if (item.UPC2 === '-' && m.UPC2) item.UPC2 = m.UPC2;
-                if (item.SKUBrand === '-' && m.SKUBrand) item.SKUBrand = m.SKUBrand;
-                if (item.unitPrice === 0 && m.unitPrice) item.unitPrice = m.unitPrice;
-            }
-        }
-
         const lowerSearch = catalogSearch.toLowerCase();
         const allItems = Array.from(catalogMap.values());
         if (!lowerSearch) return allItems;
@@ -5462,7 +5475,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             (c.UPC2 && c.UPC2.toLowerCase().includes(lowerSearch)) ||
             (c.SKUBrand && c.SKUBrand.toLowerCase().includes(lowerSearch))
         );
-    }, [catalogDataList, masterDataList, catalogSearch, activeProject?.id]);
+    }, [catalogDataList, catalogSearch, activeProject?.id]);
 
     const totalCatalogPages = Math.ceil(filteredSKUCatalog.length / ITEMS_PER_PAGE) || 1;
     const paginatedSKUCatalog = useMemo(() => {
