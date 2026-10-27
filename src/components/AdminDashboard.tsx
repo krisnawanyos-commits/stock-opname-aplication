@@ -395,6 +395,75 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
     const [masterDataList, setMasterDataList] = useState<MasterSKUItem[]>([]);
     const [catalogDataList, setCatalogDataList] = useState<any[]>([]);
 
+    // EDIT & DELETE & ADD MASTER TASK STATES
+    const [editingMasterTask, setEditingMasterTask] = useState<MasterSKUItem | null>(null);
+    const [isSavingMasterTask, setIsSavingMasterTask] = useState<boolean>(false);
+    const [deletingMasterTask, setDeletingMasterTask] = useState<MasterSKUItem | null>(null);
+    const [isDeletingMasterTask, setIsDeletingMasterTask] = useState<boolean>(false);
+    const [deleteMasterConfirmedChecked, setDeleteMasterConfirmedChecked] = useState<boolean>(false);
+    const [isAddMasterTaskOpen, setIsAddMasterTaskOpen] = useState<boolean>(false);
+    const [isAddingMasterTask, setIsAddingMasterTask] = useState<boolean>(false);
+    const [newMasterTaskForm, setNewMasterTaskForm] = useState<{
+        SKU: string;
+        Description: string;
+        UPC1: string;
+        UPC2: string;
+        Location: string;
+        level: string;
+        ailee: string;
+        Zone: string;
+        Qty: number;
+        satuanHitung: string;
+        pcsPerCarton: number;
+        SKUBrand: string;
+        Owner: string;
+        counter: string;
+        unitPrice: number;
+    }>({
+        SKU: '',
+        Description: '',
+        UPC1: '',
+        UPC2: '',
+        Location: '',
+        level: '1',
+        ailee: '',
+        Zone: 'RACKING',
+        Qty: 0,
+        satuanHitung: 'PCS',
+        pcsPerCarton: 1,
+        SKUBrand: '',
+        Owner: 'DDI',
+        counter: 'unassigned',
+        unitPrice: 0
+    });
+
+    // EDIT & DELETE & ADD SKU CATALOG STATES
+    const [editingCatalogItem, setEditingCatalogItem] = useState<any | null>(null);
+    const [isSavingCatalogItem, setIsSavingCatalogItem] = useState<boolean>(false);
+    const [deletingCatalogItem, setDeletingCatalogItem] = useState<any | null>(null);
+    const [isDeletingCatalogItem, setIsDeletingCatalogItem] = useState<boolean>(false);
+    const [isAddCatalogOpen, setIsAddCatalogOpen] = useState<boolean>(false);
+    const [isAddingCatalogItem, setIsAddingCatalogItem] = useState<boolean>(false);
+    const [newCatalogForm, setNewCatalogForm] = useState<{
+        SKU: string;
+        Description: string;
+        UPC1: string;
+        UPC2: string;
+        SKUBrand: string;
+        Owner: string;
+        unitPrice: number;
+        satuanHitung: string;
+    }>({
+        SKU: '',
+        Description: '',
+        UPC1: '',
+        UPC2: '',
+        SKUBrand: '',
+        Owner: 'DDI',
+        unitPrice: 0,
+        satuanHitung: 'PCS'
+    });
+
     const filteredProjects = useMemo(() => {
         if (projectFilterStatus === 'ALL') return projectHistory;
         return projectHistory.filter(p => (p.status || 'LIVE_ACTIVE') === projectFilterStatus);
@@ -838,7 +907,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             updateTimer = setTimeout(() => {
                 const filteredDocs = snapshot.docs.filter(docSnap => {
                     const data = docSnap.data();
-                    if (activeProjId && data.projectId && data.projectId !== activeProjId) return false;
+                    if (activeProjId && data.projectId !== activeProjId) return false;
                     // Abaikan dokumen placeholder lokasi rak tanpa SKU barang
                     if (!data.SKU || !data.SKU.trim() || data.SKU === 'SKU_UNKNOWN') return false;
                     return true;
@@ -3520,6 +3589,15 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     let chunkCursor = 0;
                     let completedRows = 0;
 
+                    // Buat indeks cepat task yang sudah dihitung di project aktif agar upload ulang Master Task TIDAK menghapus hasil hitungan (Actual Qty)
+                    const existingCountedMap = new Map<string, MasterSKUItem>();
+                    masterDataList.forEach(item => {
+                        if (item.isCounted || (item.countedQty !== undefined && item.countedQty !== null)) {
+                            const key = `${(item.Location || '').trim().toUpperCase()}__${(item.SKU || '').trim().toUpperCase()}`;
+                            existingCountedMap.set(key, item);
+                        }
+                    });
+
                     setUploadProgress({ current: 0, total: totalRows, stepMessage: "Mengunggah data batch ke Cloud..." });
 
                     // Fungsi proses satu chunk dengan membuat WriteBatch BARU di setiap percobaan
@@ -3536,13 +3614,17 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                     const locStr = (row['Location'] || row['LOCATION'] || `LOC-${globalIdx + 1}`).toString().trim();
                                     const skuStr = (row['SKU'] || `SKU-${globalIdx + 1}`).toString().trim();
 
-                                    const taskId = sanitizeDocId(`${pId}_${locStr}_${skuStr}_${globalIdx + 1}`);
+                                    const existingCounted = existingCountedMap.get(`${locStr.toUpperCase()}__${skuStr.toUpperCase()}`);
+                                    const taskId = existingCounted?.id || sanitizeDocId(`${pId}_${locStr}_${skuStr}_${globalIdx + 1}`);
 
                                     const rawActQty = row['QTY ACTUAL'] ?? row['Qty Actual'] ?? row['ACTUAL QTY'];
                                     const numActQty = parseInt(rawActQty, 10);
-                                    const isCounted = rawActQty !== undefined && rawActQty !== null && rawActQty !== '' && !isNaN(numActQty);
+                                    const hasExcelActQty = rawActQty !== undefined && rawActQty !== null && rawActQty !== '' && !isNaN(numActQty);
 
-                                    const taskDoc = {
+                                    const preservedIsCounted = hasExcelActQty ? true : (existingCounted?.isCounted ?? false);
+                                    const preservedActQty = hasExcelActQty ? numActQty : (existingCounted?.countedQty ?? existingCounted?.QTY_ACTUAL ?? null);
+
+                                    const taskDoc: any = {
                                         projectId: pId,
                                         Owner: row['Owner'] || 'DDI',
                                         SKU: skuStr,
@@ -3559,15 +3641,18 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                         LocationType: row['Location Type'] || 'RACK',
                                         counter: cleanCounter,
                                         Status: row['Status'] || 'Active',
-                                        currentRound: parseInt(row['current round']) || 1,
+                                        currentRound: existingCounted?.currentRound || parseInt(row['current round']) || 1,
                                         expiredDateSystem: row['expired date by system'] || '',
-                                        expiredDateActual: row['expired date by actual'] || '',
+                                        expiredDateActual: row['expired date by actual'] || existingCounted?.expiredDateActual || '',
                                         Qty: parseInt(row['Qty System'] || row['QTY SYSTEM']) || 0,
                                         unitPrice: parseInt(row['Unit Price'] || '0') || 0,
-                                        isCounted,
-                                        QTY_ACTUAL: isCounted ? numActQty : null,
+                                        isCounted: preservedIsCounted,
                                         updatedAt: new Date().toISOString()
                                     };
+
+                                    if (hasExcelActQty || !existingCounted) {
+                                        taskDoc.QTY_ACTUAL = preservedActQty;
+                                    }
 
                                     const taskRef = doc(db, "master_tasks", taskId);
                                     batch.set(taskRef, taskDoc, { merge: true });
@@ -3575,8 +3660,9 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                     newMasterList[globalIdx] = {
                                         id: taskId,
                                         ...taskDoc,
-                                        countedQty: isCounted ? numActQty : undefined,
-                                        Remarks: row['REMARKS'] || ''
+                                        QTY_ACTUAL: preservedActQty,
+                                        countedQty: preservedActQty !== null ? preservedActQty : undefined,
+                                        Remarks: row['REMARKS'] || existingCounted?.Remarks || ''
                                     };
                                 });
 
@@ -3732,6 +3818,502 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         triggerNotification("Export data Master Task (.xlsx) berhasil diunduh!");
     };
 
+    // ==========================================
+    // HANDLERS: EDIT, DELETE, ADD MASTER TASK
+    // ==========================================
+    const handleOpenEditMasterModal = (item: MasterSKUItem) => {
+        setEditingMasterTask({ ...item });
+    };
+
+    const handleSaveEditMasterTask = async () => {
+        if (!editingMasterTask || !editingMasterTask.id) return;
+        if (!editingMasterTask.SKU?.trim() || !editingMasterTask.Location?.trim()) {
+            triggerNotification("SKU dan Lokasi Rak wajib diisi!");
+            return;
+        }
+
+        setIsSavingMasterTask(true);
+        try {
+            const taskRef = doc(db, "master_tasks", editingMasterTask.id);
+            const numQty = Number(editingMasterTask.Qty) || 0;
+            const updatePayload: any = {
+                SKU: editingMasterTask.SKU.trim(),
+                Description: (editingMasterTask.Description || '').trim(),
+                UPC1: (editingMasterTask.UPC1 || '').trim(),
+                UPC2: (editingMasterTask.UPC2 || '').trim(),
+                Location: editingMasterTask.Location.trim(),
+                level: (editingMasterTask.level || '1').toString().trim(),
+                ailee: (editingMasterTask.ailee || '').toString().trim(),
+                Zone: (editingMasterTask.Zone || 'RACKING').trim(),
+                Qty: numQty,
+                QTY_SYSTEM: numQty,
+                satuanHitung: (editingMasterTask.satuanHitung || 'PCS').trim(),
+                pcsPerCarton: Number(editingMasterTask.pcsPerCarton) || 1,
+                SKUBrand: (editingMasterTask.SKUBrand || '').trim(),
+                Owner: (editingMasterTask.Owner || 'DDI').trim(),
+                counter: (editingMasterTask.counter || 'unassigned').toLowerCase().trim(),
+                unitPrice: Number(editingMasterTask.unitPrice) || 0,
+                updatedAt: new Date().toISOString(),
+                updatedBy: currentUserEmail || effectiveRole
+            };
+
+            await updateDoc(taskRef, updatePayload);
+            triggerNotification(`Master Task SKU "${editingMasterTask.SKU}" berhasil diperbarui!`);
+            setEditingMasterTask(null);
+        } catch (err: any) {
+            console.error("Gagal update master task:", err);
+            triggerNotification(`Gagal update task: ${err.message || String(err)}`);
+        } finally {
+            setIsSavingMasterTask(false);
+        }
+    };
+
+    const handlePromptDeleteMaster = (item: MasterSKUItem) => {
+        setDeletingMasterTask(item);
+        setDeleteMasterConfirmedChecked(false);
+    };
+
+    const handleExecuteDeleteMasterTask = async () => {
+        if (!deletingMasterTask || !deletingMasterTask.id) return;
+        setIsDeletingMasterTask(true);
+        try {
+            await deleteDoc(doc(db, "master_tasks", deletingMasterTask.id));
+            triggerNotification(`Master Task SKU "${deletingMasterTask.SKU}" berhasil dihapus.`);
+            setDeletingMasterTask(null);
+        } catch (err: any) {
+            console.error("Gagal hapus master task:", err);
+            triggerNotification(`Gagal hapus task: ${err.message || String(err)}`);
+        } finally {
+            setIsDeletingMasterTask(false);
+        }
+    };
+
+    const handleOpenAddMasterModal = () => {
+        setNewMasterTaskForm({
+            SKU: '',
+            Description: '',
+            UPC1: '',
+            UPC2: '',
+            Location: '',
+            level: '1',
+            ailee: '',
+            Zone: 'RACKING',
+            Qty: 0,
+            satuanHitung: 'PCS',
+            pcsPerCarton: 1,
+            SKUBrand: '',
+            Owner: 'DDI',
+            counter: globalAccounts[0]?.username || 'unassigned',
+            unitPrice: 0
+        });
+        setIsAddMasterTaskOpen(true);
+    };
+
+    const handleSaveAddMasterTask = async () => {
+        if (!newMasterTaskForm.SKU.trim() || !newMasterTaskForm.Location.trim()) {
+            triggerNotification("SKU dan Lokasi Rak wajib diisi!");
+            return;
+        }
+
+        setIsAddingMasterTask(true);
+        try {
+            const pId = activeProject?.id || 'GLOBAL';
+            const skuStr = newMasterTaskForm.SKU.trim();
+            const locStr = newMasterTaskForm.Location.trim();
+            const cleanCounter = sanitizeDocId(newMasterTaskForm.counter.toLowerCase().trim() || 'unassigned');
+            const taskId = sanitizeDocId(`${pId}_${locStr}_${skuStr}_${Date.now()}`);
+            const numQty = Number(newMasterTaskForm.Qty) || 0;
+
+            const newTaskDoc: any = {
+                projectId: pId,
+                Owner: newMasterTaskForm.Owner.trim() || 'DDI',
+                SKU: skuStr,
+                Description: newMasterTaskForm.Description.trim(),
+                UPC1: newMasterTaskForm.UPC1.trim(),
+                UPC2: newMasterTaskForm.UPC2.trim(),
+                Location: locStr,
+                level: newMasterTaskForm.level.trim() || '1',
+                ailee: newMasterTaskForm.ailee.trim() || '',
+                Zone: newMasterTaskForm.Zone.trim() || 'RACKING',
+                LocationType: 'RACK',
+                counter: cleanCounter,
+                Status: 'Active',
+                Qty: numQty,
+                QTY_SYSTEM: numQty,
+                satuanHitung: newMasterTaskForm.satuanHitung.trim() || 'PCS',
+                pcsPerCarton: Number(newMasterTaskForm.pcsPerCarton) || 1,
+                SKUBrand: newMasterTaskForm.SKUBrand.trim(),
+                unitPrice: Number(newMasterTaskForm.unitPrice) || 0,
+                currentRound: 1,
+                isCounted: false,
+                createdAt: new Date().toISOString(),
+                createdBy: currentUserEmail || effectiveRole
+            };
+
+            await setDoc(doc(db, "master_tasks", taskId), newTaskDoc);
+            triggerNotification(`Task SKU "${skuStr}" di rak "${locStr}" berhasil ditambahkan!`);
+            setIsAddMasterTaskOpen(false);
+        } catch (err: any) {
+            console.error("Gagal menambah master task:", err);
+            triggerNotification(`Gagal menambah task: ${err.message || String(err)}`);
+        } finally {
+            setIsAddingMasterTask(false);
+        }
+    };
+
+    // ==========================================
+    // HANDLERS: EDIT, DELETE, ADD SKU CATALOG
+    // ==========================================
+    const handleOpenEditCatalogModal = (item: any) => {
+        setEditingCatalogItem({ ...item });
+    };
+
+    const handleSaveEditCatalog = async () => {
+        if (!editingCatalogItem) return;
+        if (!editingCatalogItem.SKU?.trim()) {
+            triggerNotification("SKU wajib diisi!");
+            return;
+        }
+
+        setIsSavingCatalogItem(true);
+        try {
+            const pId = activeProject?.id || editingCatalogItem.projectId || 'GLOBAL';
+            const cleanSku = editingCatalogItem.SKU.trim();
+            const docId = editingCatalogItem.id || sanitizeDocId(`${pId}_${cleanSku}`);
+            const catRef = doc(db, "sku_catalog", docId);
+            const cleanDesc = (editingCatalogItem.Description || '').trim();
+            const cleanUpc1 = (editingCatalogItem.UPC1 || '').trim();
+            const cleanUpc2 = (editingCatalogItem.UPC2 || '').trim();
+            const cleanBrand = (editingCatalogItem.SKUBrand || '').trim();
+            const cleanOwner = (editingCatalogItem.Owner || 'DDI').trim();
+            const cleanPrice = Number(editingCatalogItem.unitPrice) || 0;
+            const cleanSatuan = (editingCatalogItem.satuanHitung || 'PCS').trim().toUpperCase();
+
+            await setDoc(catRef, {
+                projectId: pId,
+                SKU: cleanSku,
+                Description: cleanDesc,
+                UPC1: cleanUpc1,
+                UPC2: cleanUpc2,
+                SKUBrand: cleanBrand,
+                Owner: cleanOwner,
+                unitPrice: cleanPrice,
+                satuanHitung: cleanSatuan,
+                updatedAt: new Date().toISOString()
+            }, { merge: true });
+
+            // Sinkronkan juga ke master_tasks di project aktif yang cocok SKU / Barcode-nya tanpa menyentuh QTY_ACTUAL!
+            const skuUpper = cleanSku.toUpperCase();
+            const upc1Lower = cleanUpc1.toLowerCase();
+            const upc2Lower = cleanUpc2.toLowerCase();
+            const matchingTasks = masterDataList.filter(m => {
+                const mSku = (m.SKU || '').toUpperCase().trim();
+                const mUpc1 = (m.UPC1 || '').toLowerCase().trim();
+                const mUpc2 = (m.UPC2 || '').toLowerCase().trim();
+                return mSku === skuUpper ||
+                    (upc1Lower && (mSku.toLowerCase() === upc1Lower || mUpc1 === upc1Lower || mUpc2 === upc1Lower)) ||
+                    (upc2Lower && (mSku.toLowerCase() === upc2Lower || mUpc1 === upc2Lower || mUpc2 === upc2Lower));
+            });
+
+            if (matchingTasks.length > 0) {
+                const batch = writeBatch(db);
+                matchingTasks.slice(0, 450).forEach(t => {
+                    if (!t.id) return;
+                    batch.set(doc(db, "master_tasks", t.id), {
+                        SKU: cleanSku,
+                        Owner: cleanOwner,
+                        Description: cleanDesc,
+                        UPC1: cleanUpc1,
+                        UPC2: cleanUpc2,
+                        SKUBrand: cleanBrand,
+                        satuanHitung: cleanSatuan,
+                        unitPrice: cleanPrice,
+                        updatedAt: new Date().toISOString()
+                    }, { merge: true });
+                });
+                await batch.commit();
+            }
+
+            triggerNotification(`Katalog SKU "${cleanSku}" diperbarui${matchingTasks.length > 0 ? ` & di-mapping ke ${matchingTasks.length} hasil hitungan` : ''}!`);
+            setEditingCatalogItem(null);
+        } catch (err: any) {
+            console.error("Gagal update katalog SKU:", err);
+            triggerNotification(`Gagal update katalog: ${err.message || String(err)}`);
+        } finally {
+            setIsSavingCatalogItem(false);
+        }
+    };
+
+    const handlePromptDeleteCatalog = (item: any) => {
+        setDeletingCatalogItem(item);
+    };
+
+    const handleExecuteDeleteCatalog = async () => {
+        if (!deletingCatalogItem) return;
+        setIsDeletingCatalogItem(true);
+        try {
+            const pId = activeProject?.id || deletingCatalogItem.projectId || 'GLOBAL';
+            const docId = deletingCatalogItem.id || sanitizeDocId(`${pId}_${deletingCatalogItem.SKU}`);
+            await deleteDoc(doc(db, "sku_catalog", docId));
+            // Hapus juga jika ada dokumen lama tanpa prefix projectId
+            const legacyId = sanitizeDocId(deletingCatalogItem.SKU || '');
+            if (legacyId && legacyId !== docId) {
+                await deleteDoc(doc(db, "sku_catalog", legacyId)).catch(() => {});
+            }
+            triggerNotification(`Katalog SKU "${deletingCatalogItem.SKU}" berhasil dihapus (Hasil hitungan tetap aman).`);
+            setDeletingCatalogItem(null);
+        } catch (err: any) {
+            console.error("Gagal hapus katalog SKU:", err);
+            triggerNotification(`Gagal hapus katalog: ${err.message || String(err)}`);
+        } finally {
+            setIsDeletingCatalogItem(false);
+        }
+    };
+
+    // HAPUS SEMUA MASTER SKU KATALOG (TANPA MENGHAPUS HASIL HITUNGAN COUNTER!)
+    const handleDeleteAllSKUCatalog = async () => {
+        const activeProjId = activeProject?.id || '';
+        const targetDocs = catalogDataList.filter(c => !activeProjId || !c.projectId || c.projectId === activeProjId);
+        if (targetDocs.length === 0) {
+            triggerNotification("Master Katalog SKU pada project ini sudah kosong.");
+            return;
+        }
+
+        const confirmed = window.confirm(
+            `Apakah Anda yakin ingin MENGHAPUS SEMUA (${targetDocs.length.toLocaleString('id-ID')} item) Master Katalog SKU pada project ini?\n\n` +
+            `✅ AMAN: Seluruh Hasil Hitungan Fisik (Actual Qty) counter TIDAK AKAN TERHAPUS.\n` +
+            `✅ Setelah dihapus, Anda bisa Upload Master SKU baru dan hasil hitungan yang sudah ada akan otomatis ter-mapping ulang!`
+        );
+        if (!confirmed) return;
+
+        try {
+            isUploadingRef.current = true;
+            setUploadProgress({ current: 0, total: targetDocs.length, stepMessage: "Menghapus Master Katalog SKU..." });
+            const CHUNK = 400;
+            for (let i = 0; i < targetDocs.length; i += CHUNK) {
+                const chunk = targetDocs.slice(i, i + CHUNK);
+                const batch = writeBatch(db);
+                chunk.forEach(c => {
+                    if (c.id) batch.delete(doc(db, "sku_catalog", c.id));
+                });
+                await batch.commit();
+                setUploadProgress({
+                    current: Math.min(i + CHUNK, targetDocs.length),
+                    total: targetDocs.length,
+                    stepMessage: `Menghapus Master SKU (${Math.min(i + CHUNK, targetDocs.length)} / ${targetDocs.length})...`
+                });
+            }
+            isUploadingRef.current = false;
+            setUploadProgress(null);
+            setCatalogDataList(prev => prev.filter(c => activeProjId && c.projectId && c.projectId !== activeProjId));
+            triggerNotification(`🗑️ ${targetDocs.length.toLocaleString('id-ID')} Master Katalog SKU berhasil dihapus! Hasil hitungan counter tetap utuh & siap di-mapping ulang.`);
+        } catch (err: any) {
+            isUploadingRef.current = false;
+            setUploadProgress(null);
+            console.error("Gagal hapus semua katalog SKU:", err);
+            triggerNotification(`Gagal menghapus semua katalog: ${err.message || String(err)}`);
+        }
+    };
+
+    // MAPPING ULANG OTOMATIS DARI MASTER KATALOG SKU KE SELURUH HASIL HITUNGAN (MASTER TASKS)
+    const handleRemapMasterTasksFromCatalog = async () => {
+        const activeProjId = activeProject?.id || '';
+        const projectCatalog = catalogDataList.filter(c => !activeProjId || c.projectId === activeProjId);
+        if (projectCatalog.length === 0) {
+            triggerNotification("Belum ada data di Master Katalog SKU pada project ini. Silakan Upload Referensi SKU terlebih dahulu.");
+            return;
+        }
+        if (masterDataList.length === 0) {
+            triggerNotification("Belum ada data task / hasil hitungan di project ini untuk di-mapping.");
+            return;
+        }
+
+        try {
+            isUploadingRef.current = true;
+            setUploadProgress({ current: 0, total: masterDataList.length, stepMessage: "Mencocokkan SKU & Barcode dengan hasil hitungan yang ada..." });
+
+            const bySku = new Map<string, any>();
+            const byUpc = new Map<string, any>();
+            projectCatalog.forEach(c => {
+                if (c.SKU) bySku.set(c.SKU.toString().toUpperCase().trim(), c);
+                if (c.UPC1) byUpc.set(c.UPC1.toString().toLowerCase().trim(), c);
+                if (c.UPC2) byUpc.set(c.UPC2.toString().toLowerCase().trim(), c);
+            });
+
+            const tasksToUpdate: { id: string; updates: any }[] = [];
+            masterDataList.forEach(task => {
+                if (!task.id) return;
+                const tSkuUpper = (task.SKU || '').toString().toUpperCase().trim();
+                const tSkuLower = (task.SKU || '').toString().toLowerCase().trim();
+                const tUpc1Lower = (task.UPC1 || '').toString().toLowerCase().trim();
+                const tUpc2Lower = (task.UPC2 || '').toString().toLowerCase().trim();
+
+                const matchedCat =
+                    bySku.get(tSkuUpper) ||
+                    (tSkuLower ? byUpc.get(tSkuLower) : undefined) ||
+                    (tUpc1Lower ? (byUpc.get(tUpc1Lower) || bySku.get(tUpc1Lower.toUpperCase())) : undefined) ||
+                    (tUpc2Lower ? (byUpc.get(tUpc2Lower) || bySku.get(tUpc2Lower.toUpperCase())) : undefined);
+
+                if (matchedCat) {
+                    const updates: any = {
+                        updatedAt: new Date().toISOString()
+                    };
+                    if (matchedCat.SKU) updates.SKU = matchedCat.SKU;
+                    if (matchedCat.Owner) updates.Owner = matchedCat.Owner;
+                    if (matchedCat.Description) updates.Description = matchedCat.Description;
+                    if (matchedCat.UPC1) updates.UPC1 = matchedCat.UPC1;
+                    if (matchedCat.UPC2) updates.UPC2 = matchedCat.UPC2;
+                    if (matchedCat.SKUBrand) updates.SKUBrand = matchedCat.SKUBrand;
+                    if (matchedCat.satuanHitung) updates.satuanHitung = matchedCat.satuanHitung;
+                    if (matchedCat.pcsPerCarton > 0) updates.pcsPerCarton = matchedCat.pcsPerCarton;
+                    if (matchedCat.unitPrice > 0) updates.unitPrice = matchedCat.unitPrice;
+                    tasksToUpdate.push({ id: task.id, updates });
+                }
+            });
+
+            const CHUNK = 400;
+            for (let i = 0; i < tasksToUpdate.length; i += CHUNK) {
+                const chunk = tasksToUpdate.slice(i, i + CHUNK);
+                const batch = writeBatch(db);
+                chunk.forEach(item => {
+                    batch.set(doc(db, "master_tasks", item.id), item.updates, { merge: true });
+                });
+                await batch.commit();
+                setUploadProgress({
+                    current: Math.min(i + CHUNK, tasksToUpdate.length),
+                    total: Math.max(1, tasksToUpdate.length),
+                    stepMessage: `Memperbarui mapping hasil hitungan (${Math.min(i + CHUNK, tasksToUpdate.length)} / ${tasksToUpdate.length})...`
+                });
+            }
+
+            isUploadingRef.current = false;
+            setUploadProgress(null);
+            triggerNotification(`🔄 Mapping Ulang Selesai! ${tasksToUpdate.length.toLocaleString('id-ID')} hasil hitungan berhasil di-mapping ulang ke Master SKU terbaru tanpa mengubah Qty Actual.`);
+        } catch (err: any) {
+            isUploadingRef.current = false;
+            setUploadProgress(null);
+            console.error("Gagal mapping ulang:", err);
+            triggerNotification(`Gagal melakukan mapping ulang: ${err.message || String(err)}`);
+        }
+    };
+
+    // BERSIHKAN BARIS TEMUAN DUPLIKAT AKIBAT KLIK BERULANG SAAT SINYAL HILANG
+    const handleDeduplicateTasks = async () => {
+        if (masterDataList.length === 0) {
+            triggerNotification("Tidak ada data task di project ini.");
+            return;
+        }
+
+        // Kelompokkan dokumen temuan (Qty System = 0 atau ID mengandung TEMUAN) berdasarkan Location + SKU/UPC1 + Counter
+        const seenTemuanMap = new Map<string, MasterSKUItem>();
+        const duplicateIdsToDelete: { id: string; sku: string; loc: string; counter: string }[] = [];
+
+        masterDataList.forEach(item => {
+            if (!item.id) return;
+            const isTemuan = (item.Qty === 0) || item.id.includes('_TEMUAN');
+            if (!isTemuan) return;
+
+            const locKey = (item.Location || '').trim().toUpperCase();
+            const skuOrUpcKey = ((item.SKU || item.UPC1 || '').trim().toUpperCase());
+            const counterKey = (item.counter || '').trim().toLowerCase();
+            const groupKey = `${locKey}__${skuOrUpcKey}__${counterKey}`;
+
+            if (!seenTemuanMap.has(groupKey)) {
+                seenTemuanMap.set(groupKey, item);
+            } else {
+                duplicateIdsToDelete.push({
+                    id: item.id,
+                    sku: item.SKU || item.UPC1 || '-',
+                    loc: item.Location || '-',
+                    counter: item.counter || '-'
+                });
+            }
+        });
+
+        if (duplicateIdsToDelete.length === 0) {
+            triggerNotification("✨ Tidak ditemukan baris temuan ganda/duplikat pada project ini!");
+            return;
+        }
+
+        const confirmed = window.confirm(
+            `Ditemukan ${duplicateIdsToDelete.length} baris inputan temuan duplikat (akibat klik berulang saat sinyal lemah)!\n\n` +
+            `Contoh: Rak ${duplicateIdsToDelete[0].loc} • SKU/Barcode ${duplicateIdsToDelete[0].sku} (${duplicateIdsToDelete[0].counter})\n\n` +
+            `Sistem akan menyisakan 1 baris asli per SKU di tiap rak dan menghapus ${duplicateIdsToDelete.length} baris gandanya. Lanjutkan?`
+        );
+        if (!confirmed) return;
+
+        try {
+            isUploadingRef.current = true;
+            setUploadProgress({ current: 0, total: duplicateIdsToDelete.length, stepMessage: "Membersihkan baris duplikat..." });
+            const CHUNK = 400;
+            for (let i = 0; i < duplicateIdsToDelete.length; i += CHUNK) {
+                const chunk = duplicateIdsToDelete.slice(i, i + CHUNK);
+                const batch = writeBatch(db);
+                chunk.forEach(dup => {
+                    batch.delete(doc(db, "master_tasks", dup.id));
+                });
+                await batch.commit();
+            }
+            const deletedSet = new Set(duplicateIdsToDelete.map(d => d.id));
+            setMasterDataList(prev => prev.filter(m => !m.id || !deletedSet.has(m.id)));
+            isUploadingRef.current = false;
+            setUploadProgress(null);
+            triggerNotification(`🧹 Berhasil membersihkan ${duplicateIdsToDelete.length} baris duplikat! Rekapan kini bersih.`);
+        } catch (err: any) {
+            isUploadingRef.current = false;
+            setUploadProgress(null);
+            console.error("Gagal membersihkan duplikat:", err);
+            triggerNotification(`Gagal membersihkan duplikat: ${err.message || String(err)}`);
+        }
+    };
+
+    const handleOpenAddCatalogModal = () => {
+        setNewCatalogForm({
+            SKU: '',
+            Description: '',
+            UPC1: '',
+            UPC2: '',
+            SKUBrand: '',
+            Owner: 'DDI',
+            unitPrice: 0,
+            satuanHitung: 'PCS'
+        });
+        setIsAddCatalogOpen(true);
+    };
+
+    const handleSaveAddCatalog = async () => {
+        if (!newCatalogForm.SKU.trim()) {
+            triggerNotification("SKU wajib diisi!");
+            return;
+        }
+
+        setIsAddingCatalogItem(true);
+        try {
+            const pId = activeProject?.id || 'GLOBAL';
+            const skuClean = sanitizeDocId(`${pId}_${newCatalogForm.SKU.trim()}`);
+            const catRef = doc(db, "sku_catalog", skuClean);
+            await setDoc(catRef, {
+                projectId: pId,
+                SKU: newCatalogForm.SKU.trim(),
+                Description: newCatalogForm.Description.trim(),
+                UPC1: newCatalogForm.UPC1.trim(),
+                UPC2: newCatalogForm.UPC2.trim(),
+                SKUBrand: newCatalogForm.SKUBrand.trim(),
+                Owner: newCatalogForm.Owner.trim() || 'DDI',
+                unitPrice: Number(newCatalogForm.unitPrice) || 0,
+                satuanHitung: newCatalogForm.satuanHitung.trim() || 'PCS',
+                createdAt: new Date().toISOString()
+            });
+            triggerNotification(`Katalog SKU "${newCatalogForm.SKU.trim()}" berhasil ditambahkan ke project ini!`);
+            setIsAddCatalogOpen(false);
+        } catch (err: any) {
+            console.error("Gagal menambah katalog SKU:", err);
+            triggerNotification(`Gagal menambah katalog: ${err.message || String(err)}`);
+        } finally {
+            setIsAddingCatalogItem(false);
+        }
+    };
+
     const handleDownloadCatalogTemplateXLSX = () => {
         const templateData = [
             {
@@ -3800,20 +4382,30 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             }
 
             const totalRows = json.length;
+            const activeProjId = activeProject?.id || 'GLOBAL';
             isUploadCancelledRef.current = false;
             isUploadingRef.current = true;
             setUploadProgress({ current: 0, total: totalRows, stepMessage: "Membaca & memvalidasi data katalog referensi..." });
 
-            // Peta SKU ke ID master_tasks untuk auto-sync deskripsi, barcode & harga
-            const skuToTaskDocIds = new Map<string, string[]>();
+            // Peta multi-key (SKU, UPC1, UPC2) ke ID master_tasks di project aktif agar hasil hitungan yang sudah ada (termasuk temuan barcode) otomatis ter-mapping ulang!
+            const keyToTaskDocIds = new Map<string, Set<string>>();
+            const addTaskMappingKey = (k: string | undefined, docId: string) => {
+                if (!k) return;
+                const clean = k.toString().trim().toUpperCase();
+                if (!clean || clean === '-') return;
+                if (!keyToTaskDocIds.has(clean)) keyToTaskDocIds.set(clean, new Set());
+                keyToTaskDocIds.get(clean)!.add(docId);
+            };
             masterDataList.forEach(m => {
-                if (!m.SKU) return;
-                if (!skuToTaskDocIds.has(m.SKU)) skuToTaskDocIds.set(m.SKU, []);
-                skuToTaskDocIds.get(m.SKU)!.push(m.id || `${m.Location}_${m.SKU}`);
+                const tId = m.id || `${m.Location}_${m.SKU}`;
+                addTaskMappingKey(m.SKU, tId);
+                addTaskMappingKey(m.UPC1, tId);
+                addTaskMappingKey(m.UPC2, tId);
             });
 
             const CHUNK_SIZE = 100;
             let successCount = 0;
+            let remappedTaskCount = 0;
 
             for (let i = 0; i < totalRows; i += CHUNK_SIZE) {
                 if (isUploadCancelledRef.current) {
@@ -3828,7 +4420,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     const rawSku = (row['SKU'] || row['SKU BARANG'] || row['Kode Barang'] || row['sku'] || '').toString().trim();
                     if (!rawSku) return;
 
-                    const skuKey = sanitizeDocId(rawSku);
+                    const skuKey = sanitizeDocId(`${activeProjId}_${rawSku}`);
                     const owner = (row['Owner'] || row['OWNER'] || row['owner'] || 'DDI').toString().trim();
                     const desc = (row['Description'] || row['DESKRIPSI PRODUK'] || row['Deskripsi'] || row['Nama Produk'] || row['description'] || '').toString().trim();
                     const upc1 = (row['UPC 1'] || row['UPC1'] || row['UPC 1 (ECERAN)'] || row['Barcode'] || row['barcode'] || row['upc1'] || '').toString().trim();
@@ -3841,6 +4433,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     const unitPrice = parseInt(rawPrice, 10) || 0;
 
                     const catalogDoc = {
+                        projectId: activeProjId,
                         SKU: rawSku,
                         Owner: owner,
                         Description: desc,
@@ -3857,23 +4450,32 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                     batch.set(catRef, catalogDoc, { merge: true });
                     successCount++;
 
-                    // Sinkronkan ke master_tasks jika SKU tersebut ada di task operasional aktif
-                    if (skuToTaskDocIds.has(rawSku)) {
-                        skuToTaskDocIds.get(rawSku)!.forEach(tId => {
-                            const tRef = doc(db, "master_tasks", tId);
-                            const syncUpdates: any = {};
-                            if (desc) syncUpdates.Description = desc;
-                            if (upc1) syncUpdates.UPC1 = upc1;
-                            if (upc2) syncUpdates.UPC2 = upc2;
-                            if (brand) syncUpdates.SKUBrand = brand;
-                            if (satuan) syncUpdates.satuanHitung = satuan;
-                            if (pcsPerCarton > 0) syncUpdates.pcsPerCarton = pcsPerCarton;
-                            if (unitPrice > 0) syncUpdates.unitPrice = unitPrice;
-                            if (Object.keys(syncUpdates).length > 0) {
-                                batch.set(tRef, syncUpdates, { merge: true });
-                            }
-                        });
-                    }
+                    // Cari seluruh master_tasks di project aktif yang cocok via SKU, UPC1, atau UPC2 (termasuk temuan barcode)
+                    const matchedIds = new Set<string>();
+                    [rawSku, upc1, upc2].forEach(candidate => {
+                        const cleanCand = (candidate || '').toString().trim().toUpperCase();
+                        if (cleanCand && keyToTaskDocIds.has(cleanCand)) {
+                            keyToTaskDocIds.get(cleanCand)!.forEach(id => matchedIds.add(id));
+                        }
+                    });
+
+                    matchedIds.forEach(tId => {
+                        const tRef = doc(db, "master_tasks", tId);
+                        const syncUpdates: any = {
+                            SKU: rawSku,
+                            Owner: owner || 'DDI',
+                            updatedAt: new Date().toISOString()
+                        };
+                        if (desc) syncUpdates.Description = desc;
+                        if (upc1) syncUpdates.UPC1 = upc1;
+                        if (upc2) syncUpdates.UPC2 = upc2;
+                        if (brand) syncUpdates.SKUBrand = brand;
+                        if (satuan) syncUpdates.satuanHitung = satuan;
+                        if (pcsPerCarton > 0) syncUpdates.pcsPerCarton = pcsPerCarton;
+                        if (unitPrice > 0) syncUpdates.unitPrice = unitPrice;
+                        batch.set(tRef, syncUpdates, { merge: true });
+                        remappedTaskCount++;
+                    });
                 });
 
                 await batch.commit();
@@ -3881,7 +4483,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 setUploadProgress({
                     current: Math.min(i + CHUNK_SIZE, totalRows),
                     total: totalRows,
-                    stepMessage: `Menyimpan referensi SKU (${Math.min(i + CHUNK_SIZE, totalRows).toLocaleString('id-ID')} / ${totalRows.toLocaleString('id-ID')})...`
+                    stepMessage: `Menyimpan & me-mapping referensi SKU (${Math.min(i + CHUNK_SIZE, totalRows).toLocaleString('id-ID')} / ${totalRows.toLocaleString('id-ID')})...`
                 });
             }
 
@@ -3889,7 +4491,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             setUploadProgress(null);
             const refreshSnap = await getDocs(collection(db, "sku_catalog"));
             setCatalogDataList(refreshSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-            triggerNotification(`Berhasil mengunggah ${successCount} referensi SKU ke Master Katalog!`);
+            triggerNotification(`✅ Berhasil mengunggah ${successCount.toLocaleString('id-ID')} Master SKU & otomatis me-mapping ulang ${remappedTaskCount.toLocaleString('id-ID')} hasil hitungan!`);
         } catch (err: any) {
             console.error("Error upload SKU catalog:", err);
             isUploadingRef.current = false;
@@ -4092,7 +4694,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                 const tasksSnap = await getDocs(collection(db, "master_tasks"));
                 const filteredDocs = tasksSnap.docs.filter(docSnap => {
                     const data = docSnap.data();
-                    if (proj.id && data.projectId && data.projectId !== proj.id) return false;
+                    if (proj.id && data.projectId !== proj.id) return false;
                     if (!data.SKU || !data.SKU.trim() || data.SKU === 'SKU_UNKNOWN') return false;
                     return true;
                 });
@@ -4797,15 +5399,21 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
         });
     }, [reassignModal.sourceCounter, counterGroups, globalAccounts]);
 
-    // 2. FILTERED SKU CATALOG WITH PAGINATION (Single-pass Map O(N))
+    // 2. FILTERED SKU CATALOG WITH PAGINATION (Single-pass Map O(N) - Terisolasi Per Project!)
     const filteredSKUCatalog = useMemo(() => {
         const catalogMap = new Map<string, any>();
+        const activeProjId = activeProject?.id || '';
 
-        // Sumber 1: Master SKU Catalog yang diunggah terpisah
+        // Sumber 1: Master SKU Catalog yang diunggah khusus untuk Project Aktif
         for (let i = 0; i < catalogDataList.length; i++) {
             const c = catalogDataList[i];
             if (!c.SKU) continue;
+            // Isolasi Project Ketat: jangan sertakan Master SKU dari project lama saat membuka project baru
+            if (activeProjId && c.projectId !== activeProjId) continue;
+
             catalogMap.set(c.SKU, {
+                id: c.id || sanitizeDocId(`${activeProjId || 'GLOBAL'}_${c.SKU}`),
+                projectId: c.projectId || activeProjId,
                 SKU: c.SKU,
                 Owner: c.Owner || 'DDI',
                 Description: c.Description || '-',
@@ -4817,12 +5425,14 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             });
         }
 
-        // Sumber 2: Data SKU dari Master Task WMS aktif
+        // Sumber 2: Data SKU dari Master Task WMS di Project Aktif
         for (let i = 0; i < masterDataList.length; i++) {
             const m = masterDataList[i];
             if (!m.SKU) continue;
             if (!catalogMap.has(m.SKU)) {
                 catalogMap.set(m.SKU, {
+                    id: sanitizeDocId(`${activeProjId || 'GLOBAL'}_${m.SKU}`),
+                    projectId: activeProjId,
                     SKU: m.SKU,
                     Owner: m.Owner || 'DDI',
                     Description: m.Description || '-',
@@ -4852,7 +5462,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
             (c.UPC2 && c.UPC2.toLowerCase().includes(lowerSearch)) ||
             (c.SKUBrand && c.SKUBrand.toLowerCase().includes(lowerSearch))
         );
-    }, [catalogDataList, masterDataList, catalogSearch]);
+    }, [catalogDataList, masterDataList, catalogSearch, activeProject?.id]);
 
     const totalCatalogPages = Math.ceil(filteredSKUCatalog.length / ITEMS_PER_PAGE) || 1;
     const paginatedSKUCatalog = useMemo(() => {
@@ -5699,6 +6309,891 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                     <ExternalLink className="w-3.5 h-3.5" />
                                 </a>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* MODAL EDIT MASTER TASK */}
+            {editingMasterTask && (
+                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+                    <div className="bg-white rounded-3xl max-w-2xl w-full p-6 space-y-4 shadow-2xl border border-slate-200 max-h-[90vh] overflow-y-auto scrollbar-thin">
+                        <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+                            <div className="flex items-center space-x-2.5">
+                                <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
+                                    <Edit2 className="w-5 h-5" />
+                                </div>
+                                <div>
+                                    <h3 className="text-base font-black text-slate-900">Edit Master SKU & Task Rak</h3>
+                                    <p className="text-xs text-slate-500 font-medium">Perbarui info SKU, barcode, lokasi rak, atau kuantiti WMS sistem.</p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => setEditingMasterTask(null)}
+                                disabled={isSavingMasterTask}
+                                className="p-2 text-slate-400 hover:text-slate-700 bg-slate-100 rounded-xl cursor-pointer"
+                            >
+                                <X className="w-4 h-4" />
+                            </button>
+                        </div>
+
+                        {/* STATUS HITUNG NOTIFICATION BANNER */}
+                        {editingMasterTask.isCounted ? (
+                            <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3.5 flex items-start gap-3">
+                                <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                                <div className="text-xs text-amber-900 space-y-1">
+                                    <p className="font-black text-amber-950 flex items-center gap-1.5">
+                                        <span>⚠️ Perhatian: Task ini SUDAH DIHITUNG FISIK!</span>
+                                    </p>
+                                    <p className="leading-relaxed">
+                                        Hasil hitung fisik: <strong className="font-black text-slate-900">{editingMasterTask.countedQty ?? editingMasterTask.QTY_ACTUAL ?? 0} pcs</strong> (Good: {editingMasterTask.qtyGood ?? 0}, Bad: {editingMasterTask.qtyBad ?? 0}) oleh counter <strong className="font-bold">{editingMasterTask.counter}</strong>.
+                                    </p>
+                                    <p className="text-[11px] text-amber-800 leading-relaxed font-semibold">
+                                        ✓ Perubahan data master (SKU, Deskripsi, Barcode, WMS Qty, Lokasi) <strong>AMAN</strong> dilakukan dan akan langsung tersinkron ke cloud tanpa mereset hasil hitung fisik yang sudah berjalan.
+                                    </p>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="bg-blue-50 border border-blue-200 rounded-2xl p-3 flex items-center gap-2.5 text-xs text-blue-800">
+                                <CheckCircle2 className="w-4 h-4 text-blue-600 shrink-0" />
+                                <span>Item ini <strong>belum dihitung</strong> oleh counter di lapangan.</span>
+                            </div>
+                        )}
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 text-xs">
+                            <div>
+                                <label className="font-bold text-slate-700 block mb-1">Kode SKU *</label>
+                                <input
+                                    type="text"
+                                    value={editingMasterTask.SKU}
+                                    onChange={(e) => setEditingMasterTask({ ...editingMasterTask, SKU: e.target.value })}
+                                    className="w-full px-3.5 py-2 font-mono font-bold bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                                    placeholder="Contoh: SKU-00123"
+                                />
+                            </div>
+                            <div>
+                                <label className="font-bold text-slate-700 block mb-1">Owner SKU</label>
+                                <input
+                                    type="text"
+                                    value={editingMasterTask.Owner || 'DDI'}
+                                    onChange={(e) => setEditingMasterTask({ ...editingMasterTask, Owner: e.target.value })}
+                                    className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                                    placeholder="Contoh: DDI"
+                                />
+                            </div>
+
+                            <div className="sm:col-span-2">
+                                <label className="font-bold text-slate-700 block mb-1">Deskripsi / Nama Produk</label>
+                                <input
+                                    type="text"
+                                    value={editingMasterTask.Description}
+                                    onChange={(e) => setEditingMasterTask({ ...editingMasterTask, Description: e.target.value })}
+                                    className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                                    placeholder="Nama lengkap barang..."
+                                />
+                            </div>
+
+                            <div>
+                                <label className="font-bold text-slate-700 block mb-1">UPC 1 (Barcode Eceran)</label>
+                                <input
+                                    type="text"
+                                    value={editingMasterTask.UPC1 || ''}
+                                    onChange={(e) => setEditingMasterTask({ ...editingMasterTask, UPC1: e.target.value })}
+                                    className="w-full px-3.5 py-2 font-mono bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                                    placeholder="Barcode scan satuan..."
+                                />
+                            </div>
+                            <div>
+                                <label className="font-bold text-slate-700 block mb-1">UPC 2 (Barcode Karton/Dus)</label>
+                                <input
+                                    type="text"
+                                    value={editingMasterTask.UPC2 || ''}
+                                    onChange={(e) => setEditingMasterTask({ ...editingMasterTask, UPC2: e.target.value })}
+                                    className="w-full px-3.5 py-2 font-mono bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                                    placeholder="Barcode scan karton..."
+                                />
+                            </div>
+
+                            <div>
+                                <label className="font-bold text-slate-700 block mb-1">Lokasi Rak *</label>
+                                <input
+                                    type="text"
+                                    value={editingMasterTask.Location}
+                                    onChange={(e) => setEditingMasterTask({ ...editingMasterTask, Location: e.target.value })}
+                                    className="w-full px-3.5 py-2 font-mono font-bold bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                                    placeholder="Contoh: A-01-01"
+                                />
+                            </div>
+                            <div>
+                                <label className="font-bold text-slate-700 block mb-1">Zona Rak</label>
+                                <input
+                                    type="text"
+                                    value={editingMasterTask.Zone || 'RACKING'}
+                                    onChange={(e) => setEditingMasterTask({ ...editingMasterTask, Zone: e.target.value })}
+                                    className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                                    placeholder="RACKING / DAMAGE / NS"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="font-bold text-slate-700 block mb-1">Level Rak</label>
+                                <input
+                                    type="text"
+                                    value={editingMasterTask.level || '1'}
+                                    onChange={(e) => setEditingMasterTask({ ...editingMasterTask, level: e.target.value })}
+                                    className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                                    placeholder="1, 2, 3..."
+                                />
+                            </div>
+                            <div>
+                                <label className="font-bold text-slate-700 block mb-1">Aisle / Gang</label>
+                                <input
+                                    type="text"
+                                    value={editingMasterTask.ailee || ''}
+                                    onChange={(e) => setEditingMasterTask({ ...editingMasterTask, ailee: e.target.value })}
+                                    className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                                    placeholder="A, B, C..."
+                                />
+                            </div>
+
+                            <div>
+                                <label className="font-bold text-slate-700 block mb-1">WMS / System Qty (Pcs)</label>
+                                <input
+                                    type="number"
+                                    value={editingMasterTask.Qty}
+                                    onChange={(e) => setEditingMasterTask({ ...editingMasterTask, Qty: parseInt(e.target.value, 10) || 0 })}
+                                    className="w-full px-3.5 py-2 font-mono font-bold bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                                    placeholder="0"
+                                />
+                            </div>
+                            <div>
+                                <label className="font-bold text-slate-700 block mb-1">Counter PIC</label>
+                                <select
+                                    value={editingMasterTask.counter || 'unassigned'}
+                                    onChange={(e) => setEditingMasterTask({ ...editingMasterTask, counter: e.target.value })}
+                                    className="w-full px-3.5 py-2 font-bold bg-slate-50 border border-slate-200 rounded-xl outline-none cursor-pointer"
+                                >
+                                    <option value="unassigned">Unassigned</option>
+                                    {globalAccounts.map(acc => (
+                                        <option key={acc.id} value={acc.username}>{acc.name} ({acc.username})</option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div>
+                                <label className="font-bold text-slate-700 block mb-1">Satuan Hitung</label>
+                                <select
+                                    value={editingMasterTask.satuanHitung || 'PCS'}
+                                    onChange={(e) => setEditingMasterTask({ ...editingMasterTask, satuanHitung: e.target.value })}
+                                    className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none cursor-pointer"
+                                >
+                                    <option value="PCS">PCS</option>
+                                    <option value="CARTON">CARTON</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label className="font-bold text-slate-700 block mb-1">Isi per Karton (Ratio Pcs)</label>
+                                <input
+                                    type="number"
+                                    value={editingMasterTask.pcsPerCarton || 1}
+                                    onChange={(e) => setEditingMasterTask({ ...editingMasterTask, pcsPerCarton: parseInt(e.target.value, 10) || 1 })}
+                                    className="w-full px-3.5 py-2 font-mono bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                                    placeholder="1"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="font-bold text-slate-700 block mb-1">Brand / Kategori</label>
+                                <input
+                                    type="text"
+                                    value={editingMasterTask.SKUBrand || ''}
+                                    onChange={(e) => setEditingMasterTask({ ...editingMasterTask, SKUBrand: e.target.value })}
+                                    className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                                    placeholder="Brand produk..."
+                                />
+                            </div>
+                            <div>
+                                <label className="font-bold text-slate-700 block mb-1">Harga Satuan (Rp)</label>
+                                <input
+                                    type="number"
+                                    value={editingMasterTask.unitPrice || 0}
+                                    onChange={(e) => setEditingMasterTask({ ...editingMasterTask, unitPrice: parseInt(e.target.value, 10) || 0 })}
+                                    className="w-full px-3.5 py-2 font-mono bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                                    placeholder="0"
+                                />
+                            </div>
+                        </div>
+
+                        <div className="flex justify-end space-x-2 pt-3 border-t border-slate-100">
+                            <button
+                                type="button"
+                                onClick={() => setEditingMasterTask(null)}
+                                disabled={isSavingMasterTask}
+                                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold cursor-pointer"
+                            >
+                                Batal
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleSaveEditMasterTask}
+                                disabled={isSavingMasterTask}
+                                className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md flex items-center space-x-1.5 cursor-pointer disabled:opacity-50"
+                            >
+                                {isSavingMasterTask ? (
+                                    <>
+                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                        <span>Menyimpan...</span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <Save className="w-4 h-4" />
+                                        <span>Simpan Perubahan</span>
+                                    </>
+                                )}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* MODAL HAPUS MASTER TASK */}
+            {deletingMasterTask && (
+                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+                    <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl border border-slate-200">
+                        <div className="flex items-center space-x-3 border-b border-slate-100 pb-3">
+                            <div className={`p-3 rounded-2xl ${deletingMasterTask.isCounted ? 'bg-red-100 text-red-600' : 'bg-rose-50 text-rose-600'}`}>
+                                <AlertTriangle className="w-6 h-6" />
+                            </div>
+                            <div>
+                                <h3 className="text-base font-black text-slate-900">
+                                    {deletingMasterTask.isCounted ? 'Peringatan Kritis Hapus Task' : 'Hapus Master Task'}
+                                </h3>
+                                <p className="text-xs text-slate-500 font-medium truncate max-w-xs">
+                                    {deletingMasterTask.SKU} • Lokasi: {deletingMasterTask.Location}
+                                </p>
+                            </div>
+                        </div>
+
+                        {deletingMasterTask.isCounted ? (
+                            <div className="space-y-3">
+                                <div className="bg-red-50 border border-red-200 rounded-2xl p-4 text-xs text-red-900 space-y-2">
+                                    <p className="font-black text-red-950 flex items-center gap-1.5">
+                                        <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+                                        <span>PERINGATAN: SKU INI SUDAH DIHITUNG!</span>
+                                    </p>
+                                    <p className="leading-relaxed">
+                                        Counter <strong className="font-bold">{deletingMasterTask.counter}</strong> sudah menginput hasil hitung fisik sebanyak:
+                                    </p>
+                                    <div className="bg-white/90 rounded-xl p-2.5 font-mono text-center border border-red-200">
+                                        <span className="text-base font-black text-red-600">
+                                            {deletingMasterTask.countedQty ?? deletingMasterTask.QTY_ACTUAL ?? 0} PCS
+                                        </span>
+                                        <span className="block text-[10px] text-slate-500 font-sans mt-0.5">
+                                            (Good: {deletingMasterTask.qtyGood ?? 0} | Bad: {deletingMasterTask.qtyBad ?? 0} | WMS: {deletingMasterTask.Qty})
+                                        </span>
+                                    </div>
+                                    <p className="text-[11px] text-red-800 leading-relaxed font-semibold">
+                                        ⚠️ Jika data ini dihapus sekarang, hasil hitungan fisik yang sudah dicatat counter di atas akan <strong>HILANG PERMANEN</strong> dari laporan rekonsiliasi opname!
+                                    </p>
+                                </div>
+
+                                <label className="flex items-start gap-2.5 p-3 rounded-xl border border-slate-200 bg-slate-50 cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={deleteMasterConfirmedChecked}
+                                        onChange={(e) => setDeleteMasterConfirmedChecked(e.target.checked)}
+                                        className="mt-0.5 rounded text-red-600 focus:ring-red-500"
+                                    />
+                                    <span className="text-xs font-bold text-slate-700 leading-snug">
+                                        Saya mengerti bahwa hasil hitung fisik di atas akan dihapus permanen dari sistem.
+                                    </span>
+                                </label>
+                            </div>
+                        ) : (
+                            <div className="text-xs text-slate-600 leading-relaxed">
+                                Apakah Anda yakin ingin menghapus Master Task SKU <strong className="font-mono font-bold text-slate-900">{deletingMasterTask.SKU}</strong> di Lokasi <strong className="font-mono font-bold text-slate-900">{deletingMasterTask.Location}</strong>? Task ini belum dihitung oleh counter.
+                            </div>
+                        )}
+
+                        <div className="flex justify-end space-x-2 pt-2 border-t border-slate-100">
+                            <button
+                                type="button"
+                                onClick={() => setDeletingMasterTask(null)}
+                                disabled={isDeletingMasterTask}
+                                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold cursor-pointer"
+                            >
+                                Batal
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleExecuteDeleteMasterTask}
+                                disabled={isDeletingMasterTask || (deletingMasterTask.isCounted && !deleteMasterConfirmedChecked)}
+                                className="px-5 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-40 text-white rounded-xl text-xs font-black shadow-md flex items-center space-x-1.5 cursor-pointer transition-all"
+                            >
+                                {isDeletingMasterTask ? (
+                                    <>
+                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                        <span>Menghapus...</span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <Trash2 className="w-4 h-4" />
+                                        <span>Ya, Hapus Task</span>
+                                    </>
+                                )}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* MODAL TAMBAH MASTER TASK BARU */}
+            {isAddMasterTaskOpen && (
+                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+                    <div className="bg-white rounded-3xl max-w-2xl w-full p-6 space-y-4 shadow-2xl border border-slate-200 max-h-[90vh] overflow-y-auto scrollbar-thin">
+                        <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+                            <div className="flex items-center space-x-2.5">
+                                <div className="p-2 bg-emerald-50 text-emerald-600 rounded-xl">
+                                    <Plus className="w-5 h-5" />
+                                </div>
+                                <div>
+                                    <h3 className="text-base font-black text-slate-900">Tambah Task / SKU Baru</h3>
+                                    <p className="text-xs text-slate-500 font-medium">Tambahkan SKU dan lokasi rak ke sesi opname aktif.</p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => setIsAddMasterTaskOpen(false)}
+                                disabled={isAddingMasterTask}
+                                className="p-2 text-slate-400 hover:text-slate-700 bg-slate-100 rounded-xl cursor-pointer"
+                            >
+                                <X className="w-4 h-4" />
+                            </button>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 text-xs">
+                            <div>
+                                <label className="font-bold text-slate-700 block mb-1">Kode SKU *</label>
+                                <input
+                                    type="text"
+                                    value={newMasterTaskForm.SKU}
+                                    onChange={(e) => setNewMasterTaskForm({ ...newMasterTaskForm, SKU: e.target.value })}
+                                    className="w-full px-3.5 py-2 font-mono font-bold bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                                    placeholder="Contoh: SKU-00123"
+                                />
+                            </div>
+                            <div>
+                                <label className="font-bold text-slate-700 block mb-1">Owner SKU</label>
+                                <input
+                                    type="text"
+                                    value={newMasterTaskForm.Owner}
+                                    onChange={(e) => setNewMasterTaskForm({ ...newMasterTaskForm, Owner: e.target.value })}
+                                    className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                                    placeholder="Contoh: DDI"
+                                />
+                            </div>
+
+                            <div className="sm:col-span-2">
+                                <label className="font-bold text-slate-700 block mb-1">Deskripsi / Nama Produk</label>
+                                <input
+                                    type="text"
+                                    value={newMasterTaskForm.Description}
+                                    onChange={(e) => setNewMasterTaskForm({ ...newMasterTaskForm, Description: e.target.value })}
+                                    className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                                    placeholder="Nama lengkap barang..."
+                                />
+                            </div>
+
+                            <div>
+                                <label className="font-bold text-slate-700 block mb-1">UPC 1 (Barcode Eceran)</label>
+                                <input
+                                    type="text"
+                                    value={newMasterTaskForm.UPC1}
+                                    onChange={(e) => setNewMasterTaskForm({ ...newMasterTaskForm, UPC1: e.target.value })}
+                                    className="w-full px-3.5 py-2 font-mono bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                                    placeholder="Barcode scan satuan..."
+                                />
+                            </div>
+                            <div>
+                                <label className="font-bold text-slate-700 block mb-1">UPC 2 (Barcode Karton/Dus)</label>
+                                <input
+                                    type="text"
+                                    value={newMasterTaskForm.UPC2}
+                                    onChange={(e) => setNewMasterTaskForm({ ...newMasterTaskForm, UPC2: e.target.value })}
+                                    className="w-full px-3.5 py-2 font-mono bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                                    placeholder="Barcode scan karton..."
+                                />
+                            </div>
+
+                            <div>
+                                <label className="font-bold text-slate-700 block mb-1">Lokasi Rak *</label>
+                                <input
+                                    type="text"
+                                    value={newMasterTaskForm.Location}
+                                    onChange={(e) => setNewMasterTaskForm({ ...newMasterTaskForm, Location: e.target.value })}
+                                    className="w-full px-3.5 py-2 font-mono font-bold bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                                    placeholder="Contoh: A-01-01"
+                                />
+                            </div>
+                            <div>
+                                <label className="font-bold text-slate-700 block mb-1">Zona Rak</label>
+                                <input
+                                    type="text"
+                                    value={newMasterTaskForm.Zone}
+                                    onChange={(e) => setNewMasterTaskForm({ ...newMasterTaskForm, Zone: e.target.value })}
+                                    className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                                    placeholder="RACKING / DAMAGE / NS"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="font-bold text-slate-700 block mb-1">Level Rak</label>
+                                <input
+                                    type="text"
+                                    value={newMasterTaskForm.level}
+                                    onChange={(e) => setNewMasterTaskForm({ ...newMasterTaskForm, level: e.target.value })}
+                                    className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                                    placeholder="1, 2, 3..."
+                                />
+                            </div>
+                            <div>
+                                <label className="font-bold text-slate-700 block mb-1">Aisle / Gang</label>
+                                <input
+                                    type="text"
+                                    value={newMasterTaskForm.ailee}
+                                    onChange={(e) => setNewMasterTaskForm({ ...newMasterTaskForm, ailee: e.target.value })}
+                                    className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                                    placeholder="A, B, C..."
+                                />
+                            </div>
+
+                            <div>
+                                <label className="font-bold text-slate-700 block mb-1">WMS / System Qty (Pcs)</label>
+                                <input
+                                    type="number"
+                                    value={newMasterTaskForm.Qty}
+                                    onChange={(e) => setNewMasterTaskForm({ ...newMasterTaskForm, Qty: parseInt(e.target.value, 10) || 0 })}
+                                    className="w-full px-3.5 py-2 font-mono font-bold bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                                    placeholder="0"
+                                />
+                            </div>
+                            <div>
+                                <label className="font-bold text-slate-700 block mb-1">Counter PIC</label>
+                                <select
+                                    value={newMasterTaskForm.counter}
+                                    onChange={(e) => setNewMasterTaskForm({ ...newMasterTaskForm, counter: e.target.value })}
+                                    className="w-full px-3.5 py-2 font-bold bg-slate-50 border border-slate-200 rounded-xl outline-none cursor-pointer"
+                                >
+                                    <option value="unassigned">Unassigned</option>
+                                    {globalAccounts.map(acc => (
+                                        <option key={acc.id} value={acc.username}>{acc.name} ({acc.username})</option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div>
+                                <label className="font-bold text-slate-700 block mb-1">Satuan Hitung</label>
+                                <select
+                                    value={newMasterTaskForm.satuanHitung}
+                                    onChange={(e) => setNewMasterTaskForm({ ...newMasterTaskForm, satuanHitung: e.target.value })}
+                                    className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none cursor-pointer"
+                                >
+                                    <option value="PCS">PCS</option>
+                                    <option value="CARTON">CARTON</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label className="font-bold text-slate-700 block mb-1">Isi per Karton (Ratio Pcs)</label>
+                                <input
+                                    type="number"
+                                    value={newMasterTaskForm.pcsPerCarton}
+                                    onChange={(e) => setNewMasterTaskForm({ ...newMasterTaskForm, pcsPerCarton: parseInt(e.target.value, 10) || 1 })}
+                                    className="w-full px-3.5 py-2 font-mono bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                                    placeholder="1"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="font-bold text-slate-700 block mb-1">Brand / Kategori</label>
+                                <input
+                                    type="text"
+                                    value={newMasterTaskForm.SKUBrand}
+                                    onChange={(e) => setNewMasterTaskForm({ ...newMasterTaskForm, SKUBrand: e.target.value })}
+                                    className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                                    placeholder="Brand produk..."
+                                />
+                            </div>
+                            <div>
+                                <label className="font-bold text-slate-700 block mb-1">Harga Satuan (Rp)</label>
+                                <input
+                                    type="number"
+                                    value={newMasterTaskForm.unitPrice}
+                                    onChange={(e) => setNewMasterTaskForm({ ...newMasterTaskForm, unitPrice: parseInt(e.target.value, 10) || 0 })}
+                                    className="w-full px-3.5 py-2 font-mono bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                                    placeholder="0"
+                                />
+                            </div>
+                        </div>
+
+                        <div className="flex justify-end space-x-2 pt-3 border-t border-slate-100">
+                            <button
+                                type="button"
+                                onClick={() => setIsAddMasterTaskOpen(false)}
+                                disabled={isAddingMasterTask}
+                                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold cursor-pointer"
+                            >
+                                Batal
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleSaveAddMasterTask}
+                                disabled={isAddingMasterTask}
+                                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md flex items-center space-x-1.5 cursor-pointer disabled:opacity-50"
+                            >
+                                {isAddingMasterTask ? (
+                                    <>
+                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                        <span>Menambahkan...</span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <Plus className="w-4 h-4" />
+                                        <span>Tambah ke Master Task</span>
+                                    </>
+                                )}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* MODAL EDIT SKU KATALOG */}
+            {editingCatalogItem && (
+                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+                    <div className="bg-white rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl border border-slate-200 max-h-[90vh] overflow-y-auto scrollbar-thin">
+                        <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+                            <div className="flex items-center space-x-2.5">
+                                <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
+                                    <Tag className="w-5 h-5" />
+                                </div>
+                                <div>
+                                    <h3 className="text-base font-black text-slate-900">Edit Referensi Katalog SKU</h3>
+                                    <p className="text-xs text-slate-500 font-medium">Perbarui referensi SKU, barcode, brand, atau harga satuan.</p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => setEditingCatalogItem(null)}
+                                disabled={isSavingCatalogItem}
+                                className="p-2 text-slate-400 hover:text-slate-700 bg-slate-100 rounded-xl cursor-pointer"
+                            >
+                                <X className="w-4 h-4" />
+                            </button>
+                        </div>
+
+                        <div className="space-y-3 text-xs">
+                            <div>
+                                <label className="font-bold text-slate-700 block mb-1">Kode SKU *</label>
+                                <input
+                                    type="text"
+                                    value={editingCatalogItem.SKU}
+                                    onChange={(e) => setEditingCatalogItem({ ...editingCatalogItem, SKU: e.target.value })}
+                                    className="w-full px-3.5 py-2 font-mono font-bold bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                                />
+                            </div>
+                            <div>
+                                <label className="font-bold text-slate-700 block mb-1">Deskripsi Produk</label>
+                                <input
+                                    type="text"
+                                    value={editingCatalogItem.Description || ''}
+                                    onChange={(e) => setEditingCatalogItem({ ...editingCatalogItem, Description: e.target.value })}
+                                    className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                                />
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="font-bold text-slate-700 block mb-1">UPC 1 (Eceran)</label>
+                                    <input
+                                        type="text"
+                                        value={editingCatalogItem.UPC1 || ''}
+                                        onChange={(e) => setEditingCatalogItem({ ...editingCatalogItem, UPC1: e.target.value })}
+                                        className="w-full px-3.5 py-2 font-mono bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="font-bold text-slate-700 block mb-1">UPC 2 (Kardus)</label>
+                                    <input
+                                        type="text"
+                                        value={editingCatalogItem.UPC2 || ''}
+                                        onChange={(e) => setEditingCatalogItem({ ...editingCatalogItem, UPC2: e.target.value })}
+                                        className="w-full px-3.5 py-2 font-mono bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                                    />
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="font-bold text-slate-700 block mb-1">Brand</label>
+                                    <input
+                                        type="text"
+                                        value={editingCatalogItem.SKUBrand || ''}
+                                        onChange={(e) => setEditingCatalogItem({ ...editingCatalogItem, SKUBrand: e.target.value })}
+                                        className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="font-bold text-slate-700 block mb-1">Owner</label>
+                                    <input
+                                        type="text"
+                                        value={editingCatalogItem.Owner || 'DDI'}
+                                        onChange={(e) => setEditingCatalogItem({ ...editingCatalogItem, Owner: e.target.value })}
+                                        className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                                    />
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="font-bold text-slate-700 block mb-1">Harga Satuan (Rp)</label>
+                                    <input
+                                        type="number"
+                                        value={editingCatalogItem.unitPrice || 0}
+                                        onChange={(e) => setEditingCatalogItem({ ...editingCatalogItem, unitPrice: parseInt(e.target.value, 10) || 0 })}
+                                        className="w-full px-3.5 py-2 font-mono bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="font-bold text-slate-700 block mb-1">Satuan</label>
+                                    <select
+                                        value={editingCatalogItem.satuanHitung || 'PCS'}
+                                        onChange={(e) => setEditingCatalogItem({ ...editingCatalogItem, satuanHitung: e.target.value })}
+                                        className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none cursor-pointer"
+                                    >
+                                        <option value="PCS">PCS</option>
+                                        <option value="CARTON">CARTON</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="flex justify-end space-x-2 pt-3 border-t border-slate-100">
+                            <button
+                                type="button"
+                                onClick={() => setEditingCatalogItem(null)}
+                                disabled={isSavingCatalogItem}
+                                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold cursor-pointer"
+                            >
+                                Batal
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleSaveEditCatalog}
+                                disabled={isSavingCatalogItem}
+                                className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md flex items-center space-x-1.5 cursor-pointer disabled:opacity-50"
+                            >
+                                {isSavingCatalogItem ? (
+                                    <>
+                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                        <span>Menyimpan...</span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <Save className="w-4 h-4" />
+                                        <span>Simpan Perubahan</span>
+                                    </>
+                                )}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* MODAL HAPUS SKU KATALOG */}
+            {deletingCatalogItem && (
+                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+                    <div className="bg-white rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl border border-slate-200">
+                        <div className="flex items-center space-x-3 border-b border-slate-100 pb-3">
+                            <div className="p-3 bg-rose-50 text-rose-600 rounded-2xl">
+                                <Trash2 className="w-6 h-6" />
+                            </div>
+                            <div>
+                                <h3 className="text-base font-black text-slate-900">Hapus Katalog SKU</h3>
+                                <p className="text-xs text-slate-500 font-mono">{deletingCatalogItem.SKU}</p>
+                            </div>
+                        </div>
+
+                        <div className="text-xs text-slate-600 leading-relaxed">
+                            Apakah Anda yakin ingin menghapus referensi SKU <strong className="font-mono font-bold text-slate-900">{deletingCatalogItem.SKU}</strong> ({deletingCatalogItem.Description || '-'}) dari Master Katalog?
+                        </div>
+
+                        <div className="flex justify-end space-x-2 pt-2 border-t border-slate-100">
+                            <button
+                                type="button"
+                                onClick={() => setDeletingCatalogItem(null)}
+                                disabled={isDeletingCatalogItem}
+                                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold cursor-pointer"
+                            >
+                                Batal
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleExecuteDeleteCatalog}
+                                disabled={isDeletingCatalogItem}
+                                className="px-5 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white rounded-xl text-xs font-black shadow-md flex items-center space-x-1.5 cursor-pointer transition-all"
+                            >
+                                {isDeletingCatalogItem ? (
+                                    <>
+                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                        <span>Menghapus...</span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <Trash2 className="w-4 h-4" />
+                                        <span>Ya, Hapus SKU</span>
+                                    </>
+                                )}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* MODAL TAMBAH SKU KATALOG BARU */}
+            {isAddCatalogOpen && (
+                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+                    <div className="bg-white rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl border border-slate-200 max-h-[90vh] overflow-y-auto scrollbar-thin">
+                        <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+                            <div className="flex items-center space-x-2.5">
+                                <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
+                                    <Plus className="w-5 h-5" />
+                                </div>
+                                <div>
+                                    <h3 className="text-base font-black text-slate-900">Tambah Katalog SKU Baru</h3>
+                                    <p className="text-xs text-slate-500 font-medium">Tambah referensi produk resmi untuk lookup scanner counter.</p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => setIsAddCatalogOpen(false)}
+                                disabled={isAddingCatalogItem}
+                                className="p-2 text-slate-400 hover:text-slate-700 bg-slate-100 rounded-xl cursor-pointer"
+                            >
+                                <X className="w-4 h-4" />
+                            </button>
+                        </div>
+
+                        <div className="space-y-3 text-xs">
+                            <div>
+                                <label className="font-bold text-slate-700 block mb-1">Kode SKU *</label>
+                                <input
+                                    type="text"
+                                    value={newCatalogForm.SKU}
+                                    onChange={(e) => setNewCatalogForm({ ...newCatalogForm, SKU: e.target.value })}
+                                    className="w-full px-3.5 py-2 font-mono font-bold bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                                    placeholder="Contoh: SKU-00123"
+                                />
+                            </div>
+                            <div>
+                                <label className="font-bold text-slate-700 block mb-1">Deskripsi Produk</label>
+                                <input
+                                    type="text"
+                                    value={newCatalogForm.Description}
+                                    onChange={(e) => setNewCatalogForm({ ...newCatalogForm, Description: e.target.value })}
+                                    className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                                    placeholder="Nama barang..."
+                                />
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="font-bold text-slate-700 block mb-1">UPC 1 (Eceran)</label>
+                                    <input
+                                        type="text"
+                                        value={newCatalogForm.UPC1}
+                                        onChange={(e) => setNewCatalogForm({ ...newCatalogForm, UPC1: e.target.value })}
+                                        className="w-full px-3.5 py-2 font-mono bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                                        placeholder="Barcode eceran..."
+                                    />
+                                </div>
+                                <div>
+                                    <label className="font-bold text-slate-700 block mb-1">UPC 2 (Kardus)</label>
+                                    <input
+                                        type="text"
+                                        value={newCatalogForm.UPC2}
+                                        onChange={(e) => setNewCatalogForm({ ...newCatalogForm, UPC2: e.target.value })}
+                                        className="w-full px-3.5 py-2 font-mono bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                                        placeholder="Barcode karton..."
+                                    />
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="font-bold text-slate-700 block mb-1">Brand</label>
+                                    <input
+                                        type="text"
+                                        value={newCatalogForm.SKUBrand}
+                                        onChange={(e) => setNewCatalogForm({ ...newCatalogForm, SKUBrand: e.target.value })}
+                                        className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                                        placeholder="Nama Brand..."
+                                    />
+                                </div>
+                                <div>
+                                    <label className="font-bold text-slate-700 block mb-1">Owner</label>
+                                    <input
+                                        type="text"
+                                        value={newCatalogForm.Owner}
+                                        onChange={(e) => setNewCatalogForm({ ...newCatalogForm, Owner: e.target.value })}
+                                        className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                                        placeholder="DDI"
+                                    />
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="font-bold text-slate-700 block mb-1">Harga Satuan (Rp)</label>
+                                    <input
+                                        type="number"
+                                        value={newCatalogForm.unitPrice}
+                                        onChange={(e) => setNewCatalogForm({ ...newCatalogForm, unitPrice: parseInt(e.target.value, 10) || 0 })}
+                                        className="w-full px-3.5 py-2 font-mono bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                                        placeholder="0"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="font-bold text-slate-700 block mb-1">Satuan</label>
+                                    <select
+                                        value={newCatalogForm.satuanHitung}
+                                        onChange={(e) => setNewCatalogForm({ ...newCatalogForm, satuanHitung: e.target.value })}
+                                        className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none cursor-pointer"
+                                    >
+                                        <option value="PCS">PCS</option>
+                                        <option value="CARTON">CARTON</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="flex justify-end space-x-2 pt-3 border-t border-slate-100">
+                            <button
+                                type="button"
+                                onClick={() => setIsAddCatalogOpen(false)}
+                                disabled={isAddingCatalogItem}
+                                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold cursor-pointer"
+                            >
+                                Batal
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleSaveAddCatalog}
+                                disabled={isAddingCatalogItem}
+                                className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md flex items-center space-x-1.5 cursor-pointer disabled:opacity-50"
+                            >
+                                {isAddingCatalogItem ? (
+                                    <>
+                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                        <span>Menambahkan...</span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <Plus className="w-4 h-4" />
+                                        <span>Tambah ke Katalog</span>
+                                    </>
+                                )}
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -8437,6 +9932,27 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                         <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
                                         <span>Export (.xlsx)</span>
                                     </button>
+                                    {(effectiveRole === 'owner' || effectiveRole === 'spv') && (
+                                        <button
+                                            type="button"
+                                            onClick={handleDeduplicateTasks}
+                                            className="px-3.5 py-2.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 rounded-xl text-xs font-bold flex items-center space-x-1.5 shrink-0 transition-all cursor-pointer"
+                                            title="Bersihkan baris temuan ganda/duplikat akibat klik berulang saat sinyal lemah"
+                                        >
+                                            <RefreshCw className="w-3.5 h-3.5 text-amber-600" />
+                                            <span>Bersihkan Duplikat</span>
+                                        </button>
+                                    )}
+                                    {(effectiveRole === 'owner' || effectiveRole === 'spv') && (
+                                        <button
+                                            type="button"
+                                            onClick={handleOpenAddMasterModal}
+                                            className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center space-x-1.5 shrink-0 shadow-md transition-all cursor-pointer"
+                                        >
+                                            <Plus className="w-4 h-4" />
+                                            <span>Tambah Task</span>
+                                        </button>
+                                    )}
                                     {effectiveRole === 'owner' && (
                                         <label className="px-4 py-2.5 bg-slate-900 text-white rounded-xl text-xs font-bold cursor-pointer flex items-center space-x-2 shrink-0">
                                             <Upload className="w-4 h-4" />
@@ -8448,7 +9964,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                             </div>
 
                             <div className="overflow-x-auto overflow-y-auto border rounded-2xl max-h-125 scrollbar-thin">
-                                <table className="w-full text-left text-[11px] min-w-max"><thead className="bg-slate-50 font-black text-slate-600 border-b sticky top-0 z-10"><tr><th className="p-3 bg-slate-50">OWNER SKU</th><th className="p-3 bg-slate-50">SKU</th><th className="p-3 bg-slate-50">DESKRIPSI</th><th className="p-3 bg-slate-50">UPC 1</th><th className="p-3 bg-slate-50">UPC 2</th><th className="p-3 bg-slate-50">LOKASI RAK</th><th className="p-3 bg-slate-50">COUNTER PIC</th><th className="p-3 text-center bg-slate-50">WMS QTY</th><th className="p-3 text-center bg-slate-50">ACTUAL QTY</th></tr></thead>
+                                <table className="w-full text-left text-[11px] min-w-max"><thead className="bg-slate-50 font-black text-slate-600 border-b sticky top-0 z-10"><tr><th className="p-3 bg-slate-50">OWNER SKU</th><th className="p-3 bg-slate-50">SKU</th><th className="p-3 bg-slate-50">DESKRIPSI</th><th className="p-3 bg-slate-50">UPC 1</th><th className="p-3 bg-slate-50">UPC 2</th><th className="p-3 bg-slate-50">LOKASI RAK</th><th className="p-3 bg-slate-50">COUNTER PIC</th><th className="p-3 text-center bg-slate-50">WMS QTY</th><th className="p-3 text-center bg-slate-50">ACTUAL QTY</th><th className="p-3 text-center bg-slate-50">AKSI</th></tr></thead>
                                     <tbody className="divide-y divide-slate-100 font-medium">
                                         {paginatedMasterTask.map((row, idx) => (
                                             <tr key={idx} className="hover:bg-slate-50">
@@ -8499,10 +10015,30 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                 </td>
                                                 <td className="p-3 text-center font-bold text-slate-400">{row.Qty}</td>
                                                 <td className="p-3 text-center font-black text-sm">{(row.isCounted && row.countedQty !== undefined && !isNaN(row.countedQty)) ? row.countedQty : '-'}</td>
+                                                <td className="p-2 text-center">
+                                                    <div className="flex items-center justify-center space-x-1">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleOpenEditMasterModal(row)}
+                                                            className="p-1.5 text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
+                                                            title="Edit Master SKU & Task Ini"
+                                                        >
+                                                            <Edit2 className="w-3.5 h-3.5" />
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handlePromptDeleteMaster(row)}
+                                                            className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                                                            title="Hapus SKU dari Master Task"
+                                                        >
+                                                            <Trash2 className="w-3.5 h-3.5" />
+                                                        </button>
+                                                    </div>
+                                                </td>
                                             </tr>
                                         ))}
                                         {filteredMasterTask.length === 0 && (
-                                            <tr><td colSpan={9} className="p-8 text-center text-slate-400 font-medium">Data Task tidak ditemukan.</td></tr>
+                                            <tr><td colSpan={10} className="p-8 text-center text-slate-400 font-medium">Data Task tidak ditemukan.</td></tr>
                                         )}
                                     </tbody>
                                 </table>
@@ -8580,6 +10116,38 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                         <span>Export (.xlsx)</span>
                                     </button>
                                     {(effectiveRole === 'owner' || effectiveRole === 'spv') && (
+                                        <button
+                                            type="button"
+                                            onClick={handleRemapMasterTasksFromCatalog}
+                                            className="px-3.5 py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-xl text-xs font-bold flex items-center space-x-1.5 shrink-0 transition-all cursor-pointer"
+                                            title="Mapping ulang seluruh hasil hitungan (termasuk barang temuan) ke Master SKU terbaru tanpa menghapus Actual Qty"
+                                        >
+                                            <RefreshCw className="w-3.5 h-3.5 text-emerald-600" />
+                                            <span>Mapping Ulang Hasil Hitung</span>
+                                        </button>
+                                    )}
+                                    {(effectiveRole === 'owner' || effectiveRole === 'spv') && (
+                                        <button
+                                            type="button"
+                                            onClick={handleDeleteAllSKUCatalog}
+                                            className="px-3.5 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold flex items-center space-x-1.5 shrink-0 transition-all cursor-pointer"
+                                            title="Hapus semua Master Katalog SKU di project ini (Hasil hitungan counter TIDAK ikut terhapus)"
+                                        >
+                                            <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                                            <span>Hapus Semua SKU</span>
+                                        </button>
+                                    )}
+                                    {(effectiveRole === 'owner' || effectiveRole === 'spv') && (
+                                        <button
+                                            type="button"
+                                            onClick={handleOpenAddCatalogModal}
+                                            className="px-3.5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center space-x-1.5 shrink-0 shadow-md transition-all cursor-pointer"
+                                        >
+                                            <Plus className="w-4 h-4" />
+                                            <span>Tambah SKU</span>
+                                        </button>
+                                    )}
+                                    {(effectiveRole === 'owner' || effectiveRole === 'spv') && (
                                         <label className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold cursor-pointer flex items-center space-x-2 shrink-0 shadow-md transition-all">
                                             <Upload className="w-4 h-4" />
                                             <span>Upload Referensi SKU</span>
@@ -8601,7 +10169,7 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                             </div>
 
                             <div className="overflow-x-auto overflow-y-auto border rounded-2xl max-h-125 scrollbar-thin">
-                                <table className="w-full text-left text-xs"><thead className="bg-slate-50 font-bold text-slate-600 border-b sticky top-0 z-10"><tr><th className="p-3 bg-slate-50">OWNER</th><th className="p-3 bg-slate-50">SKU BARANG</th><th className="p-3 bg-slate-50">DESKRIPSI PRODUK</th><th className="p-3 bg-slate-50">UPC 1 (ECERAN)</th><th className="p-3 bg-slate-50">UPC 2 (KARDUS)</th><th className="p-3 bg-slate-50">BRAND</th><th className="p-3 text-right bg-slate-50">HARGA SATUAN (RP)</th></tr></thead>
+                                <table className="w-full text-left text-xs"><thead className="bg-slate-50 font-bold text-slate-600 border-b sticky top-0 z-10"><tr><th className="p-3 bg-slate-50">OWNER</th><th className="p-3 bg-slate-50">SKU BARANG</th><th className="p-3 bg-slate-50">DESKRIPSI PRODUK</th><th className="p-3 bg-slate-50">UPC 1 (ECERAN)</th><th className="p-3 bg-slate-50">UPC 2 (KARDUS)</th><th className="p-3 bg-slate-50">BRAND</th><th className="p-3 text-right bg-slate-50">HARGA SATUAN (RP)</th><th className="p-3 text-center bg-slate-50">AKSI</th></tr></thead>
                                     <tbody className="divide-y divide-slate-100 font-medium">
                                         {paginatedSKUCatalog.map((item, idx) => (
                                             <tr key={idx} className="hover:bg-slate-50">
@@ -8612,10 +10180,30 @@ export default function AdminDashboard({ onBackToApp, onSwitchToCounterView, cur
                                                 <td className="p-3 font-mono">{item.UPC2}</td>
                                                 <td className="p-3 font-semibold text-slate-600">{item.SKUBrand}</td>
                                                 <td className="p-3 text-right font-mono font-bold text-amber-700">Rp {item.unitPrice.toLocaleString('id-ID')}</td>
+                                                <td className="p-2 text-center">
+                                                    <div className="flex items-center justify-center space-x-1">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleOpenEditCatalogModal(item)}
+                                                            className="p-1.5 text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
+                                                            title="Edit Referensi SKU Ini"
+                                                        >
+                                                            <Edit2 className="w-3.5 h-3.5" />
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handlePromptDeleteCatalog(item)}
+                                                            className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                                                            title="Hapus Referensi SKU"
+                                                        >
+                                                            <Trash2 className="w-3.5 h-3.5" />
+                                                        </button>
+                                                    </div>
+                                                </td>
                                             </tr>
                                         ))}
                                         {filteredSKUCatalog.length === 0 && (
-                                            <tr><td colSpan={7} className="p-8 text-center text-slate-400">Tidak ada Katalog SKU ditemukan.</td></tr>
+                                            <tr><td colSpan={8} className="p-8 text-center text-slate-400">Tidak ada Katalog SKU ditemukan.</td></tr>
                                         )}
                                     </tbody>
                                 </table>

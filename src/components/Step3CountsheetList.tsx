@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { db } from '../firebase';
-import { collection, onSnapshot, query, where, doc, setDoc, getDocs, writeBatch } from 'firebase/firestore';
+import { collection, onSnapshot, query, where, doc, getDocs, writeBatch } from 'firebase/firestore';
 import type { SessionData, RackItem, CustomModalState } from '../types';
 import CustomModal from './CustomModal';
 import NetworkStatusBadge from './NetworkStatusBadge';
+import { trackedCommit } from '../utils/syncTracker';
 import { useLanguage, LanguageToggle } from '../utils/i18n';
 import { playScanSuccessBeep, triggerHapticFeedback } from '../utils/soundAndHaptics';
 import { 
@@ -168,17 +169,19 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
     return () => unsubscribe();
   }, [activeProject, sessionData]);
 
-  // PROSES TAMBAH RAK/BIN BARU KE FIRESTORE
+  // PROSES TAMBAH RAK/BIN BARU KE FIRESTORE (OFFLINE-FIRST + ANTI DUPLIKAT)
   const handleCreateNewRack = async () => {
     if (!newRackNumber.trim()) return;
 
     const cleanRack = newRackNumber.trim().toUpperCase();
     const cleanCounter = (sessionData.primaryCounter || 'Unassigned').toLowerCase().trim();
+    const sanitizeId = (s: string) => s.replace(/[\/\\#$\[\].]/g, '-').trim();
 
-    const taskId = `${cleanRack}_BARU_${Date.now()}`;
+    const taskId = `${sanitizeId(activeProject?.id || 'PROJ')}_${sanitizeId(cleanRack)}_${sanitizeId(cleanCounter)}_RACK_INIT`;
     const taskRef = doc(db, "master_tasks", taskId);
 
-    await setDoc(taskRef, {
+    const batch = writeBatch(db);
+    batch.set(taskRef, {
       projectId: activeProject?.id || '',
       Location: cleanRack,
       Zone: newRackZone,
@@ -189,7 +192,8 @@ export default function Step3CountsheetList({ sessionData, onSelectRack, onLogou
       isRackPlaceholder: true,
       Remarks: '[LOKASI RAK BARU DITAMBAHKAN MANUAL]',
       createdAt: new Date().toISOString()
-    });
+    }, { merge: true });
+    trackedCommit(batch);
 
     setNewRackNumber('');
     setShowAddRackModal(false);

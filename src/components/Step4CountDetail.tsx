@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../firebase';
-import { collection, onSnapshot, query, where, doc, writeBatch, getDocs, limit } from 'firebase/firestore';
+import { collection, onSnapshot, query, where, doc, writeBatch, getDocs, getDocsFromCache, limit } from 'firebase/firestore';
 import type { SessionData, RackItem, CustomModalState, UnmappedItem } from '../types';
 import CustomModal from './CustomModal';
 import BarcodeScannerModal from './BarcodeScannerModal';
@@ -192,6 +192,12 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
   const [expandedSku, setExpandedSku] = useState<string | null>(null);
   const [isScannerOpen, setIsScannerOpen] = useState<boolean>(false);
   const [isLoadingSave, setIsLoadingSave] = useState<boolean>(false);
+  const [isSavingUnmapped, setIsSavingUnmapped] = useState<boolean>(false);
+  const isSavingUnmappedRef = useRef<boolean>(false);
+  const isSavingRackRef = useRef<boolean>(false);
+  const nextPendingRackRef = useRef<RackItem | null>(null);
+  const counterTasksCacheRef = useRef<any[]>([]);
+  const catalogCacheRef = useRef<any[]>([]);
   const [showCompletedSection, setShowCompletedSection] = useState<boolean>(false);
   const [hasRemainingRacks, setHasRemainingRacks] = useState<boolean>(true);
 
@@ -433,7 +439,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
     return () => { unsub(); unsubCat(); };
   }, [sessionData.sessionCode, sessionData.sessionId, sessionData.primaryCounter]);
 
-  // 2. MONITOR APAKAH MASIH ADA RAK LAIN DI PROJECT AKTIF YANG BELUM SELESAI
+  // 2. MONITOR APAKAH MASIH ADA RAK LAIN DI PROJECT AKTIF YANG BELUM SELESAI + CACHE LOKAL OFFLINE
   useEffect(() => {
     const cleanCounter = (sessionData.primaryCounter || "Unassigned").toLowerCase().trim();
     const targetLocation = rack.rackNumber || rack.id;
@@ -445,25 +451,53 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
 
     const unsubRemaining = onSnapshot(qTasks, (snapshot) => {
       let otherPendingRacksExist = false;
+      let firstNextRack: RackItem | null = null;
+      const activeTasks: any[] = [];
 
       for (const d of snapshot.docs) {
         const data = d.data();
-        if (sessionData.projectId && data.projectId && data.projectId !== sessionData.projectId) continue;
-        if (sessionData.projectId && !data.projectId) continue;
+        if (sessionData.projectId && data.projectId !== sessionData.projectId) continue;
         if (data.isLocked) continue;
         if (!data.SKU || data.SKU === 'SKU_UNKNOWN') continue;
+        activeTasks.push({ id: d.id, ...data });
+
         if (data.Location && data.Location === targetLocation) continue;
 
         const isCounted = !!data.isCounted || (data.QTY_ACTUAL !== null && data.QTY_ACTUAL !== undefined);
-        if (!isCounted) {
+        if (!isCounted && data.Location) {
           otherPendingRacksExist = true;
-          break;
+          if (!firstNextRack) {
+            firstNextRack = {
+              id: data.Location,
+              rackNumber: data.Location,
+              level: parseInt(data.level || '1', 10),
+              zone: data.Zone || 'RACKING',
+              status: 'pending',
+              totalSKU: 1,
+              countedSKU: 0
+            };
+          }
         }
       }
+      counterTasksCacheRef.current = activeTasks;
+      nextPendingRackRef.current = firstNextRack;
       setHasRemainingRacks(otherPendingRacksExist);
     });
 
-    return () => unsubRemaining();
+    // Subscribe juga ke sku_catalog project aktif agar tersimpan di IndexedDB HP untuk lookup instan saat 0 sinyal
+    const qCat = sessionData.projectId
+      ? query(collection(db, "sku_catalog"), where("projectId", "==", sessionData.projectId))
+      : collection(db, "sku_catalog");
+    const unsubCatalog = onSnapshot(qCat, (snap) => {
+      catalogCacheRef.current = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .filter((c: any) => !sessionData.projectId || !c.projectId || c.projectId === sessionData.projectId);
+    });
+
+    return () => {
+      unsubRemaining();
+      unsubCatalog();
+    };
   }, [sessionData.primaryCounter, sessionData.projectId, rack.rackNumber, rack.id]);
 
   // 3. LISTEN MASTER TASKS LOKASI RAK AKTIF
@@ -649,7 +683,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
   const [unmappedList, setUnmappedList] = useState<UnmappedItem[]>([]);
   const [selectedPhotoPreview, setSelectedPhotoPreview] = useState<{ url: string; title: string } | null>(null);
 
-  // ON-DEMAND LOOKUP BARCODE MASTER (0ms untuk rak aktif, ~150ms untuk cloud lookup via limit 1)
+  // ON-DEMAND LOOKUP BARCODE MASTER (0ms lokal cache / IndexedDB, fallback cloud hanya saat online dengan batas waktu 1.2 detik)
   useEffect(() => {
     const cleanBarcode = unmappedBarcode.trim();
     if (!cleanBarcode) {
@@ -658,11 +692,14 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       return;
     }
 
+    const cleanLower = cleanBarcode.toLowerCase();
+    const cleanUpper = cleanBarcode.toUpperCase();
+
     // 1. Cek instan di rak lokal saat ini (0 ms)
     const foundInCurrentRack = skuList.find(item =>
       (item.upc && item.upc.trim() === cleanBarcode) ||
       (item.upc2 && item.upc2.trim() === cleanBarcode) ||
-      (item.sku && item.sku.toLowerCase().trim() === cleanBarcode.toLowerCase())
+      (item.sku && item.sku.toLowerCase().trim() === cleanLower)
     );
 
     if (foundInCurrentRack) {
@@ -679,59 +716,87 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       return;
     }
 
-    // 2. Query ke Firestore on-demand (limit 1) dengan debounce 300ms
+    // 2. Cek instan di cache lokal Master SKU (sku_catalog) & Tugas Counter proyek aktif (0 ms, 100% jalan walau tanpa sinyal!)
+    const foundInCatalogCache = catalogCacheRef.current.find(c => {
+      const cSku = (c.SKU || '').toString().toUpperCase().trim();
+      const cUpc1 = (c.UPC1 || '').toString().toLowerCase().trim();
+      const cUpc2 = (c.UPC2 || '').toString().toLowerCase().trim();
+      return cSku === cleanUpper || (cleanLower && (cUpc1 === cleanLower || cUpc2 === cleanLower));
+    });
+
+    if (foundInCatalogCache) {
+      setMatchedMasterSKU(foundInCatalogCache);
+      setIsSearchingBarcode(false);
+      return;
+    }
+
+    const foundInCounterTasksCache = counterTasksCacheRef.current.find(t => {
+      const tSku = (t.SKU || '').toString().toUpperCase().trim();
+      const tUpc1 = (t.UPC1 || '').toString().toLowerCase().trim();
+      const tUpc2 = (t.UPC2 || '').toString().toLowerCase().trim();
+      return tSku === cleanUpper || (cleanLower && (tUpc1 === cleanLower || tUpc2 === cleanLower));
+    });
+
+    if (foundInCounterTasksCache) {
+      setMatchedMasterSKU(foundInCounterTasksCache);
+      setIsSearchingBarcode(false);
+      return;
+    }
+
+    // Jika sedang OFFLINE, langsung selesai tanpa menunggu request jaringan yang menggantung
+    if (!navigator.onLine) {
+      setMatchedMasterSKU(null);
+      setIsSearchingBarcode(false);
+      return;
+    }
+
+    // 3. Query ke Firestore on-demand (limit 5) dengan debounce 250ms & timeout 1200ms agar tidak hang saat sinyal lemah
     let isCancelled = false;
     setIsSearchingBarcode(true);
 
     const timer = setTimeout(async () => {
       try {
-        const q1 = query(collection(db, "master_tasks"), where("UPC1", "==", cleanBarcode), limit(1));
-        const snap1 = await getDocs(q1);
-        if (!snap1.empty && !isCancelled) {
-          setMatchedMasterSKU(snap1.docs[0].data());
-          setIsSearchingBarcode(false);
-          return;
-        }
+        const withTimeout = <T,>(p: Promise<T>, ms = 1200): Promise<T | null> =>
+          Promise.race([p, new Promise<null>(resolve => setTimeout(() => resolve(null), ms))]);
 
-        const q2 = query(collection(db, "master_tasks"), where("UPC2", "==", cleanBarcode), limit(1));
-        const snap2 = await getDocs(q2);
-        if (!snap2.empty && !isCancelled) {
-          setMatchedMasterSKU(snap2.docs[0].data());
-          setIsSearchingBarcode(false);
-          return;
-        }
+        const matchesActiveProj = (d: any) =>
+          !sessionData.projectId || d.projectId === sessionData.projectId;
 
-        const q3 = query(collection(db, "master_tasks"), where("SKU", "==", cleanBarcode.toUpperCase()), limit(1));
-        const snap3 = await getDocs(q3);
-        if (!snap3.empty && !isCancelled) {
-          setMatchedMasterSKU(snap3.docs[0].data());
-          setIsSearchingBarcode(false);
-          return;
-        }
+        const queries = [
+          query(collection(db, "sku_catalog"), where("UPC1", "==", cleanBarcode), limit(5)),
+          query(collection(db, "sku_catalog"), where("UPC2", "==", cleanBarcode), limit(5)),
+          query(collection(db, "sku_catalog"), where("SKU", "==", cleanUpper), limit(5)),
+          query(collection(db, "master_tasks"), where("UPC1", "==", cleanBarcode), limit(5)),
+          query(collection(db, "master_tasks"), where("UPC2", "==", cleanBarcode), limit(5)),
+          query(collection(db, "master_tasks"), where("SKU", "==", cleanUpper), limit(5)),
+        ];
 
-        // 3. Query tambahan ke Master Katalog Referensi (sku_catalog)
-        const qc1 = query(collection(db, "sku_catalog"), where("UPC1", "==", cleanBarcode), limit(1));
-        const snapC1 = await getDocs(qc1);
-        if (!snapC1.empty && !isCancelled) {
-          setMatchedMasterSKU(snapC1.docs[0].data());
-          setIsSearchingBarcode(false);
-          return;
-        }
+        for (const q of queries) {
+          if (isCancelled) return;
+          // Cek cache lokal IndexedDB dulu
+          try {
+            const cachedSnap = await getDocsFromCache(q);
+            const matchedDoc = cachedSnap.docs.find(d => matchesActiveProj(d.data()));
+            if (matchedDoc && !isCancelled) {
+              setMatchedMasterSKU(matchedDoc.data());
+              setIsSearchingBarcode(false);
+              return;
+            }
+          } catch {
+            // Abaikan jika tidak ada di cache
+          }
 
-        const qc2 = query(collection(db, "sku_catalog"), where("UPC2", "==", cleanBarcode), limit(1));
-        const snapC2 = await getDocs(qc2);
-        if (!snapC2.empty && !isCancelled) {
-          setMatchedMasterSKU(snapC2.docs[0].data());
-          setIsSearchingBarcode(false);
-          return;
-        }
-
-        const qc3 = query(collection(db, "sku_catalog"), where("SKU", "==", cleanBarcode.toUpperCase()), limit(1));
-        const snapC3 = await getDocs(qc3);
-        if (!snapC3.empty && !isCancelled) {
-          setMatchedMasterSKU(snapC3.docs[0].data());
-          setIsSearchingBarcode(false);
-          return;
+          if (navigator.onLine) {
+            const netSnap = await withTimeout(getDocs(q), 1000);
+            if (netSnap && !netSnap.empty && !isCancelled) {
+              const matchedDoc = netSnap.docs.find(d => matchesActiveProj(d.data()));
+              if (matchedDoc) {
+                setMatchedMasterSKU(matchedDoc.data());
+                setIsSearchingBarcode(false);
+                return;
+              }
+            }
+          }
         }
 
         if (!isCancelled) {
@@ -745,13 +810,13 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
           setIsSearchingBarcode(false);
         }
       }
-    }, 300);
+    }, 250);
 
     return () => {
       isCancelled = true;
       clearTimeout(timer);
     };
-  }, [unmappedBarcode, skuList]);
+  }, [unmappedBarcode, skuList, sessionData.projectId]);
 
   const isBarcodeInSystem = !!matchedMasterSKU;
 
@@ -1479,7 +1544,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
   };
 
   const handleAddUnmapped = async () => {
-    if (isSessionLocked) return;
+    if (isSessionLocked || isSavingUnmappedRef.current) return;
     if (!unmappedBarcode.trim()) {
       setModal({ isOpen: true, type: 'warning', title: 'Barcode Wajib Diisi', message: 'Mohon scan atau ketik barcode temuan terlebih dahulu.' });
       return;
@@ -1490,97 +1555,151 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       return;
     }
 
-    const qtyNumber = parseInt(unmappedQty || "0", 10);
-    const badQtyNum = unmappedIsBadStock ? parseInt(unmappedBadQty || "0", 10) : 0;
-    const cleanCounter = (sessionData.primaryCounter || 'Unassigned').toLowerCase().trim();
+    // Kunci tombol instan agar tidak bisa dipencet berulang-ulang saat sinyal lemah/offline
+    isSavingUnmappedRef.current = true;
+    setIsSavingUnmapped(true);
 
-    const unmSku = matchedMasterSKU?.SKU ? matchedMasterSKU.SKU.toUpperCase().trim() : unmappedBarcode.trim();
-    const unmOwner = matchedMasterSKU?.Owner || 'DDI';
-    const unmPrice = parseInt(matchedMasterSKU?.unitPrice) || 0;
-    const unmBrand = matchedMasterSKU?.SKUBrand || 'General';
-    const unmDesc = unmappedDesc.trim() || (matchedMasterSKU ? (matchedMasterSKU.Description || matchedMasterSKU.SKU) : 'Barang Fisik Baru Unmapped');
-    const totalSubmitted = qtyNumber + badQtyNum;
+    try {
+      const qtyNumber = parseInt(unmappedQty || "0", 10);
+      const badQtyNum = unmappedIsBadStock ? parseInt(unmappedBadQty || "0", 10) : 0;
+      const cleanCounter = (sessionData.primaryCounter || 'Unassigned').toLowerCase().trim();
 
-    const badCatRemarks = unmappedIsBadStock && (unmappedBadQty && parseFloat(unmappedBadQty) > 0)
-      ? (formatBadRemarks(unmappedBadBreakdown, unmappedUnit) || (unmappedSelectedCategories.length > 0 ? `[BAD STOCK] ${unmappedSelectedCategories.join(', ')}` : '[BAD STOCK]'))
-      : '[BARANG TEMUAN FISIK]';
+      const unmSku = matchedMasterSKU?.SKU ? matchedMasterSKU.SKU.toUpperCase().trim() : unmappedBarcode.trim();
+      const unmOwner = matchedMasterSKU?.Owner || 'DDI';
+      const unmPrice = parseInt(matchedMasterSKU?.unitPrice) || 0;
+      const unmBrand = matchedMasterSKU?.SKUBrand || 'General';
+      const unmDesc = unmappedDesc.trim() || (matchedMasterSKU ? (matchedMasterSKU.Description || matchedMasterSKU.SKU) : 'Barang Fisik Baru Unmapped');
+      const totalSubmitted = qtyNumber + badQtyNum;
 
-    const cleanCode = unmappedBarcode.trim().toLowerCase();
-    const existingInRack = skuList.find(
-      (item) =>
-        item.sku.toUpperCase() === unmSku.toUpperCase() ||
-        (item.upc && item.upc.toLowerCase() === cleanCode) ||
-        (item.upc2 && item.upc2.toLowerCase() === cleanCode)
-    );
+      const badCatRemarks = unmappedIsBadStock && (unmappedBadQty && parseFloat(unmappedBadQty) > 0)
+        ? (formatBadRemarks(unmappedBadBreakdown, unmappedUnit) || (unmappedSelectedCategories.length > 0 ? `[BAD STOCK] ${unmappedSelectedCategories.join(', ')}` : '[BAD STOCK]'))
+        : '[BARANG TEMUAN FISIK]';
 
-    // Cek juga ke database jika SKU ini sudah ada di rak tetapi sedang di-assign ke counter lain
-    let matchedDocDetails: { id: string; sysQty: number }[] = [];
-    let matchedActiveRound = existingInRack?.currentRound || (skuList.length > 0 ? (skuList[0].currentRound || 1) : 1);
-    let matchedPhotoUrl = '';
-    let matchedExpDate = '';
+      const cleanCode = unmappedBarcode.trim().toLowerCase();
+      const existingInRack = skuList.find(
+        (item) =>
+          item.sku.toUpperCase() === unmSku.toUpperCase() ||
+          (item.upc && item.upc.toLowerCase() === cleanCode) ||
+          (item.upc2 && item.upc2.toLowerCase() === cleanCode)
+      );
 
-    if (!existingInRack) {
-      try {
-        const qRackCheck = query(
-          collection(db, "master_tasks"),
-          where("Location", "==", rack.rackNumber)
-        );
-        const rackSnap = await getDocs(qRackCheck);
-        rackSnap.forEach(d => {
-          const dData = d.data();
-          if (sessionData.projectId && dData.projectId && dData.projectId !== sessionData.projectId) return;
-          const dSku = (dData.SKU || '').toUpperCase().trim();
-          const dUpc1 = (dData.UPC1 || '').toLowerCase().trim();
-          const dUpc2 = (dData.UPC2 || '').toLowerCase().trim();
-          if (dSku === unmSku || (cleanCode && (dUpc1 === cleanCode || dUpc2 === cleanCode))) {
-            matchedDocDetails.push({
-              id: d.id,
-              sysQty: parseInt(dData.Qty || dData.QTY_SYSTEM) || 0
-            });
-            if (dData.currentRound) matchedActiveRound = parseInt(dData.currentRound, 10) || matchedActiveRound;
-            if (dData.photoUrl) matchedPhotoUrl = dData.photoUrl;
-            if (dData.expDateActual || dData.expiredDateActual) matchedExpDate = dData.expDateActual || dData.expiredDateActual;
+      // Cek juga ke cache/database jika SKU ini sudah ada di rak tetapi sedang di-assign ke counter lain (tanpa pernah blocking saat offline!)
+      let matchedDocDetails: { id: string; sysQty: number }[] = [];
+      let matchedActiveRound = existingInRack?.currentRound || (skuList.length > 0 ? (skuList[0].currentRound || 1) : 1);
+      let matchedPhotoUrl = '';
+      let matchedExpDate = '';
+
+      if (!existingInRack) {
+        try {
+          const qRackCheck = query(
+            collection(db, "master_tasks"),
+            where("Location", "==", rack.rackNumber)
+          );
+          let rackSnap = await getDocsFromCache(qRackCheck).catch(() => null);
+          if ((!rackSnap || rackSnap.empty) && navigator.onLine) {
+            rackSnap = await Promise.race([
+              getDocs(qRackCheck),
+              new Promise<null>(resolve => setTimeout(() => resolve(null), 800))
+            ]).catch(() => null);
           }
-        });
-      } catch (err) {
-        console.warn("Gagal mengecek keberadaan SKU di rak Firestore:", err);
+          if (rackSnap) {
+            rackSnap.forEach(d => {
+              const dData = d.data();
+              if (sessionData.projectId && dData.projectId !== sessionData.projectId) return;
+              const dSku = (dData.SKU || '').toUpperCase().trim();
+              const dUpc1 = (dData.UPC1 || '').toLowerCase().trim();
+              const dUpc2 = (dData.UPC2 || '').toLowerCase().trim();
+              if (dSku === unmSku || (cleanCode && (dUpc1 === cleanCode || dUpc2 === cleanCode))) {
+                matchedDocDetails.push({
+                  id: d.id,
+                  sysQty: parseInt(dData.Qty || dData.QTY_SYSTEM) || 0
+                });
+                if (dData.currentRound) matchedActiveRound = parseInt(dData.currentRound, 10) || matchedActiveRound;
+                if (dData.photoUrl) matchedPhotoUrl = dData.photoUrl;
+                if (dData.expDateActual || dData.expiredDateActual) matchedExpDate = dData.expDateActual || dData.expiredDateActual;
+              }
+            });
+          }
+        } catch (err) {
+          console.warn("Gagal mengecek keberadaan SKU di rak Firestore:", err);
+        }
       }
-    }
 
-    const activeRound = matchedActiveRound;
-    const batch = writeBatch(db);
+      const activeRound = matchedActiveRound;
+      const batch = writeBatch(db);
 
-    // 1. Simpan inputan lokal SKU lain
-    skuList.forEach(skuItem => {
-      // Jika SKU ini adalah existingInRack, lewati karena akan di-update khusus dengan inputan form temuan
-      if (existingInRack && skuItem.sku.toUpperCase() === existingInRack.sku.toUpperCase()) return;
+      // 1. Simpan inputan lokal SKU lain
+      skuList.forEach(skuItem => {
+        // Jika SKU ini adalah existingInRack, lewati karena akan di-update khusus dengan inputan form temuan
+        if (existingInRack && skuItem.sku.toUpperCase() === existingInRack.sku.toUpperCase()) return;
 
-      const rawGood = parseFloat(skuItem.qtyGood || "0") || 0;
-      const rawBad = parseFloat(skuItem.qtyBad || "0") || 0;
-      const pcsRatio = skuItem.pcsPerCarton || (skuItem.uom === 'CARTON' ? 24 : 1);
-      const inputUnit = skuItem.inputUom || skuItem.uom;
-      const sysUnit = skuItem.uom;
+        const rawGood = parseFloat(skuItem.qtyGood || "0") || 0;
+        const rawBad = parseFloat(skuItem.qtyBad || "0") || 0;
+        const pcsRatio = skuItem.pcsPerCarton || (skuItem.uom === 'CARTON' ? 24 : 1);
+        const inputUnit = skuItem.inputUom || skuItem.uom;
+        const sysUnit = skuItem.uom;
 
-      // Konversi ke Satuan Sistem (uom)
-      const finalGoodQty = convertToSystemQty(rawGood, inputUnit, sysUnit, pcsRatio).finalQty;
-      const finalBadQty = convertToSystemQty(rawBad, inputUnit, sysUnit, pcsRatio).finalQty;
-      const skuTotalSubmitted = Math.round((finalGoodQty + finalBadQty) * 1000) / 1000;
+        // Konversi ke Satuan Sistem (uom)
+        const finalGoodQty = convertToSystemQty(rawGood, inputUnit, sysUnit, pcsRatio).finalQty;
+        const finalBadQty = convertToSystemQty(rawBad, inputUnit, sysUnit, pcsRatio).finalQty;
+        const skuTotalSubmitted = Math.round((finalGoodQty + finalBadQty) * 1000) / 1000;
 
-      const conversionNote = inputUnit !== sysUnit
-        ? ` [Input: ${rawGood + rawBad} ${inputUnit} (isi ${pcsRatio}/ctn) -> Converted: ${skuTotalSubmitted} ${sysUnit}]`
-        : '';
-      const finalRemarks = (skuItem.badRemarks || (skuItem.badBreakdown ? formatBadRemarks(skuItem.badBreakdown, inputUnit) : '')) + conversionNote;
+        const conversionNote = inputUnit !== sysUnit
+          ? ` [Input: ${rawGood + rawBad} ${inputUnit} (isi ${pcsRatio}/ctn) -> Converted: ${skuTotalSubmitted} ${sysUnit}]`
+          : '';
+        const finalRemarks = (skuItem.badRemarks || (skuItem.badBreakdown ? formatBadRemarks(skuItem.badBreakdown, inputUnit) : '')) + conversionNote;
 
-      if (skuTotalSubmitted > 0 || skuItem.expDateActual) {
-        const docsInfo = skuItem.docsDetail && skuItem.docsDetail.length === skuItem.docIds.length
-          ? skuItem.docsDetail
-          : skuItem.docIds.map((id, i) => ({ id, sysQty: i === 0 ? skuItem.totalSystemQty : 0 }));
+        if (skuTotalSubmitted > 0 || skuItem.expDateActual) {
+          const docsInfo = skuItem.docsDetail && skuItem.docsDetail.length === skuItem.docIds.length
+            ? skuItem.docsDetail
+            : skuItem.docIds.map((id, i) => ({ id, sysQty: i === 0 ? skuItem.totalSystemQty : 0 }));
 
-        const allocatedActuals = distributeQtyAcrossDocs(skuTotalSubmitted, docsInfo);
-        const allocatedGoods = distributeQtyAcrossDocs(finalGoodQty, docsInfo);
-        const allocatedBads = distributeQtyAcrossDocs(finalBadQty, docsInfo);
+          const allocatedActuals = distributeQtyAcrossDocs(skuTotalSubmitted, docsInfo);
+          const allocatedGoods = distributeQtyAcrossDocs(finalGoodQty, docsInfo);
+          const allocatedBads = distributeQtyAcrossDocs(finalBadQty, docsInfo);
 
-        skuItem.docIds.forEach((docId, i) => {
+          skuItem.docIds.forEach((docId, i) => {
+            const existingTaskRef = doc(db, "master_tasks", docId);
+            const docActual = allocatedActuals[i] ?? 0;
+            const docGood = allocatedGoods[i] ?? 0;
+            const docBad = allocatedBads[i] ?? 0;
+
+            batch.set(existingTaskRef, {
+              counter: cleanCounter,
+              counterPendamping: sessionData.partners?.[0] || '',
+              partner: sessionData.partners?.[0] || '',
+              isCounted: true,
+              QTY_ACTUAL: docActual,
+              QTY_GOOD: docGood,
+              QTY_BAD: docBad,
+              [`round${skuItem.currentRound || 1}Actual`]: docActual,
+              [`round${skuItem.currentRound || 1}Counter`]: cleanCounter,
+              badRemarks: i === 0 ? finalRemarks : '',
+              badBreakdown: i === 0 ? (skuItem.badBreakdown || {}) : {},
+              selectedCategories: i === 0 ? (skuItem.selectedCategories || []) : [],
+              expDateActual: skuItem.expDateActual || '',
+              pcsPerCarton: pcsRatio,
+              countedInUom: inputUnit,
+              rawGoodInput: i === 0 ? rawGood : 0,
+              rawBadInput: i === 0 ? rawBad : 0,
+              updatedAt: new Date().toISOString()
+            }, { merge: true });
+          });
+        }
+      });
+
+      // 2. Simpan atau perbarui dokumen temuan
+      if (existingInRack) {
+        // SKU ini SUDAH ADA di rak (terlihat di layar counter)
+        const docsInfo = existingInRack.docsDetail && existingInRack.docsDetail.length === existingInRack.docIds.length
+          ? existingInRack.docsDetail
+          : existingInRack.docIds.map((id, i) => ({ id, sysQty: i === 0 ? existingInRack.totalSystemQty : 0 }));
+
+        const allocatedActuals = distributeQtyAcrossDocs(totalSubmitted, docsInfo);
+        const allocatedGoods = distributeQtyAcrossDocs(qtyNumber, docsInfo);
+        const allocatedBads = distributeQtyAcrossDocs(badQtyNum, docsInfo);
+
+        existingInRack.docIds.forEach((docId, i) => {
           const existingTaskRef = doc(db, "master_tasks", docId);
           const docActual = allocatedActuals[i] ?? 0;
           const docGood = allocatedGoods[i] ?? 0;
@@ -1594,167 +1713,141 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
             QTY_ACTUAL: docActual,
             QTY_GOOD: docGood,
             QTY_BAD: docBad,
-            [`round${skuItem.currentRound || 1}Actual`]: docActual,
-            [`round${skuItem.currentRound || 1}Counter`]: cleanCounter,
-            badRemarks: i === 0 ? finalRemarks : '',
-            badBreakdown: i === 0 ? (skuItem.badBreakdown || {}) : {},
-            selectedCategories: i === 0 ? (skuItem.selectedCategories || []) : [],
-            expDateActual: skuItem.expDateActual || '',
-            pcsPerCarton: pcsRatio,
-            countedInUom: inputUnit,
-            rawGoodInput: i === 0 ? rawGood : 0,
-            rawBadInput: i === 0 ? rawBad : 0,
+            [`round${activeRound}Actual`]: docActual,
+            [`round${activeRound}Counter`]: cleanCounter,
+            badRemarks: i === 0 ? badCatRemarks : '',
+            badBreakdown: i === 0 ? (unmappedBadBreakdown || {}) : {},
+            selectedCategories: i === 0 ? (unmappedSelectedCategories || []) : [],
+            photoUrl: unmappedPhotoUrl || existingInRack.photoUrl || '',
+            expDateActual: unmappedExpDate || existingInRack.expDateActual || '',
             updatedAt: new Date().toISOString()
           }, { merge: true });
         });
+      } else if (matchedDocDetails.length > 0) {
+        // SKU ini SUDAH ADA di rak tapi di-assign ke counter lain -> Perbarui & alihkan ke counter ini tanpa buat dokumen temuan ganda
+        const allocatedActuals = distributeQtyAcrossDocs(totalSubmitted, matchedDocDetails);
+        const allocatedGoods = distributeQtyAcrossDocs(qtyNumber, matchedDocDetails);
+        const allocatedBads = distributeQtyAcrossDocs(badQtyNum, matchedDocDetails);
+
+        matchedDocDetails.forEach((docItem, i) => {
+          const existingTaskRef = doc(db, "master_tasks", docItem.id);
+          const docActual = allocatedActuals[i] ?? 0;
+          const docGood = allocatedGoods[i] ?? 0;
+          const docBad = allocatedBads[i] ?? 0;
+
+          batch.set(existingTaskRef, {
+            counter: cleanCounter,
+            counterPendamping: sessionData.partners?.[0] || '',
+            partner: sessionData.partners?.[0] || '',
+            isCounted: true,
+            QTY_ACTUAL: docActual,
+            QTY_GOOD: docGood,
+            QTY_BAD: docBad,
+            [`round${activeRound}Actual`]: docActual,
+            [`round${activeRound}Counter`]: cleanCounter,
+            badRemarks: i === 0 ? badCatRemarks : '',
+            badBreakdown: i === 0 ? (unmappedBadBreakdown || {}) : {},
+            selectedCategories: i === 0 ? (unmappedSelectedCategories || []) : [],
+            photoUrl: unmappedPhotoUrl || matchedPhotoUrl || '',
+            expDateActual: unmappedExpDate || matchedExpDate || '',
+            updatedAt: new Date().toISOString()
+          }, { merge: true });
+        });
+      } else {
+        // Belum ada sama sekali di rak -> Gunakan ID Deterministik (tanpa Date.now()!) agar jika terpencet ulang saat offline tidak pernah membuat baris duplikat
+        const sanitizeId = (s: string) => s.replace(/[\/\\#$\[\].]/g, '-').trim();
+        const projPrefix = sessionData.projectId ? `${sanitizeId(sessionData.projectId)}_` : '';
+        const taskId = `${projPrefix}${sanitizeId(rack.rackNumber)}_${sanitizeId(unmSku)}_TEMUAN`;
+        const taskRef = doc(db, "master_tasks", taskId);
+
+        batch.set(taskRef, {
+          projectId: sessionData.projectId || '',
+          Owner: unmOwner,
+          SKU: unmSku,
+          Description: unmDesc,
+          UPC1: matchedMasterSKU?.UPC1 || unmappedBarcode.trim(),
+          UPC2: matchedMasterSKU?.UPC2 || '',
+          SKUBrand: unmBrand,
+          Location: rack.rackNumber,
+          counter: cleanCounter,
+          counterPendamping: sessionData.partners?.[0] || '',
+          partner: sessionData.partners?.[0] || '',
+          currentRound: activeRound,
+          Qty: 0,
+          QTY_ACTUAL: totalSubmitted,
+          QTY_GOOD: qtyNumber,
+          QTY_BAD: badQtyNum,
+          [`round${activeRound}Actual`]: totalSubmitted,
+          [`round${activeRound}Counter`]: cleanCounter,
+          isCounted: true,
+          unitPrice: unmPrice,
+          satuanHitung: matchedMasterSKU?.satuanHitung || unmappedUnit || 'PCS',
+          pcsPerCarton: parseInt(matchedMasterSKU?.pcsPerCarton || '1', 10) || 1,
+          badRemarks: badCatRemarks,
+          badBreakdown: unmappedBadBreakdown || {},
+          selectedCategories: unmappedSelectedCategories || [],
+          photoUrl: unmappedPhotoUrl || '',
+          expDateActual: unmappedExpDate || '',
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
       }
-    });
 
-    // 2. Simpan atau perbarui dokumen temuan
-    if (existingInRack) {
-      // SKU ini SUDAH ADA di rak (terlihat di layar counter)
-      const docsInfo = existingInRack.docsDetail && existingInRack.docsDetail.length === existingInRack.docIds.length
-        ? existingInRack.docsDetail
-        : existingInRack.docIds.map((id, i) => ({ id, sysQty: i === 0 ? existingInRack.totalSystemQty : 0 }));
-
-      const allocatedActuals = distributeQtyAcrossDocs(totalSubmitted, docsInfo);
-      const allocatedGoods = distributeQtyAcrossDocs(qtyNumber, docsInfo);
-      const allocatedBads = distributeQtyAcrossDocs(badQtyNum, docsInfo);
-
-      existingInRack.docIds.forEach((docId, i) => {
-        const existingTaskRef = doc(db, "master_tasks", docId);
-        const docActual = allocatedActuals[i] ?? 0;
-        const docGood = allocatedGoods[i] ?? 0;
-        const docBad = allocatedBads[i] ?? 0;
-
-        batch.set(existingTaskRef, {
-          counter: cleanCounter,
-          counterPendamping: sessionData.partners?.[0] || '',
-          partner: sessionData.partners?.[0] || '',
-          isCounted: true,
-          QTY_ACTUAL: docActual,
-          QTY_GOOD: docGood,
-          QTY_BAD: docBad,
-          [`round${activeRound}Actual`]: docActual,
-          [`round${activeRound}Counter`]: cleanCounter,
-          badRemarks: i === 0 ? badCatRemarks : '',
-          badBreakdown: i === 0 ? (unmappedBadBreakdown || {}) : {},
-          selectedCategories: i === 0 ? (unmappedSelectedCategories || []) : [],
-          photoUrl: unmappedPhotoUrl || existingInRack.photoUrl || '',
-          expDateActual: unmappedExpDate || existingInRack.expDateActual || '',
-          updatedAt: new Date().toISOString()
-        }, { merge: true });
-      });
-    } else if (matchedDocDetails.length > 0) {
-      // SKU ini SUDAH ADA di rak tapi di-assign ke counter lain -> Perbarui & alihkan ke counter ini tanpa buat dokumen temuan ganda
-      const allocatedActuals = distributeQtyAcrossDocs(totalSubmitted, matchedDocDetails);
-      const allocatedGoods = distributeQtyAcrossDocs(qtyNumber, matchedDocDetails);
-      const allocatedBads = distributeQtyAcrossDocs(badQtyNum, matchedDocDetails);
-
-      matchedDocDetails.forEach((docItem, i) => {
-        const existingTaskRef = doc(db, "master_tasks", docItem.id);
-        const docActual = allocatedActuals[i] ?? 0;
-        const docGood = allocatedGoods[i] ?? 0;
-        const docBad = allocatedBads[i] ?? 0;
-
-        batch.set(existingTaskRef, {
-          counter: cleanCounter,
-          counterPendamping: sessionData.partners?.[0] || '',
-          partner: sessionData.partners?.[0] || '',
-          isCounted: true,
-          QTY_ACTUAL: docActual,
-          QTY_GOOD: docGood,
-          QTY_BAD: docBad,
-          [`round${activeRound}Actual`]: docActual,
-          [`round${activeRound}Counter`]: cleanCounter,
-          badRemarks: i === 0 ? badCatRemarks : '',
-          badBreakdown: i === 0 ? (unmappedBadBreakdown || {}) : {},
-          selectedCategories: i === 0 ? (unmappedSelectedCategories || []) : [],
-          photoUrl: unmappedPhotoUrl || matchedPhotoUrl || '',
-          expDateActual: unmappedExpDate || matchedExpDate || '',
-          updatedAt: new Date().toISOString()
-        }, { merge: true });
-      });
-    } else {
-      // Belum ada sama sekali di rak -> Simpan dokumen temuan baru dengan ronde aktif
-      const taskId = `${rack.rackNumber}_${unmSku}_TEMUAN_${Date.now()}`;
-      const taskRef = doc(db, "master_tasks", taskId);
-
-      batch.set(taskRef, {
+      // 3. Log Audit Trail (Auto-ID) - Terisolasi per project (projects/{projectId}/audit_logs)
+      const targetAuditProjId = sessionData.projectId || (sessionData as any).sessionId || '';
+      const auditRef = targetAuditProjId
+        ? doc(collection(db, "projects", targetAuditProjId, "audit_logs"))
+        : doc(collection(db, "audit_logs"));
+      batch.set(auditRef, {
         projectId: sessionData.projectId || '',
-        Owner: unmOwner,
-        SKU: unmSku,
-        Description: unmDesc,
-        UPC1: unmappedBarcode.trim(),
-        UPC2: '',
-        SKUBrand: unmBrand,
-        Location: rack.rackNumber,
-        counter: cleanCounter,
-        counterPendamping: sessionData.partners?.[0] || '',
-        partner: sessionData.partners?.[0] || '',
-        currentRound: activeRound,
-        Qty: 0,
-        QTY_ACTUAL: totalSubmitted,
-        QTY_GOOD: qtyNumber,
-        QTY_BAD: badQtyNum,
-        [`round${activeRound}Actual`]: totalSubmitted,
-        [`round${activeRound}Counter`]: cleanCounter,
-        isCounted: true,
-        unitPrice: unmPrice,
-        badRemarks: badCatRemarks,
-        badBreakdown: unmappedBadBreakdown || {},
-        selectedCategories: unmappedSelectedCategories || [],
-        photoUrl: unmappedPhotoUrl || '',
-        expDateActual: unmappedExpDate || '',
-        updatedAt: new Date().toISOString()
+        sessionCode: sessionData.sessionCode || '',
+        timestamp: new Date().toISOString(),
+        rackLocation: rack.rackNumber,
+        ownerSku: unmOwner,
+        sku: unmSku,
+        description: unmDesc,
+        upc1: unmappedBarcode.trim(),
+        upc2: matchedMasterSKU?.UPC2 || '-',
+        counterPic: cleanCounter,
+        round: activeRound,
+        qtyGood: qtyNumber,
+        qtyBad: badQtyNum,
+        totalFinalSubmitted: totalSubmitted,
+        edActual: unmappedExpDate || '-',
+        remarks: badCatRemarks,
+        hasPhoto: !!unmappedPhotoUrl
       }, { merge: true });
+
+      // Simpan instan ke memori HP (IndexedDB) & antrikan sinkronisasi otomatis ke Cloud saat sinyal tersedia
+      trackedCommit(batch);
+      setIsDirty(false);
+
+      setUnmappedBarcode('');
+      setUnmappedDesc('');
+      setUnmappedPhotoUrl('');
+      setUnmappedQty("1");
+      setUnmappedIsBadStock(false);
+      setUnmappedBadQty("");
+      setUnmappedSelectedCategories([]);
+      setUnmappedBadBreakdown({});
+      setUnmappedDrawerOpen(false);
+      playScanSuccessBeep();
+      triggerHapticFeedback('success');
+      setModal({
+        isOpen: true,
+        type: 'success',
+        title: navigator.onLine ? 'Item Temuan Tersimpan!' : 'Tersimpan di HP (Mode Offline)',
+        message: existingInRack
+          ? `Item ${unmSku} sudah ada di rak ini dan berhasil diperbarui dengan hasil hitungan ${totalSubmitted}!`
+          : (navigator.onLine
+            ? `Item ${unmSku} (${totalSubmitted} ${unmappedUnit}) berhasil disimpan & disinkronkan ke server!`
+            : `Sinyal sedang lemah/offline. Item ${unmSku} (${totalSubmitted} ${unmappedUnit}) sudah TERSIMPAN AMAN di HP dan otomatis terkirim ke server begitu sinyal kembali!`)
+      });
+    } finally {
+      setTimeout(() => {
+        isSavingUnmappedRef.current = false;
+        setIsSavingUnmapped(false);
+      }, 400);
     }
-
-    // 3. Log Audit Trail (Auto-ID) - Terisolasi per project (projects/{projectId}/audit_logs)
-    const targetAuditProjId = sessionData.projectId || (sessionData as any).sessionId || '';
-    const auditRef = targetAuditProjId
-      ? doc(collection(db, "projects", targetAuditProjId, "audit_logs"))
-      : doc(collection(db, "audit_logs"));
-    batch.set(auditRef, {
-      projectId: sessionData.projectId || '',
-      sessionCode: sessionData.sessionCode || '',
-      timestamp: new Date().toISOString(),
-      rackLocation: rack.rackNumber,
-      ownerSku: unmOwner,
-      sku: unmSku,
-      description: unmDesc,
-      upc1: unmappedBarcode.trim(),
-      upc2: '-',
-      counterPic: cleanCounter,
-      round: activeRound,
-      qtyGood: qtyNumber,
-      qtyBad: badQtyNum,
-      totalFinalSubmitted: totalSubmitted,
-      edActual: unmappedExpDate || '-',
-      remarks: badCatRemarks,
-      hasPhoto: !!unmappedPhotoUrl
-    }, { merge: true });
-
-    trackedCommit(batch);
-    setIsDirty(false);
-
-    setUnmappedBarcode('');
-    setUnmappedDesc('');
-    setUnmappedPhotoUrl('');
-    setUnmappedQty("1");
-    setUnmappedIsBadStock(false);
-    setUnmappedBadQty("");
-    setUnmappedSelectedCategories([]);
-    setUnmappedBadBreakdown({});
-    setUnmappedDrawerOpen(false);
-    setModal({
-      isOpen: true,
-      type: 'success',
-      title: 'Item Temuan Tersimpan!',
-      message: existingInRack
-        ? `Item ${unmSku} sudah ada di rak ini dan berhasil diperbarui dengan hasil hitungan ${totalSubmitted}!`
-        : `Item ${unmSku} & seluruh inputan SKU lain pada Rak ${rack.rackNumber} tersimpan aman!`
-    });
   };
 
   const handleDeleteUnmappedSku = (skuItem: GroupedSKUItem) => {
@@ -1950,7 +2043,8 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
   };
 
   const executeSaveAndNext = async (goToNextRack: boolean = true) => {
-    if (isSessionLocked) return;
+    if (isSessionLocked || isSavingRackRef.current) return;
+    isSavingRackRef.current = true;
     setIsLoadingSave(true);
 
     try {
@@ -2056,7 +2150,7 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       });
 
       if (itemsToSave.length > 0) {
-        // Tracked commit (simpan langsung ke cache lokal IndexedDB + background sync ke Cloud)
+        // Tracked commit (simpan langsung ke cache lokal IndexedDB 0ms + background sync otomatis ke Cloud saat ada sinyal)
         trackedCommit(batch);
       }
 
@@ -2068,42 +2162,8 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       }
       setHasDraftRestored(false);
 
-      const remainingTasksQuery = query(
-        collection(db, "master_tasks"),
-        where("counter", "==", cleanCounter)
-      );
-
-      const snap = await getDocs(remainingTasksQuery);
-      let nextRackItem: RackItem | null = null;
-
-      if (!snap.empty) {
-        const nextDoc = snap.docs.find(d => {
-          const data = d.data();
-          // Filter ketat isolasi Project ID
-          if (sessionData.projectId && data.projectId && data.projectId !== sessionData.projectId) return false;
-          if (sessionData.projectId && !data.projectId) return false;
-          if (data.isLocked) return false;
-          if (!data.SKU || data.SKU === 'SKU_UNKNOWN') return false;
-          if (!data.Location || data.Location === rack.rackNumber) return false;
-
-          const isCounted = !!data.isCounted || (data.QTY_ACTUAL !== null && data.QTY_ACTUAL !== undefined);
-          return !isCounted;
-        });
-
-        if (nextDoc) {
-          const nextTask = nextDoc.data();
-          const nextRackNumber = nextTask.Location;
-          nextRackItem = {
-            id: nextRackNumber,
-            rackNumber: nextRackNumber,
-            level: parseInt(nextTask.level || '1', 10),
-            zone: nextTask.Zone || 'RACKING',
-            status: 'pending',
-            totalSKU: 1,
-            countedSKU: 0
-          };
-        }
-      }
+      // Ambil rak berikutnya secara instan dari cache memori/IndexedDB (0ms, tidak pernah nyangkut saat offline!)
+      const nextRackItem = nextPendingRackRef.current;
 
       if (goToNextRack && nextRackItem && onSelectNextRack) {
         playScanSuccessBeep();
@@ -2128,6 +2188,9 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
       setModal({ isOpen: true, type: 'error', title: 'Gagal Menyimpan', message: errorMsg });
     } finally {
       setIsLoadingSave(false);
+      setTimeout(() => {
+        isSavingRackRef.current = false;
+      }, 400);
     }
   };
 
@@ -3410,7 +3473,21 @@ export default function Step4CountDetail({ sessionData, rack, onBackToList, onLo
                   <span>{unmappedPhotoUrl ? 'Foto Terlampir ✓' : (!isBarcodeInSystem ? 'Ambil Foto Kamera (Wajib)' : 'Ambil Foto Kamera (Opsional)')}</span>
                 </button>
 
-                <button type="button" disabled={isSessionLocked} onClick={handleAddUnmapped} className={`w-full min-h-11 rounded-lg cursor-pointer transition-all ${isSessionLocked ? 'bg-slate-400 opacity-50 cursor-not-allowed text-white font-bold' : 'bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-black shadow-md active:scale-[0.99]'}`}>+ Tambahkan Ke Temuan &amp; Simpan</button>
+                <button
+                  type="button"
+                  disabled={isSessionLocked || isSavingUnmapped}
+                  onClick={handleAddUnmapped}
+                  className={`w-full min-h-11 rounded-lg cursor-pointer transition-all flex items-center justify-center gap-2 ${
+                    isSessionLocked || isSavingUnmapped
+                      ? 'bg-slate-400 opacity-60 cursor-not-allowed text-white font-bold'
+                      : 'bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-black shadow-md active:scale-[0.99]'
+                  }`}
+                >
+                  {isSavingUnmapped ? '⏳ Menyimpan ke Memori HP...' : '+ Tambahkan Ke Temuan & Simpan'}
+                </button>
+                <p className="text-[10px] text-center text-slate-500 font-medium">
+                  💡 Aman tanpa sinyal: Data langsung tersimpan di HP &amp; otomatis terkirim saat sinyal kembali (anti-duplikat).
+                </p>
               </div>
             )}
           </div>
